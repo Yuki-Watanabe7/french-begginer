@@ -6,9 +6,10 @@ interface Props {
   sessionTotal: number
   onRetry: () => void
   onReview: () => void
+  onBackToSetup: () => void
 }
 
-export function SessionResult({ correctCount, wrongAnswers, sessionTotal, onRetry, onReview }: Props) {
+export function SessionResult({ correctCount, wrongAnswers, sessionTotal, onRetry, onReview, onBackToSetup }: Props) {
   const wrongCount = wrongAnswers.length
   const accuracy = sessionTotal > 0 ? Math.round((correctCount / sessionTotal) * 100) : 0
   const accuracyColor = accuracy >= 80 ? '#059669' : accuracy >= 50 ? '#d97706' : '#dc2626'
@@ -44,6 +45,7 @@ export function SessionResult({ correctCount, wrongAnswers, sessionTotal, onRetr
             間違えた問題だけ復習（{wrongCount}問）
           </button>
         )}
+        <button style={styles.backBtn} onClick={onBackToSetup}>モード選択に戻る</button>
       </div>
 
       {wrongCount > 0 && (
@@ -157,6 +159,17 @@ const styles: Record<string, React.CSSProperties> = {
     border: '2px solid #1a56d6',
     background: '#fff',
     color: '#1a56d6',
+    cursor: 'pointer',
+    width: '100%',
+  },
+  backBtn: {
+    fontSize: 15,
+    fontWeight: 500,
+    padding: '10px',
+    borderRadius: 12,
+    border: '1px solid #ccc',
+    background: '#fff',
+    color: '#666',
     cursor: 'pointer',
     width: '100%',
   },

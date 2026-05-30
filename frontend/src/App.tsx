@@ -1,9 +1,10 @@
 import { QuizCard } from './components/QuizCard'
 import { SessionResult } from './components/SessionResult'
+import { VerbGroupSelector } from './components/VerbGroupSelector'
 import { useQuiz } from './hooks/useQuiz'
 
 export default function App() {
-  const { state, inputRef, submit, setInput, nextQuestion, startNewSession, startReview, retryLoad } = useQuiz()
+  const { state, inputRef, submit, setInput, nextQuestion, startSession, startNewSession, backToSetup, startReview, retryLoad } = useQuiz()
 
   return (
     <div style={styles.root}>
@@ -12,6 +13,10 @@ export default function App() {
       </header>
 
       <main style={styles.main}>
+        {state.phase === 'setup' && (
+          <VerbGroupSelector onSelect={startSession} />
+        )}
+
         {state.phase === 'loading' && <p style={styles.msg}>読み込み中...</p>}
 
         {state.phase === 'error' && (
@@ -42,6 +47,7 @@ export default function App() {
             sessionTotal={state.sessionTotal}
             onRetry={() => { void startNewSession() }}
             onReview={startReview}
+            onBackToSetup={backToSetup}
           />
         )}
       </main>

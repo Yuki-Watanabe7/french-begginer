@@ -1,3 +1,5 @@
+export type VerbGroup = 'all' | 'er' | 'ir' | 'irregular'
+
 export interface Question {
   verb: string
   tense: string

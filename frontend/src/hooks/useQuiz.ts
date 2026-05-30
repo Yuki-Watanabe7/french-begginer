@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { checkAnswer, fetchNextQuestion } from '../api/client'
-import type { AnswerResult, Question, WrongAnswer } from '../types'
+import type { AnswerResult, Question, VerbGroup, WrongAnswer } from '../types'
 
-type Phase = 'loading' | 'answering' | 'result' | 'session-result' | 'error'
+type Phase = 'setup' | 'loading' | 'answering' | 'result' | 'session-result' | 'error'
 
 interface State {
   phase: Phase
+  group: VerbGroup
   question: Question | null
   result: AnswerResult | null
   input: string
@@ -19,8 +20,9 @@ interface State {
 
 const SESSION_SIZE = 10
 
-const newSessionState = (): State => ({
-  phase: 'loading',
+const initialState = (): State => ({
+  phase: 'setup',
+  group: 'all',
   question: null,
   result: null,
   input: '',
@@ -33,15 +35,15 @@ const newSessionState = (): State => ({
 })
 
 export function useQuiz() {
-  const [state, setState] = useState<State>(newSessionState)
+  const [state, setState] = useState<State>(initialState)
   const stateRef = useRef(state)
   stateRef.current = state
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const retryLoad = useCallback(async () => {
-    setState(s => ({ ...s, phase: 'loading', result: null, input: '', error: null }))
+  const startSession = useCallback(async (group: VerbGroup) => {
+    setState(s => ({ ...s, phase: 'loading', group, question: null, result: null, input: '', error: null, questionNum: 1, sessionTotal: SESSION_SIZE, correctCount: 0, wrongAnswers: [], reviewQueue: [] }))
     try {
-      const q = await fetchNextQuestion()
+      const q = await fetchNextQuestion(group)
       setState(s => ({ ...s, phase: 'answering', question: q }))
       setTimeout(() => inputRef.current?.focus(), 50)
     } catch {
@@ -49,9 +51,17 @@ export function useQuiz() {
     }
   }, [])
 
-  useEffect(() => {
-    void retryLoad()
-  }, [retryLoad])
+  const retryLoad = useCallback(async () => {
+    const { group } = stateRef.current
+    setState(s => ({ ...s, phase: 'loading', result: null, input: '', error: null }))
+    try {
+      const q = await fetchNextQuestion(group)
+      setState(s => ({ ...s, phase: 'answering', question: q }))
+      setTimeout(() => inputRef.current?.focus(), 50)
+    } catch {
+      setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
+    }
+  }, [])
 
   const submit = useCallback(async () => {
     const { question, input } = stateRef.current
@@ -76,7 +86,7 @@ export function useQuiz() {
   }, [])
 
   const nextQuestion = useCallback(async () => {
-    const { questionNum, sessionTotal, reviewQueue } = stateRef.current
+    const { questionNum, sessionTotal, reviewQueue, group } = stateRef.current
     if (questionNum >= sessionTotal) {
       setState(s => ({ ...s, phase: 'session-result' }))
       return
@@ -97,7 +107,7 @@ export function useQuiz() {
     } else {
       setState(s => ({ ...s, phase: 'loading', result: null, input: '', error: null, questionNum: nextNum }))
       try {
-        const q = await fetchNextQuestion()
+        const q = await fetchNextQuestion(group)
         setState(s => ({ ...s, phase: 'answering', question: q }))
         setTimeout(() => inputRef.current?.focus(), 50)
       } catch {
@@ -107,14 +117,19 @@ export function useQuiz() {
   }, [])
 
   const startNewSession = useCallback(async () => {
-    setState(newSessionState())
+    const { group } = stateRef.current
+    setState(s => ({ ...s, phase: 'loading', question: null, result: null, input: '', error: null, questionNum: 1, correctCount: 0, wrongAnswers: [], reviewQueue: [] }))
     try {
-      const q = await fetchNextQuestion()
+      const q = await fetchNextQuestion(group)
       setState(s => ({ ...s, phase: 'answering', question: q }))
       setTimeout(() => inputRef.current?.focus(), 50)
     } catch {
       setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
     }
+  }, [])
+
+  const backToSetup = useCallback(() => {
+    setState(initialState())
   }, [])
 
   const startReview = useCallback(() => {
@@ -126,7 +141,8 @@ export function useQuiz() {
       pronoun: w.pronoun,
     }))
     const [first, ...rest] = queue
-    setState({
+    setState(s => ({
+      ...s,
       phase: 'answering',
       question: first,
       result: null,
@@ -137,7 +153,7 @@ export function useQuiz() {
       correctCount: 0,
       wrongAnswers: [],
       reviewQueue: rest,
-    })
+    }))
     setTimeout(() => inputRef.current?.focus(), 50)
   }, [])
 
@@ -145,5 +161,16 @@ export function useQuiz() {
     setState(s => ({ ...s, input: v }))
   }, [])
 
-  return { state, inputRef, submit, setInput, nextQuestion, startNewSession, startReview, retryLoad }
+  return {
+    state,
+    inputRef,
+    submit,
+    setInput,
+    nextQuestion,
+    startSession,
+    startNewSession,
+    backToSetup,
+    startReview,
+    retryLoad,
+  }
 }
