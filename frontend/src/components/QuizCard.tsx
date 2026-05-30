@@ -44,6 +44,7 @@ export function QuizCard({ question, input, result, inputRef, onInputChange, onS
         placeholder="活用形を入力..."
         disabled={!!result}
         autoComplete="off"
+        autoCorrect="off"
         autoCapitalize="none"
         spellCheck={false}
       />
