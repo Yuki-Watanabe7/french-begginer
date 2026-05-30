@@ -1,0 +1,64 @@
+# Architecture
+
+## 全体構成
+
+```
+Browser (React + Vite)
+    ↕ HTTP (JSON)
+FastAPI (Python)
+    ↕
+SQLite (初期) → PostgreSQL (将来)
+```
+
+## Frontend / Backend 構成
+
+| 項目 | 詳細 |
+|------|------|
+| Frontend | React 18 + TypeScript + Vite、スタイルはインラインCSSで最小構成 |
+| Backend | FastAPI + Python 3.12、uvicorn でサーブ |
+| Dev環境 | Docker Compose、Dev Container / GitHub Codespaces |
+| CI | GitHub Actions (ruff, pytest, npm build) |
+
+## API 概要
+
+| Method | Path | 説明 |
+|--------|------|------|
+| GET | `/health` | ヘルスチェック |
+| GET | `/api/questions/next` | 次の問題を返す（ランダム選択） |
+| POST | `/api/answers/check` | 回答の正誤判定 |
+
+## Backend 責務分担
+
+```
+backend/app/
+├── api/          # HTTPリクエスト/レスポンスの受け取り・返却のみ
+│   ├── questions.py
+│   └── answers.py
+├── domain/       # ビジネスルール（活用データ、モデル定義、判定ロジック）
+│   └── conjugation.py
+└── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
+    └── question_service.py
+```
+
+- **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。
+- **domain層**: 活用データと判定ロジック。フレームワーク非依存。テストが書きやすい。
+- **service層**: ユースケース実装。domain層を組み合わせてビジネスフローを実現。
+
+## 将来的なDB拡張方針
+
+現在は活用データをコード内辞書で保持しています。DB導入時の方針:
+
+1. **SQLite → PostgreSQL 移行**
+   - SQLAlchemy (非同期: `sqlalchemy[asyncio]`) + Alembic でマイグレーション管理
+   - Docker Compose に `db` サービスを追加し、接続文字列を環境変数 `DATABASE_URL` で切り替え
+   - SQLite: `sqlite+aiosqlite:///./french.db`
+   - PostgreSQL: `postgresql+asyncpg://user:pass@db:5432/french`
+
+2. **想定テーブル**
+   - `verbs`: 動詞一覧
+   - `conjugations`: (verb_id, tense, pronoun, form) の活用データ
+   - `quiz_results`: ユーザーの回答履歴（ユーザー認証追加後）
+
+3. **移行タイミング**
+   - 学習履歴の永続化が必要になった時点でPostgreSQLへ移行
+   - それまではSQLiteで十分
