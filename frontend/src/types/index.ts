@@ -9,3 +9,11 @@ export interface AnswerResult {
   expected: string
   given: string
 }
+
+export interface WrongAnswer {
+  verb: string
+  tense: string
+  pronoun: string
+  correctAnswer: string
+  userAnswer: string
+}

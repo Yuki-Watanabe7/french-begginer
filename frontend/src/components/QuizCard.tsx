@@ -6,12 +6,14 @@ interface Props {
   input: string
   result: AnswerResult | null
   inputRef: React.RefObject<HTMLInputElement>
+  questionNum: number
+  sessionTotal: number
   onInputChange: (v: string) => void
   onSubmit: () => void
   onNext: () => void
 }
 
-export function QuizCard({ question, input, result, inputRef, onInputChange, onSubmit, onNext }: Props) {
+export function QuizCard({ question, input, result, inputRef, questionNum, sessionTotal, onInputChange, onSubmit, onNext }: Props) {
   const handleKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       result ? onNext() : onSubmit()
@@ -20,8 +22,9 @@ export function QuizCard({ question, input, result, inputRef, onInputChange, onS
 
   return (
     <div style={styles.card}>
-      <div style={styles.meta}>
+      <div style={styles.topRow}>
         <span style={styles.badge}>{question.tense}</span>
+        <span style={styles.progress}>{questionNum} / {sessionTotal}</span>
       </div>
 
       <div style={styles.verbRow}>
@@ -56,7 +59,7 @@ export function QuizCard({ question, input, result, inputRef, onInputChange, onS
             <div style={styles.answer}>正解: <strong>{result.expected}</strong></div>
           )}
           <button style={styles.nextBtn} onClick={onNext}>
-            次の問題 →
+            {questionNum >= sessionTotal ? '結果を見る →' : '次の問題 →'}
           </button>
         </div>
       )}
@@ -74,9 +77,10 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: 20,
   },
-  meta: {
+  topRow: {
     display: 'flex',
-    gap: 8,
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   badge: {
     background: '#e8f0fe',
@@ -85,6 +89,11 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '4px 12px',
     fontSize: 14,
     fontWeight: 600,
+  },
+  progress: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: '#888',
   },
   verbRow: {
     display: 'flex',
