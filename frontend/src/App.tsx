@@ -5,7 +5,18 @@ import { VerbGroupSelector } from './components/VerbGroupSelector'
 import { useQuiz } from './hooks/useQuiz'
 
 export default function App() {
-  const { state, inputRef, submit, setInput, nextQuestion, selectGroup, startSession, startNewSession, backToSetup, startReview, retryLoad } = useQuiz()
+  const { state, inputRef, submit, setInput, nextQuestion, selectGroup, startSession, startNewSession, backToSetup, retryLoad } = useQuiz()
+
+  const nextLabel = (() => {
+    if (state.phase !== 'result') return '次の問題 →'
+    if (state.isReviewPhase) {
+      return state.reviewQueue.length === 0 ? '結果を見る →' : '次の問題 →'
+    }
+    if (state.questionNum >= state.sessionTotal) {
+      return state.wrongAnswers.length > 0 ? '復習へ →' : '結果を見る →'
+    }
+    return '次の問題 →'
+  })()
 
   return (
     <div style={styles.root}>
@@ -42,16 +53,19 @@ export default function App() {
             onNext={() => { void nextQuestion() }}
             questionNum={state.questionNum}
             sessionTotal={state.sessionTotal}
+            isReviewPhase={state.isReviewPhase}
+            nextLabel={nextLabel}
           />
         )}
 
         {state.phase === 'session-result' && (
           <SessionResult
-            correctCount={state.correctCount}
+            firstCorrectCount={state.firstCorrectCount}
+            reviewCorrectCount={state.reviewCorrectCount}
+            unresolvedCount={Math.max(0, state.wrongAnswers.length - state.reviewCorrectCount)}
             wrongAnswers={state.wrongAnswers}
-            sessionTotal={state.sessionTotal}
+            normalSessionTotal={state.normalSessionTotal}
             onRetry={() => { void startNewSession() }}
-            onReview={startReview}
             onBackToSetup={backToSetup}
           />
         )}
