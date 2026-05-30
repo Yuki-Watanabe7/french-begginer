@@ -11,22 +11,38 @@ interface Props {
   onNext: () => void
   questionNum: number
   sessionTotal: number
+  isReviewPhase: boolean
+  nextLabel: string
 }
 
-export function QuizCard({ question, input, result, inputRef, onInputChange, onSubmit, onNext, questionNum, sessionTotal }: Props) {
+export function QuizCard({
+  question,
+  input,
+  result,
+  inputRef,
+  onInputChange,
+  onSubmit,
+  onNext,
+  questionNum,
+  sessionTotal,
+  isReviewPhase,
+  nextLabel,
+}: Props) {
   const handleKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       result ? onNext() : onSubmit()
     }
   }
 
-  const isLast = questionNum >= sessionTotal
-
   return (
     <div style={styles.card}>
       <div style={styles.meta}>
-        <span style={styles.badge}>{question.tense}</span>
-        <span style={styles.progress}>{questionNum} / {sessionTotal}</span>
+        <span style={isReviewPhase ? styles.reviewBadge : styles.badge}>
+          {isReviewPhase ? '復習' : question.tense}
+        </span>
+        <span style={styles.progress}>
+          {isReviewPhase ? '復習中' : `${questionNum} / ${sessionTotal}`}
+        </span>
       </div>
 
       <div style={styles.verbRow}>
@@ -62,7 +78,7 @@ export function QuizCard({ question, input, result, inputRef, onInputChange, onS
             <div style={styles.answer}>正解: <strong>{result.expected}</strong></div>
           )}
           <button style={styles.nextBtn} onClick={onNext}>
-            {isLast ? '結果を見る →' : '次の問題 →'}
+            {nextLabel}
           </button>
         </div>
       )}
@@ -88,6 +104,14 @@ const styles: Record<string, React.CSSProperties> = {
   badge: {
     background: '#e8f0fe',
     color: '#1a56d6',
+    borderRadius: 99,
+    padding: '4px 12px',
+    fontSize: 14,
+    fontWeight: 600,
+  },
+  reviewBadge: {
+    background: '#fef3c7',
+    color: '#d97706',
     borderRadius: 99,
     padding: '4px 12px',
     fontSize: 14,

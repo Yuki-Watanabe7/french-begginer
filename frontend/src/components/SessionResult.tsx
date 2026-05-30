@@ -1,18 +1,27 @@
 import type { WrongAnswer } from '../types'
 
 interface Props {
-  correctCount: number
+  firstCorrectCount: number
+  reviewCorrectCount: number
+  unresolvedCount: number
   wrongAnswers: WrongAnswer[]
-  sessionTotal: number
+  normalSessionTotal: number
   onRetry: () => void
-  onReview: () => void
   onBackToSetup: () => void
 }
 
-export function SessionResult({ correctCount, wrongAnswers, sessionTotal, onRetry, onReview, onBackToSetup }: Props) {
-  const wrongCount = wrongAnswers.length
-  const accuracy = sessionTotal > 0 ? Math.round((correctCount / sessionTotal) * 100) : 0
+export function SessionResult({
+  firstCorrectCount,
+  reviewCorrectCount,
+  unresolvedCount,
+  wrongAnswers,
+  normalSessionTotal,
+  onRetry,
+  onBackToSetup,
+}: Props) {
+  const accuracy = normalSessionTotal > 0 ? Math.round((firstCorrectCount / normalSessionTotal) * 100) : 0
   const accuracyColor = accuracy >= 80 ? '#059669' : accuracy >= 50 ? '#d97706' : '#dc2626'
+  const hadReview = wrongAnswers.length > 0
 
   return (
     <div style={styles.card}>
@@ -20,37 +29,40 @@ export function SessionResult({ correctCount, wrongAnswers, sessionTotal, onRetr
 
       <div style={styles.accuracyBox}>
         <span style={{ ...styles.accuracyNum, color: accuracyColor }}>{accuracy}%</span>
-        <span style={styles.accuracyLabel}>正答率</span>
+        <span style={styles.accuracyLabel}>初回正答率</span>
       </div>
 
       <div style={styles.stats}>
         <div style={styles.statItem}>
-          <span style={{ ...styles.statNum, color: '#059669' }}>{correctCount}</span>
-          <span style={styles.statLabel}>正解</span>
+          <span style={{ ...styles.statNum, color: '#059669' }}>{firstCorrectCount}</span>
+          <span style={styles.statLabel}>初回正解</span>
+        </div>
+        {hadReview && (
+          <div style={styles.statItem}>
+            <span style={{ ...styles.statNum, color: '#d97706' }}>{reviewCorrectCount}</span>
+            <span style={styles.statLabel}>復習正解</span>
+          </div>
+        )}
+        <div style={styles.statItem}>
+          <span style={{ ...styles.statNum, color: unresolvedCount > 0 ? '#dc2626' : '#888' }}>
+            {unresolvedCount}
+          </span>
+          <span style={styles.statLabel}>未解決</span>
         </div>
         <div style={styles.statItem}>
-          <span style={{ ...styles.statNum, color: '#dc2626' }}>{wrongCount}</span>
-          <span style={styles.statLabel}>不正解</span>
-        </div>
-        <div style={styles.statItem}>
-          <span style={styles.statNum}>{sessionTotal}</span>
+          <span style={styles.statNum}>{normalSessionTotal}</span>
           <span style={styles.statLabel}>合計</span>
         </div>
       </div>
 
       <div style={styles.btnGroup}>
         <button style={styles.primaryBtn} onClick={onRetry}>もう一度挑戦</button>
-        {wrongCount > 0 && (
-          <button style={styles.secondaryBtn} onClick={onReview}>
-            間違えた問題だけ復習（{wrongCount}問）
-          </button>
-        )}
         <button style={styles.backBtn} onClick={onBackToSetup}>モード選択に戻る</button>
       </div>
 
-      {wrongCount > 0 && (
+      {wrongAnswers.length > 0 && (
         <div style={styles.wrongSection}>
-          <h3 style={styles.wrongHeading}>間違えた問題</h3>
+          <h3 style={styles.wrongHeading}>初回誤答問題</h3>
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
               <thead>
@@ -148,17 +160,6 @@ const styles: Record<string, React.CSSProperties> = {
     border: 'none',
     background: '#1a56d6',
     color: '#fff',
-    cursor: 'pointer',
-    width: '100%',
-  },
-  secondaryBtn: {
-    fontSize: 16,
-    fontWeight: 600,
-    padding: '12px',
-    borderRadius: 12,
-    border: '2px solid #1a56d6',
-    background: '#fff',
-    color: '#1a56d6',
     cursor: 'pointer',
     width: '100%',
   },

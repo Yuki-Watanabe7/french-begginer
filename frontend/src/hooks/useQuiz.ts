@@ -13,9 +13,13 @@ interface State {
   error: string | null
   questionNum: number
   sessionTotal: number
+  normalSessionTotal: number
   correctCount: number
   wrongAnswers: WrongAnswer[]
   reviewQueue: Question[]
+  isReviewPhase: boolean
+  firstCorrectCount: number
+  reviewCorrectCount: number
 }
 
 const DEFAULT_SESSION_SIZE = 10
@@ -29,9 +33,13 @@ const initialState = (): State => ({
   error: null,
   questionNum: 1,
   sessionTotal: DEFAULT_SESSION_SIZE,
+  normalSessionTotal: DEFAULT_SESSION_SIZE,
   correctCount: 0,
   wrongAnswers: [],
   reviewQueue: [],
+  isReviewPhase: false,
+  firstCorrectCount: 0,
+  reviewCorrectCount: 0,
 })
 
 export function useQuiz() {
@@ -46,7 +54,23 @@ export function useQuiz() {
 
   const startSession = useCallback(async (sessionSize: number) => {
     const { group } = stateRef.current
-    setState(s => ({ ...s, phase: 'loading', question: null, result: null, input: '', error: null, questionNum: 1, sessionTotal: sessionSize, correctCount: 0, wrongAnswers: [], reviewQueue: [] }))
+    setState(s => ({
+      ...s,
+      phase: 'loading',
+      question: null,
+      result: null,
+      input: '',
+      error: null,
+      questionNum: 1,
+      sessionTotal: sessionSize,
+      normalSessionTotal: sessionSize,
+      correctCount: 0,
+      wrongAnswers: [],
+      reviewQueue: [],
+      isReviewPhase: false,
+      firstCorrectCount: 0,
+      reviewCorrectCount: 0,
+    }))
     try {
       const q = await fetchNextQuestion(group)
       setState(s => ({ ...s, phase: 'answering', question: q }))
@@ -69,21 +93,35 @@ export function useQuiz() {
   }, [])
 
   const submit = useCallback(async () => {
-    const { question, input } = stateRef.current
+    const { question, input, isReviewPhase } = stateRef.current
     if (!question || input.trim() === '') return
     try {
       const result = await checkAnswer(question.verb, question.tense, question.pronoun, input)
       if (result.correct) {
-        setState(s => ({ ...s, phase: 'result', result, correctCount: s.correctCount + 1 }))
-      } else {
-        const wrong: WrongAnswer = {
-          verb: question.verb,
-          tense: question.tense,
-          pronoun: question.pronoun,
-          correctAnswer: result.expected,
-          userAnswer: input,
+        if (isReviewPhase) {
+          setState(s => ({ ...s, phase: 'result', result, reviewCorrectCount: s.reviewCorrectCount + 1 }))
+        } else {
+          setState(s => ({ ...s, phase: 'result', result, correctCount: s.correctCount + 1 }))
         }
-        setState(s => ({ ...s, phase: 'result', result, wrongAnswers: [...s.wrongAnswers, wrong] }))
+      } else {
+        if (isReviewPhase) {
+          setState(s => ({ ...s, phase: 'result', result, reviewQueue: [...s.reviewQueue, question] }))
+        } else {
+          const wrong: WrongAnswer = {
+            verb: question.verb,
+            tense: question.tense,
+            pronoun: question.pronoun,
+            correctAnswer: result.expected,
+            userAnswer: input,
+          }
+          setState(s => {
+            const isDuplicate = s.wrongAnswers.some(
+              w => w.verb === wrong.verb && w.tense === wrong.tense && w.pronoun === wrong.pronoun,
+            )
+            if (isDuplicate) return { ...s, phase: 'result', result }
+            return { ...s, phase: 'result', result, wrongAnswers: [...s.wrongAnswers, wrong] }
+          })
+        }
       }
     } catch {
       setState(s => ({ ...s, phase: 'error', error: '判定に失敗しました' }))
@@ -91,13 +129,14 @@ export function useQuiz() {
   }, [])
 
   const nextQuestion = useCallback(async () => {
-    const { questionNum, sessionTotal, reviewQueue, group } = stateRef.current
-    if (questionNum >= sessionTotal) {
-      setState(s => ({ ...s, phase: 'session-result' }))
-      return
-    }
-    const nextNum = questionNum + 1
-    if (reviewQueue.length > 0) {
+    const { questionNum, sessionTotal, reviewQueue, group, isReviewPhase, correctCount, wrongAnswers } =
+      stateRef.current
+
+    if (isReviewPhase) {
+      if (reviewQueue.length === 0) {
+        setState(s => ({ ...s, phase: 'session-result' }))
+        return
+      }
       const [next, ...rest] = reviewQueue
       setState(s => ({
         ...s,
@@ -105,25 +144,71 @@ export function useQuiz() {
         question: next,
         result: null,
         input: '',
-        questionNum: nextNum,
+        questionNum: s.questionNum + 1,
         reviewQueue: rest,
       }))
       setTimeout(() => inputRef.current?.focus(), 50)
-    } else {
-      setState(s => ({ ...s, phase: 'loading', result: null, input: '', error: null, questionNum: nextNum }))
-      try {
-        const q = await fetchNextQuestion(group)
-        setState(s => ({ ...s, phase: 'answering', question: q }))
+      return
+    }
+
+    // Normal phase
+    if (questionNum >= sessionTotal) {
+      if (wrongAnswers.length > 0) {
+        const queue: Question[] = wrongAnswers.map(w => ({
+          verb: w.verb,
+          tense: w.tense,
+          pronoun: w.pronoun,
+        }))
+        const [first, ...rest] = queue
+        setState(s => ({
+          ...s,
+          phase: 'answering',
+          question: first,
+          result: null,
+          input: '',
+          isReviewPhase: true,
+          firstCorrectCount: correctCount,
+          reviewCorrectCount: 0,
+          questionNum: 1,
+          sessionTotal: queue.length,
+          reviewQueue: rest,
+        }))
         setTimeout(() => inputRef.current?.focus(), 50)
-      } catch {
-        setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
+      } else {
+        setState(s => ({ ...s, phase: 'session-result', firstCorrectCount: correctCount }))
       }
+      return
+    }
+
+    const nextNum = questionNum + 1
+    setState(s => ({ ...s, phase: 'loading', result: null, input: '', error: null, questionNum: nextNum }))
+    try {
+      const q = await fetchNextQuestion(group)
+      setState(s => ({ ...s, phase: 'answering', question: q }))
+      setTimeout(() => inputRef.current?.focus(), 50)
+    } catch {
+      setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
     }
   }, [])
 
   const startNewSession = useCallback(async () => {
-    const { group } = stateRef.current
-    setState(s => ({ ...s, phase: 'loading', question: null, result: null, input: '', error: null, questionNum: 1, correctCount: 0, wrongAnswers: [], reviewQueue: [] }))
+    const { group, normalSessionTotal } = stateRef.current
+    setState(s => ({
+      ...s,
+      phase: 'loading',
+      question: null,
+      result: null,
+      input: '',
+      error: null,
+      questionNum: 1,
+      sessionTotal: normalSessionTotal,
+      correctCount: 0,
+      wrongAnswers: [],
+      reviewQueue: [],
+      isReviewPhase: false,
+      firstCorrectCount: 0,
+      reviewCorrectCount: 0,
+    }))
     try {
       const q = await fetchNextQuestion(group)
       setState(s => ({ ...s, phase: 'answering', question: q }))
@@ -135,31 +220,6 @@ export function useQuiz() {
 
   const backToSetup = useCallback(() => {
     setState(initialState())
-  }, [])
-
-  const startReview = useCallback(() => {
-    const { wrongAnswers } = stateRef.current
-    if (wrongAnswers.length === 0) return
-    const queue: Question[] = wrongAnswers.map(w => ({
-      verb: w.verb,
-      tense: w.tense,
-      pronoun: w.pronoun,
-    }))
-    const [first, ...rest] = queue
-    setState(s => ({
-      ...s,
-      phase: 'answering',
-      question: first,
-      result: null,
-      input: '',
-      error: null,
-      questionNum: 1,
-      sessionTotal: wrongAnswers.length,
-      correctCount: 0,
-      wrongAnswers: [],
-      reviewQueue: rest,
-    }))
-    setTimeout(() => inputRef.current?.focus(), 50)
   }, [])
 
   const setInput = useCallback((v: string) => {
@@ -176,7 +236,6 @@ export function useQuiz() {
     startSession,
     startNewSession,
     backToSetup,
-    startReview,
     retryLoad,
   }
 }
