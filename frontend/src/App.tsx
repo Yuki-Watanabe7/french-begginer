@@ -1,8 +1,9 @@
 import { QuizCard } from './components/QuizCard'
+import { SessionResult } from './components/SessionResult'
 import { useQuiz } from './hooks/useQuiz'
 
 export default function App() {
-  const { state, inputRef, submit, setInput, loadQuestion } = useQuiz()
+  const { state, inputRef, submit, setInput, nextQuestion, startNewSession, startReview, retryLoad } = useQuiz()
 
   return (
     <div style={styles.root}>
@@ -16,7 +17,7 @@ export default function App() {
         {state.phase === 'error' && (
           <div style={styles.errorBox}>
             <p>{state.error}</p>
-            <button style={styles.retryBtn} onClick={loadQuestion}>再試行</button>
+            <button style={styles.retryBtn} onClick={retryLoad}>再試行</button>
           </div>
         )}
 
@@ -28,7 +29,19 @@ export default function App() {
             inputRef={inputRef}
             onInputChange={setInput}
             onSubmit={submit}
-            onNext={loadQuestion}
+            onNext={() => { void nextQuestion() }}
+            questionNum={state.questionNum}
+            sessionTotal={state.sessionTotal}
+          />
+        )}
+
+        {state.phase === 'session-result' && (
+          <SessionResult
+            correctCount={state.correctCount}
+            wrongAnswers={state.wrongAnswers}
+            sessionTotal={state.sessionTotal}
+            onRetry={() => { void startNewSession() }}
+            onReview={startReview}
           />
         )}
       </main>
