@@ -2,7 +2,7 @@
   "name": "French Beginner Dev",
   "dockerComposeFile": ["../docker-compose.yml"],
   "service": "frontend",
-  "workspaceFolder": "/workspace",
+  "workspaceFolder": "/app",
   "forwardPorts": [5173, 8000],
   "portsAttributes": {
     "5173": {
@@ -26,5 +26,5 @@
       }
     }
   },
-  "postCreateCommand": "cd /workspace/frontend && npm install"
+  "postCreateCommand": "npm install"
 }
