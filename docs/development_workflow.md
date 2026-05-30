@@ -73,7 +73,7 @@
 
 ## PR 作成時に確認すべき項目
 
-- [ ] CIが全て通っている（ruff / pytest / npm build）
+- [ ] CIが全て通っている（ruff / pytest / npm lint / npm build）
 - [ ] `docker compose up` で起動できる
 - [ ] スマホブラウザで動作確認済み（Codespacesまたはローカル）
 - [ ] 新規APIがある場合、`docs/architecture.md` の API 表を更新した

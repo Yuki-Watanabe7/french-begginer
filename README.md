@@ -98,6 +98,11 @@ uv run pytest
 cd frontend
 
 npm install
+
+# lint
+npm run lint
+
+# build
 npm run build
 ```
 
