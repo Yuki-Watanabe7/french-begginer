@@ -1,11 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
-from app.domain.conjugation import Question
+from app.domain.conjugation import Question, VerbGroup
 from app.services.question_service import get_next_question
 
 router = APIRouter(prefix="/api/questions", tags=["questions"])
 
 
 @router.get("/next", response_model=Question)
-def next_question() -> Question:
-    return get_next_question()
+def next_question(group: VerbGroup = Query(default="all")) -> Question:
+    return get_next_question(group=group)
