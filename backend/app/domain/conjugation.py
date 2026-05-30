@@ -1,4 +1,20 @@
+from typing import Literal
+
 from pydantic import BaseModel
+
+VerbGroup = Literal["er", "ir", "irregular"]
+
+VERB_GROUPS: dict[str, VerbGroup] = {
+    "être": "irregular",
+    "avoir": "irregular",
+    "aller": "irregular",
+    "faire": "irregular",
+    "parler": "er",
+    "aimer": "er",
+    "travailler": "er",
+    "finir": "ir",
+    "choisir": "ir",
+}
 
 CONJUGATIONS: dict[str, dict[str, dict[str, str]]] = {
     "être": {
@@ -39,6 +55,56 @@ CONJUGATIONS: dict[str, dict[str, dict[str, str]]] = {
             "nous": "faisons",
             "vous": "faites",
             "ils/elles": "font",
+        }
+    },
+    "parler": {
+        "présent": {
+            "je": "parle",
+            "tu": "parles",
+            "il/elle": "parle",
+            "nous": "parlons",
+            "vous": "parlez",
+            "ils/elles": "parlent",
+        }
+    },
+    "aimer": {
+        "présent": {
+            "je": "aime",
+            "tu": "aimes",
+            "il/elle": "aime",
+            "nous": "aimons",
+            "vous": "aimez",
+            "ils/elles": "aiment",
+        }
+    },
+    "travailler": {
+        "présent": {
+            "je": "travaille",
+            "tu": "travailles",
+            "il/elle": "travaille",
+            "nous": "travaillons",
+            "vous": "travaillez",
+            "ils/elles": "travaillent",
+        }
+    },
+    "finir": {
+        "présent": {
+            "je": "finis",
+            "tu": "finis",
+            "il/elle": "finit",
+            "nous": "finissons",
+            "vous": "finissez",
+            "ils/elles": "finissent",
+        }
+    },
+    "choisir": {
+        "présent": {
+            "je": "choisis",
+            "tu": "choisis",
+            "il/elle": "choisit",
+            "nous": "choisissons",
+            "vous": "choisissez",
+            "ils/elles": "choisissent",
         }
     },
 }
