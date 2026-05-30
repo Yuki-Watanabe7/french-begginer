@@ -1,5 +1,15 @@
 # Development Workflow
 
+## Issue 駆動開発ルール
+
+1. **1 Issue = 1 目的** — 1つのIssueに複数の目的を混ぜない
+2. **使用感に関わる変更はスマホで確認** — UI・UX・レイアウトに影響する変更は必ずスマホ実機で確認してからPR化する
+3. **CI を緑にしてから PR 化** — ruff / pytest / npm lint / npm build が全て通ってからPRを作成する
+4. **新機能追加時は Docs 更新要否を確認** — API追加・起動方法変更・CI変更を伴う場合はドキュメントも更新する
+5. **Claude Code への依頼時は対象範囲・非対象範囲・完了条件を明記** — 曖昧な依頼は意図しない変更を招く
+
+---
+
 ## GitHub Issues ベース開発の方針
 
 - **1 Issue = 1 PR** を基本とする
@@ -49,11 +59,16 @@
 
 ### GitHub Codespaces の場合
 
-1. Codespaces を起動する
-2. `docker compose up` を実行
-3. Codespaces の「ポート」タブで `5173` を確認
-4. ポートを「Public」に変更してURLをコピー
-5. スマホブラウザでそのURLを開く
+1. GitHub リポジトリページで **Code → Codespaces → Create codespace on main** をクリック
+2. ターミナルで `docker compose up` を実行
+3. 「ポート」タブで `5173` が表示されることを確認
+4. `5173` の行を右クリックし **Visibility → Public** に変更
+5. 表示された URL（`https://<codespace-name>-5173.app.github.dev` 形式）をスマホブラウザで開く
+6. 以下の学習ループが正常に動くことを確認する:
+   - 問題（動詞・時制・主語）が表示される
+   - 活用形を入力して送信できる
+   - 正誤フィードバックが表示される
+   - 次の問題に進める
 
 ### ローカルの場合（同一WiFi）
 

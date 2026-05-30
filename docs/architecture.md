@@ -17,7 +17,7 @@ SQLite (初期) → PostgreSQL (将来)
 | Frontend | React 18 + TypeScript + Vite、スタイルはインラインCSSで最小構成 |
 | Backend | FastAPI + Python 3.12、uvicorn でサーブ |
 | Dev環境 | Docker Compose、Dev Container / GitHub Codespaces |
-| CI | GitHub Actions (ruff, pytest, npm build) |
+| CI | GitHub Actions (ruff, pytest, npm lint, npm build) |
 
 ## API 概要
 
