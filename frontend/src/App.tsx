@@ -1,10 +1,11 @@
 import { QuizCard } from './components/QuizCard'
+import { QuizSettings } from './components/QuizSettings'
 import { SessionResult } from './components/SessionResult'
 import { VerbGroupSelector } from './components/VerbGroupSelector'
 import { useQuiz } from './hooks/useQuiz'
 
 export default function App() {
-  const { state, inputRef, submit, setInput, nextQuestion, startSession, startNewSession, backToSetup, startReview, retryLoad } = useQuiz()
+  const { state, inputRef, submit, setInput, nextQuestion, selectGroup, startSession, startNewSession, backToSetup, startReview, retryLoad } = useQuiz()
 
   return (
     <div style={styles.root}>
@@ -14,7 +15,11 @@ export default function App() {
 
       <main style={styles.main}>
         {state.phase === 'setup' && (
-          <VerbGroupSelector onSelect={startSession} />
+          <VerbGroupSelector onSelect={selectGroup} />
+        )}
+
+        {state.phase === 'quiz-settings' && (
+          <QuizSettings onStart={sessionSize => { void startSession(sessionSize) }} onBack={backToSetup} />
         )}
 
         {state.phase === 'loading' && <p style={styles.msg}>読み込み中...</p>}

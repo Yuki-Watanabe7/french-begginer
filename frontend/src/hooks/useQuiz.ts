@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { checkAnswer, fetchNextQuestion } from '../api/client'
 import type { AnswerResult, Question, VerbGroup, WrongAnswer } from '../types'
 
-type Phase = 'setup' | 'loading' | 'answering' | 'result' | 'session-result' | 'error'
+type Phase = 'setup' | 'quiz-settings' | 'loading' | 'answering' | 'result' | 'session-result' | 'error'
 
 interface State {
   phase: Phase
@@ -18,7 +18,7 @@ interface State {
   reviewQueue: Question[]
 }
 
-const SESSION_SIZE = 10
+const DEFAULT_SESSION_SIZE = 10
 
 const initialState = (): State => ({
   phase: 'setup',
@@ -28,7 +28,7 @@ const initialState = (): State => ({
   input: '',
   error: null,
   questionNum: 1,
-  sessionTotal: SESSION_SIZE,
+  sessionTotal: DEFAULT_SESSION_SIZE,
   correctCount: 0,
   wrongAnswers: [],
   reviewQueue: [],
@@ -40,8 +40,13 @@ export function useQuiz() {
   stateRef.current = state
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const startSession = useCallback(async (group: VerbGroup) => {
-    setState(s => ({ ...s, phase: 'loading', group, question: null, result: null, input: '', error: null, questionNum: 1, sessionTotal: SESSION_SIZE, correctCount: 0, wrongAnswers: [], reviewQueue: [] }))
+  const selectGroup = useCallback((group: VerbGroup) => {
+    setState(s => ({ ...s, phase: 'quiz-settings', group }))
+  }, [])
+
+  const startSession = useCallback(async (sessionSize: number) => {
+    const { group } = stateRef.current
+    setState(s => ({ ...s, phase: 'loading', question: null, result: null, input: '', error: null, questionNum: 1, sessionTotal: sessionSize, correctCount: 0, wrongAnswers: [], reviewQueue: [] }))
     try {
       const q = await fetchNextQuestion(group)
       setState(s => ({ ...s, phase: 'answering', question: q }))
@@ -167,6 +172,7 @@ export function useQuiz() {
     submit,
     setInput,
     nextQuestion,
+    selectGroup,
     startSession,
     startNewSession,
     backToSetup,
