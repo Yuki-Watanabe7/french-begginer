@@ -26,6 +26,32 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies of backend
+        working-directory: backend
+        run: uv sync --locked --dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies of frontend
+        working-directory: frontend
+        run: npm install
+
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -35,6 +61,9 @@ jobs:
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
             actions: read
+          claude_args: |
+            --max-turns 10
+            --append-system-prompt "Before reporting completion, run bash scripts/quality-check.sh. If it fails or cannot be run, do not claim completion. Report the failing command and unresolved issue."
 
           # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
           # prompt: 'Update the pull request description to include a summary of changes.'
@@ -44,3 +73,6 @@ jobs:
           # or https://code.claude.com/docs/en/cli-reference for available options
           # claude_args: '--allowed-tools Bash(gh pr *)'
 
+      - name: Run quality checks after Claude
+        if: always()
+        run: bash scripts/quality-check.sh
