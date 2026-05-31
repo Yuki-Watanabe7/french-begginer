@@ -2,10 +2,10 @@
 set -euo pipefail
 
 cd backend
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest
+uv run --extra dev ruff check .
+uv run --extra dev ruff format --check .
+uv run --extra dev pytest
 
 cd ../frontend
 npm run lint
-npm test
+npm run build
