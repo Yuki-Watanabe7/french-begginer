@@ -49,7 +49,7 @@ jobs:
 
       - name: Install dependencies of frontend
         working-directory: frontend
-        run: npm ci
+        run: npm ci --include=dev
 
 
       - name: Run Claude Code
