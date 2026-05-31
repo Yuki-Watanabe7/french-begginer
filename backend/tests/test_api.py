@@ -93,6 +93,52 @@ def test_check_answer_whitespace_trimmed():
     assert res.json()["correct"] is True
 
 
+def test_regarder_conjugation():
+    cases = [
+        ("je", "regarde"),
+        ("tu", "regardes"),
+        ("il/elle", "regarde"),
+        ("nous", "regardons"),
+        ("vous", "regardez"),
+        ("ils/elles", "regardent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "regarder",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"regarder/{pronoun}: expected {expected}"
+
+
+def test_grandir_conjugation():
+    cases = [
+        ("je", "grandis"),
+        ("tu", "grandis"),
+        ("il/elle", "grandit"),
+        ("nous", "grandissons"),
+        ("vous", "grandissez"),
+        ("ils/elles", "grandissent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "grandir",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"grandir/{pronoun}: expected {expected}"
+
+
 def test_verb_groups_conjugations_match():
     assert set(VERB_GROUPS) == set(CONJUGATIONS)
 
