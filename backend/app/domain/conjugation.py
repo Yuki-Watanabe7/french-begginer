@@ -1,8 +1,35 @@
-from typing import Literal
+from typing import Literal, TypedDict
 
 from pydantic import BaseModel
 
 VerbGroup = Literal["all", "er", "ir", "irregular"]
+
+# How to add a new verb:
+# 1. Add the verb and its group to VERB_GROUPS (er/ir/irregular)
+# 2. Add all 6 présent conjugations to CONJUGATIONS
+# 3. Add level + pattern metadata to VERB_METADATA
+# 4. Add at least one test in tests/test_api.py
+
+
+class VerbMeta(TypedDict):
+    level: Literal["basic", "standard", "challenge"]
+    pattern: Literal["regular", "stem_change", "spelling_change", "irregular"]
+
+
+# level:   basic=最重要, standard=標準, challenge=応用
+# pattern: regular=規則活用, stem_change=語幹変化,
+#          spelling_change=綴り変化, irregular=不規則
+VERB_METADATA: dict[str, VerbMeta] = {
+    "parler": {"level": "basic", "pattern": "regular"},
+    "aimer": {"level": "basic", "pattern": "regular"},
+    "travailler": {"level": "basic", "pattern": "regular"},
+    "finir": {"level": "basic", "pattern": "regular"},
+    "choisir": {"level": "standard", "pattern": "regular"},
+    "être": {"level": "basic", "pattern": "irregular"},
+    "avoir": {"level": "basic", "pattern": "irregular"},
+    "aller": {"level": "basic", "pattern": "irregular"},
+    "faire": {"level": "standard", "pattern": "irregular"},
+}
 
 VERB_GROUPS: dict[str, Literal["er", "ir", "irregular"]] = {
     "parler": "er",
