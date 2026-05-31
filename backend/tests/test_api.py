@@ -417,6 +417,253 @@ def test_envoyer_conjugation():
         assert res.json()["correct"] is True, f"envoyer/{pronoun}: expected {expected}"
 
 
+def test_check_answer_unknown_verb_returns_400():
+    res = client.post(
+        "/api/answers/check",
+        json={"verb": "unknown", "tense": "présent", "pronoun": "je", "answer": "foo"},
+    )
+    assert res.status_code == 400
+
+
+def test_check_answer_unknown_tense_returns_400():
+    res = client.post(
+        "/api/answers/check",
+        json={
+            "verb": "parler",
+            "tense": "imparfait",
+            "pronoun": "je",
+            "answer": "parlais",
+        },
+    )
+    assert res.status_code == 400
+
+
+def test_check_answer_missing_required_field_returns_422():
+    res = client.post(
+        "/api/answers/check",
+        json={"verb": "parler", "tense": "présent", "pronoun": "je"},
+    )
+    assert res.status_code == 422
+
+
+def test_check_answer_case_insensitive():
+    res = client.post(
+        "/api/answers/check",
+        json={"verb": "être", "tense": "présent", "pronoun": "je", "answer": "SUIS"},
+    )
+    assert res.status_code == 200
+    assert res.json()["correct"] is True
+
+
+def test_check_answer_empty_answer_is_incorrect():
+    res = client.post(
+        "/api/answers/check",
+        json={"verb": "parler", "tense": "présent", "pronoun": "je", "answer": ""},
+    )
+    assert res.status_code == 200
+    assert res.json()["correct"] is False
+
+
+def test_check_answer_given_field_is_stripped():
+    res = client.post(
+        "/api/answers/check",
+        json={
+            "verb": "aller",
+            "tense": "présent",
+            "pronoun": "je",
+            "answer": "  vais  ",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["correct"] is True
+    assert data["given"] == "vais"
+
+
+def test_parler_conjugation():
+    cases = [
+        ("je", "parle"),
+        ("tu", "parles"),
+        ("il/elle", "parle"),
+        ("nous", "parlons"),
+        ("vous", "parlez"),
+        ("ils/elles", "parlent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "parler",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"parler/{pronoun}: expected {expected}"
+
+
+def test_aimer_conjugation():
+    cases = [
+        ("je", "aime"),
+        ("tu", "aimes"),
+        ("il/elle", "aime"),
+        ("nous", "aimons"),
+        ("vous", "aimez"),
+        ("ils/elles", "aiment"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "aimer",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"aimer/{pronoun}: expected {expected}"
+
+
+def test_etre_conjugation():
+    cases = [
+        ("je", "suis"),
+        ("tu", "es"),
+        ("il/elle", "est"),
+        ("nous", "sommes"),
+        ("vous", "êtes"),
+        ("ils/elles", "sont"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "être",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"être/{pronoun}: expected {expected}"
+
+
+def test_avoir_conjugation():
+    cases = [
+        ("je", "ai"),
+        ("tu", "as"),
+        ("il/elle", "a"),
+        ("nous", "avons"),
+        ("vous", "avez"),
+        ("ils/elles", "ont"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "avoir",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"avoir/{pronoun}: expected {expected}"
+
+
+def test_aller_conjugation():
+    cases = [
+        ("je", "vais"),
+        ("tu", "vas"),
+        ("il/elle", "va"),
+        ("nous", "allons"),
+        ("vous", "allez"),
+        ("ils/elles", "vont"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "aller",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"aller/{pronoun}: expected {expected}"
+
+
+def test_faire_conjugation():
+    cases = [
+        ("je", "fais"),
+        ("tu", "fais"),
+        ("il/elle", "fait"),
+        ("nous", "faisons"),
+        ("vous", "faites"),
+        ("ils/elles", "font"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "faire",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"faire/{pronoun}: expected {expected}"
+
+
+def test_finir_conjugation():
+    cases = [
+        ("je", "finis"),
+        ("tu", "finis"),
+        ("il/elle", "finit"),
+        ("nous", "finissons"),
+        ("vous", "finissez"),
+        ("ils/elles", "finissent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "finir",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"finir/{pronoun}: expected {expected}"
+
+
+def test_choisir_conjugation():
+    cases = [
+        ("je", "choisis"),
+        ("tu", "choisis"),
+        ("il/elle", "choisit"),
+        ("nous", "choisissons"),
+        ("vous", "choisissez"),
+        ("ils/elles", "choisissent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "choisir",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"choisir/{pronoun}: expected {expected}"
+
+
 def test_verb_groups_conjugations_match():
     assert set(VERB_GROUPS) == set(CONJUGATIONS)
 
