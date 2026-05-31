@@ -52,6 +52,16 @@ VERB_METADATA: dict[str, VerbMeta] = {
     "préférer": {"level": "standard", "pattern": "stem_change"},
     "espérer": {"level": "standard", "pattern": "stem_change"},
     "envoyer": {"level": "standard", "pattern": "stem_change"},
+    "dire": {"level": "basic", "pattern": "irregular"},
+    "lire": {"level": "standard", "pattern": "irregular"},
+    "écrire": {"level": "standard", "pattern": "irregular"},
+    "voir": {"level": "basic", "pattern": "irregular"},
+    "mettre": {"level": "basic", "pattern": "irregular"},
+    "partir": {"level": "standard", "pattern": "irregular"},
+    "sortir": {"level": "standard", "pattern": "irregular"},
+    "dormir": {"level": "standard", "pattern": "irregular"},
+    "attendre": {"level": "standard", "pattern": "irregular"},
+    "répondre": {"level": "standard", "pattern": "irregular"},
 }
 
 VERB_GROUPS: dict[str, Literal["er", "ir", "irregular"]] = {
@@ -87,6 +97,16 @@ VERB_GROUPS: dict[str, Literal["er", "ir", "irregular"]] = {
     "préférer": "er",
     "espérer": "er",
     "envoyer": "er",
+    "dire": "irregular",
+    "lire": "irregular",
+    "écrire": "irregular",
+    "voir": "irregular",
+    "mettre": "irregular",
+    "partir": "irregular",
+    "sortir": "irregular",
+    "dormir": "irregular",
+    "attendre": "irregular",
+    "répondre": "irregular",
 }
 
 CONJUGATIONS: dict[str, dict[str, dict[str, str]]] = {
@@ -408,6 +428,106 @@ CONJUGATIONS: dict[str, dict[str, dict[str, str]]] = {
             "nous": "envoyons",
             "vous": "envoyez",
             "ils/elles": "envoient",
+        }
+    },
+    "dire": {
+        "présent": {
+            "je": "dis",
+            "tu": "dis",
+            "il/elle": "dit",
+            "nous": "disons",
+            "vous": "dites",
+            "ils/elles": "disent",
+        }
+    },
+    "lire": {
+        "présent": {
+            "je": "lis",
+            "tu": "lis",
+            "il/elle": "lit",
+            "nous": "lisons",
+            "vous": "lisez",
+            "ils/elles": "lisent",
+        }
+    },
+    "écrire": {
+        "présent": {
+            "je": "écris",
+            "tu": "écris",
+            "il/elle": "écrit",
+            "nous": "écrivons",
+            "vous": "écrivez",
+            "ils/elles": "écrivent",
+        }
+    },
+    "voir": {
+        "présent": {
+            "je": "vois",
+            "tu": "vois",
+            "il/elle": "voit",
+            "nous": "voyons",
+            "vous": "voyez",
+            "ils/elles": "voient",
+        }
+    },
+    "mettre": {
+        "présent": {
+            "je": "mets",
+            "tu": "mets",
+            "il/elle": "met",
+            "nous": "mettons",
+            "vous": "mettez",
+            "ils/elles": "mettent",
+        }
+    },
+    "partir": {
+        "présent": {
+            "je": "pars",
+            "tu": "pars",
+            "il/elle": "part",
+            "nous": "partons",
+            "vous": "partez",
+            "ils/elles": "partent",
+        }
+    },
+    "sortir": {
+        "présent": {
+            "je": "sors",
+            "tu": "sors",
+            "il/elle": "sort",
+            "nous": "sortons",
+            "vous": "sortez",
+            "ils/elles": "sortent",
+        }
+    },
+    "dormir": {
+        "présent": {
+            "je": "dors",
+            "tu": "dors",
+            "il/elle": "dort",
+            "nous": "dormons",
+            "vous": "dormez",
+            "ils/elles": "dorment",
+        }
+    },
+    "attendre": {
+        "présent": {
+            "je": "attends",
+            "tu": "attends",
+            "il/elle": "attend",
+            "nous": "attendons",
+            "vous": "attendez",
+            "ils/elles": "attendent",
+        }
+    },
+    "répondre": {
+        "présent": {
+            "je": "réponds",
+            "tu": "réponds",
+            "il/elle": "répond",
+            "nous": "répondons",
+            "vous": "répondez",
+            "ils/elles": "répondent",
         }
     },
 }
