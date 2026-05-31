@@ -62,8 +62,13 @@ jobs:
           additional_permissions: |
             actions: read
           claude_args: |
-            --max-turns 10
-            --append-system-prompt "Before reporting completion, run bash scripts/quality-check.sh. If it fails or cannot be run, do not claim completion. Report the failing command and unresolved issue."
+            --max-turns 15
+            --allowedTools Bash(bash scripts/quality-check.sh),Bash(uv:*),Bash(npm:*),Bash(git status:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*)
+            --append-system-prompt "You must run bash scripts/quality-check.sh before committing or reporting completion.
+            If the command fails, inspect the error, fix the issue, and rerun the command.
+            Repeat until it passes.
+            Do not claim completion unless the final run passes.
+            If execution is blocked by permissions or environment issues, report that explicitly and do not create a completion report."
 
           # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
           # prompt: 'Update the pull request description to include a summary of changes.'
