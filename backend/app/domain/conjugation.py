@@ -22,9 +22,19 @@ class VerbMeta(TypedDict):
 VERB_METADATA: dict[str, VerbMeta] = {
     "parler": {"level": "basic", "pattern": "regular"},
     "aimer": {"level": "basic", "pattern": "regular"},
+    "habiter": {"level": "basic", "pattern": "regular"},
+    "regarder": {"level": "basic", "pattern": "regular"},
+    "écouter": {"level": "basic", "pattern": "regular"},
     "travailler": {"level": "basic", "pattern": "regular"},
+    "étudier": {"level": "standard", "pattern": "regular"},
+    "chercher": {"level": "standard", "pattern": "regular"},
+    "donner": {"level": "basic", "pattern": "regular"},
+    "demander": {"level": "basic", "pattern": "regular"},
     "finir": {"level": "basic", "pattern": "regular"},
     "choisir": {"level": "standard", "pattern": "regular"},
+    "réussir": {"level": "standard", "pattern": "regular"},
+    "remplir": {"level": "standard", "pattern": "regular"},
+    "grandir": {"level": "standard", "pattern": "regular"},
     "être": {"level": "basic", "pattern": "irregular"},
     "avoir": {"level": "basic", "pattern": "irregular"},
     "aller": {"level": "basic", "pattern": "irregular"},
@@ -34,9 +44,19 @@ VERB_METADATA: dict[str, VerbMeta] = {
 VERB_GROUPS: dict[str, Literal["er", "ir", "irregular"]] = {
     "parler": "er",
     "aimer": "er",
+    "habiter": "er",
+    "regarder": "er",
+    "écouter": "er",
     "travailler": "er",
+    "étudier": "er",
+    "chercher": "er",
+    "donner": "er",
+    "demander": "er",
     "finir": "ir",
     "choisir": "ir",
+    "réussir": "ir",
+    "remplir": "ir",
+    "grandir": "ir",
     "être": "irregular",
     "avoir": "irregular",
     "aller": "irregular",
@@ -44,6 +64,106 @@ VERB_GROUPS: dict[str, Literal["er", "ir", "irregular"]] = {
 }
 
 CONJUGATIONS: dict[str, dict[str, dict[str, str]]] = {
+    "habiter": {
+        "présent": {
+            "je": "habite",
+            "tu": "habites",
+            "il/elle": "habite",
+            "nous": "habitons",
+            "vous": "habitez",
+            "ils/elles": "habitent",
+        }
+    },
+    "regarder": {
+        "présent": {
+            "je": "regarde",
+            "tu": "regardes",
+            "il/elle": "regarde",
+            "nous": "regardons",
+            "vous": "regardez",
+            "ils/elles": "regardent",
+        }
+    },
+    "écouter": {
+        "présent": {
+            "je": "écoute",
+            "tu": "écoutes",
+            "il/elle": "écoute",
+            "nous": "écoutons",
+            "vous": "écoutez",
+            "ils/elles": "écoutent",
+        }
+    },
+    "étudier": {
+        "présent": {
+            "je": "étudie",
+            "tu": "étudies",
+            "il/elle": "étudie",
+            "nous": "étudions",
+            "vous": "étudiez",
+            "ils/elles": "étudient",
+        }
+    },
+    "chercher": {
+        "présent": {
+            "je": "cherche",
+            "tu": "cherches",
+            "il/elle": "cherche",
+            "nous": "cherchons",
+            "vous": "cherchez",
+            "ils/elles": "cherchent",
+        }
+    },
+    "donner": {
+        "présent": {
+            "je": "donne",
+            "tu": "donnes",
+            "il/elle": "donne",
+            "nous": "donnons",
+            "vous": "donnez",
+            "ils/elles": "donnent",
+        }
+    },
+    "demander": {
+        "présent": {
+            "je": "demande",
+            "tu": "demandes",
+            "il/elle": "demande",
+            "nous": "demandons",
+            "vous": "demandez",
+            "ils/elles": "demandent",
+        }
+    },
+    "réussir": {
+        "présent": {
+            "je": "réussis",
+            "tu": "réussis",
+            "il/elle": "réussit",
+            "nous": "réussissons",
+            "vous": "réussissez",
+            "ils/elles": "réussissent",
+        }
+    },
+    "remplir": {
+        "présent": {
+            "je": "remplis",
+            "tu": "remplis",
+            "il/elle": "remplit",
+            "nous": "remplissons",
+            "vous": "remplissez",
+            "ils/elles": "remplissent",
+        }
+    },
+    "grandir": {
+        "présent": {
+            "je": "grandis",
+            "tu": "grandis",
+            "il/elle": "grandit",
+            "nous": "grandissons",
+            "vous": "grandissez",
+            "ils/elles": "grandissent",
+        }
+    },
     "parler": {
         "présent": {
             "je": "parle",
