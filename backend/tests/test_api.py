@@ -917,3 +917,116 @@ def test_verb_metadata_patterns_valid():
     }
     for verb, meta in VERB_METADATA.items():
         assert meta["pattern"] in valid, f"{verb}: invalid pattern"
+
+
+# --- level / pattern filter tests ---
+
+
+def test_next_question_level_basic():
+    basic_verbs = {v for v, m in VERB_METADATA.items() if m["level"] == "basic"}
+    for _ in range(20):
+        res = client.get("/api/questions/next?level=basic")
+        assert res.status_code == 200
+        assert res.json()["verb"] in basic_verbs
+
+
+def test_next_question_level_standard():
+    standard_verbs = {v for v, m in VERB_METADATA.items() if m["level"] == "standard"}
+    for _ in range(20):
+        res = client.get("/api/questions/next?level=standard")
+        assert res.status_code == 200
+        assert res.json()["verb"] in standard_verbs
+
+
+def test_next_question_pattern_regular():
+    regular_verbs = {v for v, m in VERB_METADATA.items() if m["pattern"] == "regular"}
+    for _ in range(20):
+        res = client.get("/api/questions/next?pattern=regular")
+        assert res.status_code == 200
+        assert res.json()["verb"] in regular_verbs
+
+
+def test_next_question_pattern_irregular():
+    irregular_verbs = {
+        v for v, m in VERB_METADATA.items() if m["pattern"] == "irregular"
+    }
+    for _ in range(20):
+        res = client.get("/api/questions/next?pattern=irregular")
+        assert res.status_code == 200
+        assert res.json()["verb"] in irregular_verbs
+
+
+def test_next_question_pattern_stem_change():
+    stem_verbs = {v for v, m in VERB_METADATA.items() if m["pattern"] == "stem_change"}
+    for _ in range(20):
+        res = client.get("/api/questions/next?pattern=stem_change")
+        assert res.status_code == 200
+        assert res.json()["verb"] in stem_verbs
+
+
+def test_next_question_pattern_spelling_change():
+    spelling_verbs = {
+        v for v, m in VERB_METADATA.items() if m["pattern"] == "spelling_change"
+    }
+    for _ in range(20):
+        res = client.get("/api/questions/next?pattern=spelling_change")
+        assert res.status_code == 200
+        assert res.json()["verb"] in spelling_verbs
+
+
+def test_next_question_group_and_level():
+    er_basic = {
+        v
+        for v, g in VERB_GROUPS.items()
+        if g == "er" and VERB_METADATA.get(v, {}).get("level") == "basic"
+    }
+    for _ in range(20):
+        res = client.get("/api/questions/next?group=er&level=basic")
+        assert res.status_code == 200
+        assert res.json()["verb"] in er_basic
+
+
+def test_next_question_group_and_pattern():
+    er_spelling = {
+        v
+        for v, g in VERB_GROUPS.items()
+        if g == "er" and VERB_METADATA.get(v, {}).get("pattern") == "spelling_change"
+    }
+    for _ in range(20):
+        res = client.get("/api/questions/next?group=er&pattern=spelling_change")
+        assert res.status_code == 200
+        assert res.json()["verb"] in er_spelling
+
+
+def test_next_question_level_and_pattern():
+    basic_irregular = {
+        v
+        for v, m in VERB_METADATA.items()
+        if m["level"] == "basic" and m["pattern"] == "irregular"
+    }
+    for _ in range(20):
+        res = client.get("/api/questions/next?level=basic&pattern=irregular")
+        assert res.status_code == 200
+        assert res.json()["verb"] in basic_irregular
+
+
+def test_next_question_invalid_level_returns_422():
+    res = client.get("/api/questions/next?level=beginner")
+    assert res.status_code == 422
+
+
+def test_next_question_invalid_pattern_returns_422():
+    res = client.get("/api/questions/next?pattern=unknown")
+    assert res.status_code == 422
+
+
+def test_next_question_no_match_returns_404():
+    # ir グループに spelling_change パターンの動詞は存在しない
+    res = client.get("/api/questions/next?group=ir&pattern=spelling_change")
+    assert res.status_code == 404
+
+
+def test_next_question_level_challenge_no_match_returns_404():
+    # challenge レベルの動詞は現在データに存在しない
+    res = client.get("/api/questions/next?level=challenge")
+    assert res.status_code == 404

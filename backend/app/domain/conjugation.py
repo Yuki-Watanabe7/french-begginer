@@ -3,6 +3,8 @@ from typing import Literal, TypedDict
 from pydantic import BaseModel
 
 VerbGroup = Literal["all", "er", "ir", "irregular"]
+VerbLevel = Literal["basic", "standard", "challenge"]
+VerbPattern = Literal["regular", "stem_change", "spelling_change", "irregular"]
 
 # How to add a new verb:
 # 1. Add the verb and its group to VERB_GROUPS (er/ir/irregular)
