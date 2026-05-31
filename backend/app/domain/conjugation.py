@@ -45,6 +45,13 @@ VERB_METADATA: dict[str, VerbMeta] = {
     "vouloir": {"level": "basic", "pattern": "irregular"},
     "devoir": {"level": "basic", "pattern": "irregular"},
     "savoir": {"level": "basic", "pattern": "irregular"},
+    "commencer": {"level": "standard", "pattern": "spelling_change"},
+    "manger": {"level": "standard", "pattern": "spelling_change"},
+    "acheter": {"level": "standard", "pattern": "stem_change"},
+    "appeler": {"level": "standard", "pattern": "stem_change"},
+    "préférer": {"level": "standard", "pattern": "stem_change"},
+    "espérer": {"level": "standard", "pattern": "stem_change"},
+    "envoyer": {"level": "standard", "pattern": "stem_change"},
 }
 
 VERB_GROUPS: dict[str, Literal["er", "ir", "irregular"]] = {
@@ -73,6 +80,13 @@ VERB_GROUPS: dict[str, Literal["er", "ir", "irregular"]] = {
     "vouloir": "irregular",
     "devoir": "irregular",
     "savoir": "irregular",
+    "commencer": "er",
+    "manger": "er",
+    "acheter": "er",
+    "appeler": "er",
+    "préférer": "er",
+    "espérer": "er",
+    "envoyer": "er",
 }
 
 CONJUGATIONS: dict[str, dict[str, dict[str, str]]] = {
@@ -324,6 +338,76 @@ CONJUGATIONS: dict[str, dict[str, dict[str, str]]] = {
             "nous": "savons",
             "vous": "savez",
             "ils/elles": "savent",
+        }
+    },
+    "commencer": {
+        "présent": {
+            "je": "commence",
+            "tu": "commences",
+            "il/elle": "commence",
+            "nous": "commençons",
+            "vous": "commencez",
+            "ils/elles": "commencent",
+        }
+    },
+    "manger": {
+        "présent": {
+            "je": "mange",
+            "tu": "manges",
+            "il/elle": "mange",
+            "nous": "mangeons",
+            "vous": "mangez",
+            "ils/elles": "mangent",
+        }
+    },
+    "acheter": {
+        "présent": {
+            "je": "achète",
+            "tu": "achètes",
+            "il/elle": "achète",
+            "nous": "achetons",
+            "vous": "achetez",
+            "ils/elles": "achètent",
+        }
+    },
+    "appeler": {
+        "présent": {
+            "je": "appelle",
+            "tu": "appelles",
+            "il/elle": "appelle",
+            "nous": "appelons",
+            "vous": "appelez",
+            "ils/elles": "appellent",
+        }
+    },
+    "préférer": {
+        "présent": {
+            "je": "préfère",
+            "tu": "préfères",
+            "il/elle": "préfère",
+            "nous": "préférons",
+            "vous": "préférez",
+            "ils/elles": "préfèrent",
+        }
+    },
+    "espérer": {
+        "présent": {
+            "je": "espère",
+            "tu": "espères",
+            "il/elle": "espère",
+            "nous": "espérons",
+            "vous": "espérez",
+            "ils/elles": "espèrent",
+        }
+    },
+    "envoyer": {
+        "présent": {
+            "je": "envoie",
+            "tu": "envoies",
+            "il/elle": "envoie",
+            "nous": "envoyons",
+            "vous": "envoyez",
+            "ils/elles": "envoient",
         }
     },
 }
