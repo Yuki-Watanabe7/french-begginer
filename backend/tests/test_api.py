@@ -139,6 +139,144 @@ def test_grandir_conjugation():
         assert res.json()["correct"] is True, f"grandir/{pronoun}: expected {expected}"
 
 
+def test_venir_conjugation():
+    cases = [
+        ("je", "viens"),
+        ("tu", "viens"),
+        ("il/elle", "vient"),
+        ("nous", "venons"),
+        ("vous", "venez"),
+        ("ils/elles", "viennent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "venir",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"venir/{pronoun}: expected {expected}"
+
+
+def test_prendre_conjugation():
+    cases = [
+        ("je", "prends"),
+        ("tu", "prends"),
+        ("il/elle", "prend"),
+        ("nous", "prenons"),
+        ("vous", "prenez"),
+        ("ils/elles", "prennent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "prendre",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"prendre/{pronoun}: expected {expected}"
+
+
+def test_pouvoir_conjugation():
+    cases = [
+        ("je", "peux"),
+        ("tu", "peux"),
+        ("il/elle", "peut"),
+        ("nous", "pouvons"),
+        ("vous", "pouvez"),
+        ("ils/elles", "peuvent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "pouvoir",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"pouvoir/{pronoun}: expected {expected}"
+
+
+def test_vouloir_conjugation():
+    cases = [
+        ("je", "veux"),
+        ("tu", "veux"),
+        ("il/elle", "veut"),
+        ("nous", "voulons"),
+        ("vous", "voulez"),
+        ("ils/elles", "veulent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "vouloir",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"vouloir/{pronoun}: expected {expected}"
+
+
+def test_devoir_conjugation():
+    cases = [
+        ("je", "dois"),
+        ("tu", "dois"),
+        ("il/elle", "doit"),
+        ("nous", "devons"),
+        ("vous", "devez"),
+        ("ils/elles", "doivent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "devoir",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"devoir/{pronoun}: expected {expected}"
+
+
+def test_savoir_conjugation():
+    cases = [
+        ("je", "sais"),
+        ("tu", "sais"),
+        ("il/elle", "sait"),
+        ("nous", "savons"),
+        ("vous", "savez"),
+        ("ils/elles", "savent"),
+    ]
+    for pronoun, expected in cases:
+        res = client.post(
+            "/api/answers/check",
+            json={
+                "verb": "savoir",
+                "tense": "présent",
+                "pronoun": pronoun,
+                "answer": expected,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["correct"] is True, f"savoir/{pronoun}: expected {expected}"
+
+
 def test_verb_groups_conjugations_match():
     assert set(VERB_GROUPS) == set(CONJUGATIONS)
 
