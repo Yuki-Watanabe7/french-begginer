@@ -44,6 +44,45 @@ backend/app/
 - **domain層**: 活用データと判定ロジック。フレームワーク非依存。テストが書きやすい。
 - **service層**: ユースケース実装。domain層を組み合わせてビジネスフローを実現。
 
+## 動詞データ管理方針
+
+動詞データは `backend/app/domain/conjugation.py` の3つの辞書で管理する。
+
+| 辞書 | 役割 |
+|------|------|
+| `VERB_GROUPS` | 動詞グループ（`er` / `ir` / `irregular`）。APIの `?group=` フィルタに使用 |
+| `CONJUGATIONS` | 全動詞の活用形データ（時制 → 主語 → 活用形） |
+| `VERB_METADATA` | 分類メタデータ（`level` / `pattern`）。出題制御・苦手再出題への活用を想定 |
+
+### 分類メタデータ仕様
+
+**level**（頻出度・難易度）
+
+| 値 | 意味 |
+|----|------|
+| `basic` | 最重要・初学者必須 |
+| `standard` | 標準レベル |
+| `challenge` | 応用・発展 |
+
+**pattern**（活用パターン）
+
+| 値 | 意味 |
+|----|------|
+| `regular` | 規則活用 |
+| `stem_change` | 語幹変化あり |
+| `spelling_change` | 綴り変化あり（発音保持目的） |
+| `irregular` | 不規則活用 |
+
+### 動詞を追加する際のルール
+
+1. `VERB_GROUPS` にグループ（`er`/`ir`/`irregular`）を追加する
+2. `CONJUGATIONS` に全6主語の直説法現在形を追加する
+3. `VERB_METADATA` に `level` と `pattern` を追加する
+4. `tests/test_api.py` に代表的なテストを1件以上追加する
+
+> UIや学習モードを増やす前に、既存モードで自然に練習できるか確認すること。
+> 新しい時制や例文の追加は別Issueで扱う。
+
 ## 将来的なDB拡張方針
 
 現在は活用データをコード内辞書で保持しています。DB導入時の方針:

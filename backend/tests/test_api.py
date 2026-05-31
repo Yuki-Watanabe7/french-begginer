@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.domain.conjugation import VERB_GROUPS
+from app.domain.conjugation import CONJUGATIONS, VERB_GROUPS, VERB_METADATA
 from app.main import app
 
 client = TestClient(app)
@@ -91,3 +91,28 @@ def test_check_answer_whitespace_trimmed():
     )
     assert res.status_code == 200
     assert res.json()["correct"] is True
+
+
+def test_verb_groups_conjugations_match():
+    assert set(VERB_GROUPS) == set(CONJUGATIONS)
+
+
+def test_verb_metadata_keys_match_groups():
+    assert set(VERB_METADATA) == set(VERB_GROUPS)
+
+
+def test_verb_metadata_levels_valid():
+    valid = {"basic", "standard", "challenge"}
+    for verb, meta in VERB_METADATA.items():
+        assert meta["level"] in valid, f"{verb}: invalid level"
+
+
+def test_verb_metadata_patterns_valid():
+    valid = {
+        "regular",
+        "stem_change",
+        "spelling_change",
+        "irregular",
+    }
+    for verb, meta in VERB_METADATA.items():
+        assert meta["pattern"] in valid, f"{verb}: invalid pattern"
