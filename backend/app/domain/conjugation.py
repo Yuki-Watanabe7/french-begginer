@@ -38,7 +38,13 @@ VERB_METADATA: dict[str, VerbMeta] = {
     "être": {"level": "basic", "pattern": "irregular"},
     "avoir": {"level": "basic", "pattern": "irregular"},
     "aller": {"level": "basic", "pattern": "irregular"},
-    "faire": {"level": "standard", "pattern": "irregular"},
+    "faire": {"level": "basic", "pattern": "irregular"},
+    "venir": {"level": "basic", "pattern": "irregular"},
+    "prendre": {"level": "basic", "pattern": "irregular"},
+    "pouvoir": {"level": "basic", "pattern": "irregular"},
+    "vouloir": {"level": "basic", "pattern": "irregular"},
+    "devoir": {"level": "basic", "pattern": "irregular"},
+    "savoir": {"level": "basic", "pattern": "irregular"},
 }
 
 VERB_GROUPS: dict[str, Literal["er", "ir", "irregular"]] = {
@@ -61,6 +67,12 @@ VERB_GROUPS: dict[str, Literal["er", "ir", "irregular"]] = {
     "avoir": "irregular",
     "aller": "irregular",
     "faire": "irregular",
+    "venir": "irregular",
+    "prendre": "irregular",
+    "pouvoir": "irregular",
+    "vouloir": "irregular",
+    "devoir": "irregular",
+    "savoir": "irregular",
 }
 
 CONJUGATIONS: dict[str, dict[str, dict[str, str]]] = {
@@ -252,6 +264,66 @@ CONJUGATIONS: dict[str, dict[str, dict[str, str]]] = {
             "nous": "faisons",
             "vous": "faites",
             "ils/elles": "font",
+        }
+    },
+    "venir": {
+        "présent": {
+            "je": "viens",
+            "tu": "viens",
+            "il/elle": "vient",
+            "nous": "venons",
+            "vous": "venez",
+            "ils/elles": "viennent",
+        }
+    },
+    "prendre": {
+        "présent": {
+            "je": "prends",
+            "tu": "prends",
+            "il/elle": "prend",
+            "nous": "prenons",
+            "vous": "prenez",
+            "ils/elles": "prennent",
+        }
+    },
+    "pouvoir": {
+        "présent": {
+            "je": "peux",
+            "tu": "peux",
+            "il/elle": "peut",
+            "nous": "pouvons",
+            "vous": "pouvez",
+            "ils/elles": "peuvent",
+        }
+    },
+    "vouloir": {
+        "présent": {
+            "je": "veux",
+            "tu": "veux",
+            "il/elle": "veut",
+            "nous": "voulons",
+            "vous": "voulez",
+            "ils/elles": "veulent",
+        }
+    },
+    "devoir": {
+        "présent": {
+            "je": "dois",
+            "tu": "dois",
+            "il/elle": "doit",
+            "nous": "devons",
+            "vous": "devez",
+            "ils/elles": "doivent",
+        }
+    },
+    "savoir": {
+        "présent": {
+            "je": "sais",
+            "tu": "sais",
+            "il/elle": "sait",
+            "nous": "savons",
+            "vous": "savez",
+            "ils/elles": "savent",
         }
     },
 }
