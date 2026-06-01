@@ -24,8 +24,24 @@ SQLite (初期) → PostgreSQL (将来)
 | Method | Path | 説明 |
 |--------|------|------|
 | GET | `/health` | ヘルスチェック |
-| GET | `/api/questions/next` | 次の問題を返す（ランダム選択） |
+| GET | `/api/questions/next` | 次の問題を返す。クエリパラメータで絞り込み可能（下表参照） |
 | POST | `/api/answers/check` | 回答の正誤判定 |
+
+### GET /api/questions/next クエリパラメータ
+
+| パラメータ | 型 | デフォルト | 説明 |
+|------------|-----|------------|------|
+| `group` | `all` \| `er` \| `ir` \| `irregular` | `all` | 動詞グループで絞り込み |
+| `level` | `basic` \| `standard` \| `challenge` | （指定なし） | 難易度で絞り込み |
+| `pattern` | `regular` \| `stem_change` \| `spelling_change` \| `irregular` | （指定なし） | 活用パターンで絞り込み |
+
+複数パラメータを同時指定した場合はAND条件で絞り込まれる。
+不正な値を指定した場合は `422 Unprocessable Entity`、条件に一致する動詞が存在しない場合は `404 Not Found` を返す。
+
+例:
+- `/api/questions/next?level=basic`
+- `/api/questions/next?pattern=stem_change`
+- `/api/questions/next?group=er&pattern=spelling_change`
 
 ## Backend 責務分担
 
@@ -52,7 +68,7 @@ backend/app/
 |------|------|
 | `VERB_GROUPS` | 動詞グループ（`er` / `ir` / `irregular`）。APIの `?group=` フィルタに使用 |
 | `CONJUGATIONS` | 全動詞の活用形データ（時制 → 主語 → 活用形） |
-| `VERB_METADATA` | 分類メタデータ（`level` / `pattern`）。出題制御・苦手再出題への活用を想定 |
+| `VERB_METADATA` | 分類メタデータ（`level` / `pattern`）。APIの `?level=` / `?pattern=` フィルタに使用 |
 
 ### 分類メタデータ仕様
 
