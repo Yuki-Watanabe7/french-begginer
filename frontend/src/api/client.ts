@@ -1,4 +1,4 @@
-import type { AnswerResult, NounGender, NounGenderAnswerResult, NounGenderQuestion, Question, VerbGroup } from '../types'
+import type { AnswerResult, NounFilter, NounGender, NounGenderAnswerResult, NounGenderQuestion, Question, VerbGroup } from '../types'
 
 const BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -27,8 +27,12 @@ export async function checkAnswer(
   )
 }
 
-export async function fetchNextNounQuestion(): Promise<NounGenderQuestion> {
-  return json(await fetch(`${BASE}/api/nouns/next`))
+export async function fetchNextNounQuestion(filter?: NounFilter): Promise<NounGenderQuestion> {
+  const params = new URLSearchParams()
+  if (filter?.level) params.set('level', filter.level)
+  if (filter?.category) params.set('category', filter.category)
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  return json(await fetch(`${BASE}/api/nouns/next${query}`))
 }
 
 export async function checkNounAnswer(noun: string, answer: NounGender): Promise<NounGenderAnswerResult> {
