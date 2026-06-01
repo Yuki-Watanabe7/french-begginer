@@ -1,3 +1,4 @@
+import { useTTS } from '../hooks/useTTS'
 import type { NounGender, NounGenderAnswerResult, NounGenderQuestion } from '../types'
 
 interface Props {
@@ -36,6 +37,8 @@ export function NounGenderCard({
   nextLabel,
 }: Props) {
   const answered = !!result
+  const { play, isLoading: ttsLoading } = useTTS()
+  const ttsText = `${question.article_indefinite} ${question.noun}`
 
   return (
     <div style={styles.card}>
@@ -49,7 +52,18 @@ export function NounGenderCard({
       </div>
 
       <div style={styles.nounRow}>
-        <span style={styles.noun}>{question.noun}</span>
+        <div style={styles.nounWithTts}>
+          <span style={styles.noun}>{question.noun}</span>
+          <button
+            style={styles.ttsBtn}
+            onClick={() => play(ttsText)}
+            disabled={ttsLoading}
+            aria-label={`${ttsText}を読み上げる`}
+            title={ttsText}
+          >
+            {ttsLoading ? '…' : '🔊'}
+          </button>
+        </div>
         {question.meaning_ja && (
           <span style={styles.meaning}>{question.meaning_ja}</span>
         )}
@@ -136,11 +150,30 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     textAlign: 'center',
   },
+  nounWithTts: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+  },
   noun: {
     fontSize: 44,
     fontWeight: 700,
     color: '#1a1a2e',
     letterSpacing: 2,
+  },
+  ttsBtn: {
+    background: 'none',
+    border: '1.5px solid #c0c8d8',
+    borderRadius: 8,
+    padding: '4px 8px',
+    fontSize: 20,
+    cursor: 'pointer',
+    color: '#555',
+    lineHeight: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   meaning: {
     fontSize: 16,

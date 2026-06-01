@@ -126,6 +126,7 @@ export function useNounQuiz() {
           const wrong: NounWrongAnswer = {
             noun: question.noun,
             meaning_ja: question.meaning_ja,
+            article_indefinite: question.article_indefinite,
             correctGender: result.expected,
             userAnswer: answer,
           }
@@ -167,6 +168,7 @@ export function useNounQuiz() {
         const queue: NounGenderQuestion[] = wrongAnswers.map(w => ({
           noun: w.noun,
           meaning_ja: w.meaning_ja,
+          article_indefinite: w.article_indefinite,
         }))
         const [first, ...rest] = queue
         setState(s => ({
