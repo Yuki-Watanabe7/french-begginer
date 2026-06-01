@@ -1,8 +1,116 @@
-# TTS API 技術検証メモ
+# TTS（テキスト読み上げ）機能 設定・運用ガイド
 
-issue #77 の技術検証として実施した内容の記録。
+## 概要
 
-## 選定したTTS API
+TTS（Text-to-Speech）機能は OpenAI TTS API を使用してフランス語テキストを音声化する。
+`/api/tts/speak` エンドポイントが `audio/mpeg` バイナリを返し、フロントエンドで再生できる。
+
+> **重要**: TTS機能を使うためには `OPENAI_API_KEY` の設定が必要。
+> ただし、動詞活用・名詞クイズなどの基本機能は **APIキーなしで利用可能**。
+
+## 環境変数
+
+| 変数名 | 必須 | 説明 |
+|--------|------|------|
+| `OPENAI_API_KEY` | TTS機能使用時のみ | OpenAI APIキー（`sk-...` 形式）。取得先: [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+
+## APIキー未設定時の挙動
+
+| 状況 | HTTPステータス | レスポンス例 |
+|------|---------------|-------------|
+| APIキー未設定 | 503 | `{"detail": "TTS service unavailable: OPENAI_API_KEY is not set"}` |
+| APIキーが無効 | 503 | `{"detail": "TTS service unavailable: OPENAI_API_KEY is invalid"}` |
+| テキストが空 | 400 | `{"detail": "Text must not be empty"}` |
+| テキストが500文字超 | 400 | `{"detail": "Text is too long (max 500 characters)"}` |
+| OpenAI API接続失敗 | 502 | `{"detail": "TTS API call failed: ..."}` |
+
+`OPENAI_API_KEY` 未設定の状態で `/api/tts/speak` を呼んでも、
+`/api/questions/next` や `/api/nouns/next` など他のエンドポイントへの影響はない。
+
+## ローカル開発環境での設定方法
+
+### Docker Compose を使う場合（推奨）
+
+ホストのシェル環境変数に `OPENAI_API_KEY` を設定すると、
+docker-compose.yml のパススルー設定を通じてバックエンドコンテナに自動的に渡る。
+
+```bash
+export OPENAI_API_KEY=sk-xxxxxxxxxxxx
+docker compose up
+```
+
+または、`.env.example` を参考に `backend/.env` ファイルを作成する方法もある（`.gitignore` 済み）:
+
+```bash
+cp .env.example backend/.env
+# backend/.env の OPENAI_API_KEY= の値を実際のキーに書き換える
+```
+
+### Docker を使わずに backend を直接起動する場合
+
+```bash
+cd backend
+OPENAI_API_KEY=sk-xxxxxxxxxxxx uv run uvicorn app.main:app --reload --port 8000
+```
+
+### 動作確認用コマンド
+
+```bash
+# サーバー起動後に音声ファイルを取得して再生確認
+curl "http://localhost:8000/api/tts/speak?text=un%20livre" -o test.mp3
+
+# APIキー未設定の場合は 503 が返ることを確認
+curl -v "http://localhost:8000/api/tts/speak?text=un%20livre"
+# → HTTP/1.1 503 Service Unavailable
+```
+
+## GitHub Codespaces での設定方法
+
+GitHub Codespaces でTTS機能を有効にするには、リポジトリのシークレットを設定する:
+
+1. GitHub リポジトリページで **Settings → Secrets and variables → Codespaces** を開く
+2. **New repository secret** をクリック
+3. Name: `OPENAI_API_KEY`、Value: APIキーを入力して保存
+4. Codespace を再起動（または新しく作成）すると自動的に環境変数として注入される
+
+シークレットを設定しない場合でも、基本機能（動詞活用・名詞クイズ）は通常通り使用できる。
+
+## CIでのTTS取り扱い方針
+
+**CIでは実際のOpenAI APIを呼び出さない。**
+
+- `tests/test_tts.py` のTTS APIコールはすべて `unittest.mock.patch` でモック化
+- `OPENAI_API_KEY` がなくても `bash scripts/quality-check.sh` が通る状態を維持する
+- APIキー未設定時の503エラー等は、モックなしで実際のコードパスをテスト
+
+これにより:
+- CI に `OPENAI_API_KEY` のシークレット設定は不要
+- OpenAIアカウントなしでテストを実行可能
+- 実際のAPI呼び出しによる課金・レート制限なしでテスト可能
+
+## コミット禁止事項
+
+以下はリポジトリにコミットしないこと（`.gitignore` で除外済み）:
+
+| 対象 | パス | 理由 |
+|------|------|------|
+| APIキー | `.env`, `backend/.env` | 秘密情報の漏洩防止 |
+| TTS音声キャッシュ | `backend/.cache/` | バイナリファイルによるリポジトリ肥大化防止 |
+
+## TTS音声キャッシュについて
+
+生成した音声は `backend/.cache/tts/` にファイルとしてキャッシュされる。
+キャッシュが存在すれば、`OPENAI_API_KEY` なしでも音声を返すことができる。
+
+- **キャッシュキー形式**: `tts_openai_tts-1_alloy_{text_sha256}.mp3`
+- **TTL**: 設定なし（手動削除まで保持）
+- **用途**: 開発中の繰り返しリクエストによるAPIコスト削減
+
+---
+
+## 技術情報（issue #77 検証記録）
+
+### 選定したTTS API
 
 **OpenAI TTS API**
 
@@ -14,32 +122,17 @@ issue #77 の技術検証として実施した内容の記録。
 
 モデル・ボイス: `tts-1` / `alloy`（ニュートラルな声質）
 
-## 実装した内容
+### 実装ファイル
 
 | ファイル | 役割 |
 |----------|------|
 | `backend/app/services/tts_service.py` | TTS API呼び出しロジック。`generate_tts_audio(text) -> bytes` |
+| `backend/app/services/tts_cache_service.py` | ファイルシステムキャッシュ。`backend/.cache/tts/` に音声を保存 |
 | `backend/app/api/tts.py` | `/api/tts/speak?text=...` エンドポイント |
+| `backend/tests/test_tts.py` | TTS APIのモックテスト（CI用） |
 | `.env.example` | 必要な環境変数の説明 |
 
-### 動作確認用コマンド
-
-```bash
-# サーバー起動
-cd backend
-uv run uvicorn app.main:app --reload --port 8000
-
-# 音声ファイルを取得して再生確認
-curl "http://localhost:8000/api/tts/speak?text=un%20livre" -o test.mp3
-
-# 動作確認テキスト例
-curl "http://localhost:8000/api/tts/speak?text=une%20maison" -o test.mp3
-curl "http://localhost:8000/api/tts/speak?text=l%27%C3%A9cole" -o test.mp3
-```
-
-## レスポンス形式の考察
-
-### 採用: audio/mpeg バイナリを直接返す方式
+### レスポンス形式
 
 ```
 GET /api/tts/speak?text=un+livre
@@ -47,18 +140,9 @@ GET /api/tts/speak?text=un+livre
 → バイナリストリーム
 ```
 
-**採用理由:**
-- 一時ファイルやURLを返す方式と比べて実装がシンプル
-- クライアント側でURL管理が不要
-- `StreamingResponse` でメモリ効率よく返せる
+### フロントエンドでの再生方式
 
-**トレードオフ:**
-- キャッシュはサーバー側で対応が必要（後続issueで実装）
-- CDN配信する場合はURL方式に切り替えが必要
-
-## フロントエンドでの再生方式
-
-### 方式1: `<audio>` 要素に src を直接指定
+#### 方式1: `<audio>` 要素に src を直接指定
 
 ```tsx
 <audio
@@ -68,12 +152,7 @@ GET /api/tts/speak?text=un+livre
 />
 ```
 
-**特徴:**
-- 実装が最もシンプル
-- ブラウザがネイティブにストリーミング再生
-- ボタン連打でリクエストが重複する可能性あり
-
-### 方式2: Blob URL を生成して再生（推奨）
+#### 方式2: Blob URL を生成して再生（推奨）
 
 ```ts
 async function playTts(text: string): Promise<void> {
@@ -87,45 +166,10 @@ async function playTts(text: string): Promise<void> {
 }
 ```
 
-**特徴:**
-- 再生開始前に全データを受信するため、安定した再生が可能
-- ローディング状態の制御がしやすい
-- `URL.revokeObjectURL` で確実にメモリ解放できる
-- ボタン連打防止の制御を追加しやすい
-
 **推奨**: 名詞問題画面への本格統合時は **Blob URL 方式** を採用する。
-理由: ローディング状態の管理とメモリ解放が明示的に行え、UXの制御がしやすい。
+ローディング状態の管理とメモリ解放が明示的に行え、UXの制御がしやすい。
 
-## エラー時の挙動
-
-| 状況 | HTTPステータス | レスポンス例 |
-|------|---------------|-------------|
-| APIキー未設定 | 503 | `{"detail": "TTS service unavailable: OPENAI_API_KEY is not set"}` |
-| APIキーが無効 | 503 | `{"detail": "TTS service unavailable: OPENAI_API_KEY is invalid"}` |
-| テキストが空 | 400 | `{"detail": "Text must not be empty"}` |
-| テキストが500文字超 | 400 | `{"detail": "Text is too long (max 500 characters)"}` |
-| OpenAI API接続失敗 | 502 | `{"detail": "TTS API call failed: ..."}` |
-
-フロントエンドでは、503の場合はユーザーへの通知なしにボタンを非表示にする対応が想定される。
-502の場合はリトライ可能なエラーとして扱う。
-
-## キャッシュキー案
-
-後続issueでキャッシュを実装する際のキー設計案:
-
-```python
-import hashlib
-
-# キャッシュキー形式
-# tts:{provider}:{model}:{voice}:{text_hash}
-key = f"tts:openai:tts-1:alloy:{hashlib.sha256(text.encode()).hexdigest()}"
-
-# TTL候補: 7日（フランス語の発音は変わらないため長期キャッシュ可）
-# ストレージ候補: Redis（将来的にDB拡張と同タイミングで導入）
-# または: ファイルシステムキャッシュ（シンプルだが水平スケールに不向き）
-```
-
-## 後続issue実装時の注意点
+### 後続issue実装時の注意点
 
 - 名詞問題画面への音声再生ボタン追加: `NounArticleCard` か `NounGenderCard` にボタンを追加する想定
 - テキストは冠詞付き名詞（例: `un livre`, `l'école`）を渡すと自然な発音になる
