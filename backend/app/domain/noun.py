@@ -511,6 +511,63 @@ NOUNS: dict[str, NounData] = {
         "article_definite": "le",
         "plural": "soirs",
     },
+    # person (additional)
+    "fils": {
+        "gender": "masculine",
+        "meaning_ja": "息子",
+        "level": "basic",
+        "category": "person",
+        "article_indefinite": "un",
+        "article_definite": "le",
+        "plural": "fils",
+    },
+    "fille": {
+        "gender": "feminine",
+        "meaning_ja": "娘・女の子",
+        "level": "basic",
+        "category": "person",
+        "article_indefinite": "une",
+        "article_definite": "la",
+        "plural": "filles",
+    },
+    # nature (additional animals)
+    "oiseau": {
+        "gender": "masculine",
+        "meaning_ja": "鳥",
+        "level": "basic",
+        "category": "nature",
+        "article_indefinite": "un",
+        "article_definite": "l'",
+        "plural": "oiseaux",
+    },
+    "lapin": {
+        "gender": "masculine",
+        "meaning_ja": "うさぎ",
+        "level": "basic",
+        "category": "nature",
+        "article_indefinite": "un",
+        "article_definite": "le",
+        "plural": "lapins",
+    },
+    "montagne": {
+        "gender": "feminine",
+        "meaning_ja": "山",
+        "level": "basic",
+        "category": "nature",
+        "article_indefinite": "une",
+        "article_definite": "la",
+        "plural": "montagnes",
+    },
+    # food (additional)
+    "vin": {
+        "gender": "masculine",
+        "meaning_ja": "ワイン",
+        "level": "basic",
+        "category": "food",
+        "article_indefinite": "un",
+        "article_definite": "le",
+        "plural": "vins",
+    },
     # school
     "classe": {
         "gender": "feminine",
