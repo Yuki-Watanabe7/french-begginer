@@ -1,4 +1,4 @@
-import type { AnswerResult, Question, VerbGroup } from '../types'
+import type { AnswerResult, NounGender, NounGenderAnswerResult, NounGenderQuestion, Question, VerbGroup } from '../types'
 
 const BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -23,6 +23,20 @@ export async function checkAnswer(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ verb, tense, pronoun, answer }),
+    }),
+  )
+}
+
+export async function fetchNextNounQuestion(): Promise<NounGenderQuestion> {
+  return json(await fetch(`${BASE}/api/nouns/next`))
+}
+
+export async function checkNounAnswer(noun: string, answer: NounGender): Promise<NounGenderAnswerResult> {
+  return json(
+    await fetch(`${BASE}/api/nouns/check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noun, answer }),
     }),
   )
 }

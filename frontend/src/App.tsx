@@ -1,13 +1,49 @@
+import { useState } from 'react'
+import { ModeSelector } from './components/ModeSelector'
+import { NounGenderCard } from './components/NounGenderCard'
+import { NounSessionResult } from './components/NounSessionResult'
 import { QuizCard } from './components/QuizCard'
 import { QuizSettings } from './components/QuizSettings'
 import { SessionResult } from './components/SessionResult'
 import { VerbGroupSelector } from './components/VerbGroupSelector'
+import { useNounQuiz } from './hooks/useNounQuiz'
 import { useQuiz } from './hooks/useQuiz'
 
-export default function App() {
-  const { state, inputRef, submit, setInput, nextQuestion, selectGroup, startSession, startNewSession, backToSetup, retryLoad } = useQuiz()
+type AppMode = 'mode-select' | 'verb' | 'noun'
 
-  const nextLabel = (() => {
+export default function App() {
+  const [appMode, setAppMode] = useState<AppMode>('mode-select')
+  const verbQuiz = useQuiz()
+  const nounQuiz = useNounQuiz()
+
+  const handleSelectVerb = () => {
+    setAppMode('verb')
+  }
+
+  const handleSelectNoun = () => {
+    setAppMode('noun')
+  }
+
+  const handleBackToModeSelect = () => {
+    if (appMode === 'verb') verbQuiz.backToSetup()
+    if (appMode === 'noun') nounQuiz.backToSetup()
+    setAppMode('mode-select')
+  }
+
+  const verbNextLabel = (() => {
+    const { state } = verbQuiz
+    if (state.phase !== 'result') return '次の問題 →'
+    if (state.isReviewPhase) {
+      return state.reviewQueue.length === 0 ? '結果を見る →' : '次の問題 →'
+    }
+    if (state.questionNum >= state.sessionTotal) {
+      return state.wrongAnswers.length > 0 ? '復習へ →' : '結果を見る →'
+    }
+    return '次の問題 →'
+  })()
+
+  const nounNextLabel = (() => {
+    const { state } = nounQuiz
     if (state.phase !== 'result') return '次の問題 →'
     if (state.isReviewPhase) {
       return state.reviewQueue.length === 0 ? '結果を見る →' : '次の問題 →'
@@ -21,52 +57,101 @@ export default function App() {
   return (
     <div style={styles.root}>
       <header style={styles.header}>
-        <h1 style={styles.title}>🇫🇷 動詞活用練習</h1>
+        <h1 style={styles.title}>フランス語練習</h1>
       </header>
 
       <main style={styles.main}>
-        {state.phase === 'setup' && (
-          <VerbGroupSelector onSelect={selectGroup} />
+        {appMode === 'mode-select' && (
+          <ModeSelector onSelectVerb={handleSelectVerb} onSelectNoun={handleSelectNoun} />
         )}
 
-        {state.phase === 'quiz-settings' && (
-          <QuizSettings onStart={sessionSize => { void startSession(sessionSize) }} onBack={backToSetup} />
+        {/* 動詞活用練習 */}
+        {appMode === 'verb' && verbQuiz.state.phase === 'setup' && (
+          <VerbGroupSelector onSelect={verbQuiz.selectGroup} />
         )}
-
-        {state.phase === 'loading' && <p style={styles.msg}>読み込み中...</p>}
-
-        {state.phase === 'error' && (
+        {appMode === 'verb' && verbQuiz.state.phase === 'quiz-settings' && (
+          <QuizSettings
+            onStart={size => { void verbQuiz.startSession(size) }}
+            onBack={verbQuiz.backToSetup}
+          />
+        )}
+        {appMode === 'verb' && verbQuiz.state.phase === 'loading' && (
+          <p style={styles.msg}>読み込み中...</p>
+        )}
+        {appMode === 'verb' && verbQuiz.state.phase === 'error' && (
           <div style={styles.errorBox}>
-            <p>{state.error}</p>
-            <button style={styles.retryBtn} onClick={retryLoad}>再試行</button>
+            <p>{verbQuiz.state.error}</p>
+            <button style={styles.retryBtn} onClick={verbQuiz.retryLoad}>再試行</button>
           </div>
         )}
-
-        {(state.phase === 'answering' || state.phase === 'result') && state.question && (
-          <QuizCard
-            question={state.question}
-            input={state.input}
-            result={state.result}
-            inputRef={inputRef}
-            onInputChange={setInput}
-            onSubmit={submit}
-            onNext={() => { void nextQuestion() }}
-            questionNum={state.questionNum}
-            sessionTotal={state.sessionTotal}
-            isReviewPhase={state.isReviewPhase}
-            nextLabel={nextLabel}
+        {appMode === 'verb' &&
+          (verbQuiz.state.phase === 'answering' || verbQuiz.state.phase === 'result') &&
+          verbQuiz.state.question && (
+            <QuizCard
+              question={verbQuiz.state.question}
+              input={verbQuiz.state.input}
+              result={verbQuiz.state.result}
+              inputRef={verbQuiz.inputRef}
+              onInputChange={verbQuiz.setInput}
+              onSubmit={verbQuiz.submit}
+              onNext={() => { void verbQuiz.nextQuestion() }}
+              questionNum={verbQuiz.state.questionNum}
+              sessionTotal={verbQuiz.state.sessionTotal}
+              isReviewPhase={verbQuiz.state.isReviewPhase}
+              nextLabel={verbNextLabel}
+            />
+          )}
+        {appMode === 'verb' && verbQuiz.state.phase === 'session-result' && (
+          <SessionResult
+            firstCorrectCount={verbQuiz.state.firstCorrectCount}
+            reviewCorrectCount={verbQuiz.state.reviewCorrectCount}
+            unresolvedCount={Math.max(0, verbQuiz.state.wrongAnswers.length - verbQuiz.state.reviewCorrectCount)}
+            wrongAnswers={verbQuiz.state.wrongAnswers}
+            normalSessionTotal={verbQuiz.state.normalSessionTotal}
+            onRetry={() => { void verbQuiz.startNewSession() }}
+            onBackToSetup={handleBackToModeSelect}
           />
         )}
 
-        {state.phase === 'session-result' && (
-          <SessionResult
-            firstCorrectCount={state.firstCorrectCount}
-            reviewCorrectCount={state.reviewCorrectCount}
-            unresolvedCount={Math.max(0, state.wrongAnswers.length - state.reviewCorrectCount)}
-            wrongAnswers={state.wrongAnswers}
-            normalSessionTotal={state.normalSessionTotal}
-            onRetry={() => { void startNewSession() }}
-            onBackToSetup={backToSetup}
+        {/* 名詞の性クイズ */}
+        {appMode === 'noun' && nounQuiz.state.phase === 'quiz-settings' && (
+          <QuizSettings
+            onStart={size => { void nounQuiz.startSession(size) }}
+            onBack={handleBackToModeSelect}
+          />
+        )}
+        {appMode === 'noun' && nounQuiz.state.phase === 'loading' && (
+          <p style={styles.msg}>読み込み中...</p>
+        )}
+        {appMode === 'noun' && nounQuiz.state.phase === 'error' && (
+          <div style={styles.errorBox}>
+            <p>{nounQuiz.state.error}</p>
+            <button style={styles.retryBtn} onClick={nounQuiz.retryLoad}>再試行</button>
+          </div>
+        )}
+        {appMode === 'noun' &&
+          (nounQuiz.state.phase === 'answering' || nounQuiz.state.phase === 'result') &&
+          nounQuiz.state.question && (
+            <NounGenderCard
+              question={nounQuiz.state.question}
+              result={nounQuiz.state.result}
+              onAnswer={gender => { void nounQuiz.submit(gender) }}
+              onNext={() => { void nounQuiz.nextQuestion() }}
+              questionNum={nounQuiz.state.questionNum}
+              sessionTotal={nounQuiz.state.sessionTotal}
+              isReviewPhase={nounQuiz.state.isReviewPhase}
+              nextLabel={nounNextLabel}
+            />
+          )}
+        {appMode === 'noun' && nounQuiz.state.phase === 'session-result' && (
+          <NounSessionResult
+            firstCorrectCount={nounQuiz.state.firstCorrectCount}
+            reviewCorrectCount={nounQuiz.state.reviewCorrectCount}
+            unresolvedCount={Math.max(0, nounQuiz.state.wrongAnswers.length - nounQuiz.state.reviewCorrectCount)}
+            wrongAnswers={nounQuiz.state.wrongAnswers}
+            normalSessionTotal={nounQuiz.state.normalSessionTotal}
+            onRetry={() => { void nounQuiz.startNewSession() }}
+            onBackToSetup={handleBackToModeSelect}
           />
         )}
       </main>
