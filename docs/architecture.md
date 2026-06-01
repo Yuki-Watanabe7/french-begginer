@@ -33,6 +33,7 @@ SQLite (初期) → PostgreSQL (将来)
 | GET | `/api/nouns/article/next` | 冠詞+名詞クイズ問題を1問返す |
 | GET | `/api/nouns/article/session` | セッション用に重複なしで最大`count`問の冠詞+名詞問題を返す |
 | POST | `/api/nouns/article/check` | 冠詞+名詞回答の正誤判定 |
+| GET | `/api/tts/speak` | フランス語テキストをOpenAI TTSで音声化してaudio/mpegを返す（技術検証用） |
 
 ### GET /api/questions/next クエリパラメータ
 
