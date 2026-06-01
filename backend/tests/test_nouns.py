@@ -258,3 +258,67 @@ def test_all_main_categories_have_multiple_nouns():
     counts = Counter(d["category"] for d in NOUNS.values())
     for cat in ("person", "home", "food", "place", "time", "school", "abstract"):
         assert counts[cat] >= 2, f"Category '{cat}' has only {counts[cat]} noun(s)"
+
+
+# --- filter API tests ---
+
+
+def test_next_noun_question_filter_level_basic():
+    res = client.get("/api/nouns/next?level=basic")
+    assert res.status_code == 200
+    noun = res.json()["noun"]
+    assert NOUNS[noun]["level"] == "basic"
+
+
+def test_next_noun_question_filter_level_standard():
+    res = client.get("/api/nouns/next?level=standard")
+    assert res.status_code == 200
+    noun = res.json()["noun"]
+    assert NOUNS[noun]["level"] == "standard"
+
+
+def test_next_noun_question_filter_category_food():
+    res = client.get("/api/nouns/next?category=food")
+    assert res.status_code == 200
+    noun = res.json()["noun"]
+    assert NOUNS[noun]["category"] == "food"
+
+
+def test_next_noun_question_filter_level_and_category():
+    res = client.get("/api/nouns/next?level=basic&category=home")
+    assert res.status_code == 200
+    data = res.json()
+    noun = data["noun"]
+    assert NOUNS[noun]["level"] == "basic"
+    assert NOUNS[noun]["category"] == "home"
+
+
+def test_next_noun_question_filter_no_params_returns_any():
+    res = client.get("/api/nouns/next")
+    assert res.status_code == 200
+    assert res.json()["noun"] in NOUNS
+
+
+def test_next_noun_question_filter_no_match_returns_404():
+    # No challenge-level nouns exist in current data
+    res = client.get("/api/nouns/next?level=challenge")
+    assert res.status_code == 404
+
+
+def test_next_noun_question_invalid_level_returns_422():
+    res = client.get("/api/nouns/next?level=unknown")
+    assert res.status_code == 422
+
+
+def test_next_noun_question_invalid_category_returns_422():
+    res = client.get("/api/nouns/next?category=invalid_cat")
+    assert res.status_code == 422
+
+
+def test_next_noun_question_filter_repeated_basic_food():
+    for _ in range(10):
+        res = client.get("/api/nouns/next?level=basic&category=food")
+        assert res.status_code == 200
+        noun = res.json()["noun"]
+        assert NOUNS[noun]["level"] == "basic"
+        assert NOUNS[noun]["category"] == "food"

@@ -1,10 +1,19 @@
 import random
 
-from app.domain.noun import NOUNS, NounGenderQuestion
+from app.domain.noun import NOUNS, NounCategory, NounGenderQuestion, NounLevel
 
 
-def get_random_noun_question() -> NounGenderQuestion:
-    if not NOUNS:
-        raise ValueError("No nouns available")
-    noun = random.choice(list(NOUNS.keys()))
-    return NounGenderQuestion(noun=noun, meaning_ja=NOUNS[noun]["meaning_ja"])
+def get_random_noun_question(
+    level: NounLevel | None = None,
+    category: NounCategory | None = None,
+) -> NounGenderQuestion | None:
+    candidates = {
+        noun: data
+        for noun, data in NOUNS.items()
+        if (level is None or data["level"] == level)
+        and (category is None or data["category"] == category)
+    }
+    if not candidates:
+        return None
+    noun = random.choice(list(candidates.keys()))
+    return NounGenderQuestion(noun=noun, meaning_ja=candidates[noun]["meaning_ja"])
