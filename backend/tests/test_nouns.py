@@ -115,7 +115,7 @@ def test_all_nouns_have_meaning():
 
 
 def test_noun_count():
-    assert len(NOUNS) >= 20, "Should have at least 20 nouns"
+    assert 55 <= len(NOUNS) <= 70, f"Should have 55–70 nouns, got {len(NOUNS)}"
 
 
 def test_all_nouns_have_level():
@@ -201,3 +201,60 @@ def test_check_feminine_incorrect():
     result = check_noun_gender_answer(req)
     assert result.correct is False
     assert result.expected == "feminine"
+
+
+# --- tests for expanded vocabulary ---
+
+
+@pytest.mark.parametrize(
+    "noun,expected_gender",
+    [
+        ("père", "masculine"),
+        ("mère", "feminine"),
+        ("homme", "masculine"),
+        ("femme", "feminine"),
+        ("frère", "masculine"),
+        ("sœur", "feminine"),
+        ("chambre", "feminine"),
+        ("lit", "masculine"),
+        ("café", "masculine"),
+        ("pomme", "feminine"),
+        ("gare", "feminine"),
+        ("restaurant", "masculine"),
+        ("mer", "feminine"),
+        ("jour", "masculine"),
+        ("semaine", "feminine"),
+        ("heure", "feminine"),
+        ("classe", "feminine"),
+        ("professeur", "masculine"),
+        ("idée", "feminine"),
+        ("travail", "masculine"),
+    ],
+)
+def test_check_expanded_nouns_via_api(noun: str, expected_gender: str):
+    res = client.post(
+        "/api/nouns/check",
+        json={"noun": noun, "answer": expected_gender},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["correct"] is True, f"{noun}: expected {expected_gender}"
+    assert data["expected"] == expected_gender
+
+
+def test_basic_level_count_not_too_low():
+    basic_nouns = [n for n, d in NOUNS.items() if d["level"] == "basic"]
+    assert len(basic_nouns) >= 35, f"Too few basic nouns: {len(basic_nouns)}"
+
+
+def test_standard_level_count_not_too_low():
+    standard_nouns = [n for n, d in NOUNS.items() if d["level"] == "standard"]
+    assert len(standard_nouns) >= 5, f"Too few standard nouns: {len(standard_nouns)}"
+
+
+def test_all_main_categories_have_multiple_nouns():
+    from collections import Counter
+
+    counts = Counter(d["category"] for d in NOUNS.values())
+    for cat in ("person", "home", "food", "place", "time", "school", "abstract"):
+        assert counts[cat] >= 2, f"Category '{cat}' has only {counts[cat]} noun(s)"

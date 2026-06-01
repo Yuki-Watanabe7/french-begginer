@@ -192,6 +192,211 @@ NOUNS: dict[str, NounData] = {
         "level": "basic",
         "category": "school",
     },
+    # person
+    "père": {
+        "gender": "masculine",
+        "meaning_ja": "父",
+        "level": "basic",
+        "category": "person",
+    },
+    "mère": {
+        "gender": "feminine",
+        "meaning_ja": "母",
+        "level": "basic",
+        "category": "person",
+    },
+    "homme": {
+        "gender": "masculine",
+        "meaning_ja": "男性",
+        "level": "basic",
+        "category": "person",
+    },
+    "femme": {
+        "gender": "feminine",
+        "meaning_ja": "女性",
+        "level": "basic",
+        "category": "person",
+    },
+    "frère": {
+        "gender": "masculine",
+        "meaning_ja": "兄弟",
+        "level": "basic",
+        "category": "person",
+    },
+    "sœur": {
+        "gender": "feminine",
+        "meaning_ja": "姉妹",
+        "level": "basic",
+        "category": "person",
+    },
+    # home
+    "chambre": {
+        "gender": "feminine",
+        "meaning_ja": "部屋",
+        "level": "basic",
+        "category": "home",
+    },
+    "lit": {
+        "gender": "masculine",
+        "meaning_ja": "ベッド",
+        "level": "basic",
+        "category": "home",
+    },
+    "chaise": {
+        "gender": "feminine",
+        "meaning_ja": "椅子",
+        "level": "standard",
+        "category": "home",
+    },
+    "téléphone": {
+        "gender": "masculine",
+        "meaning_ja": "電話",
+        "level": "basic",
+        "category": "home",
+    },
+    # food
+    "café": {
+        "gender": "masculine",
+        "meaning_ja": "コーヒー",
+        "level": "basic",
+        "category": "food",
+    },
+    "thé": {
+        "gender": "masculine",
+        "meaning_ja": "紅茶",
+        "level": "basic",
+        "category": "food",
+    },
+    "lait": {
+        "gender": "masculine",
+        "meaning_ja": "牛乳",
+        "level": "basic",
+        "category": "food",
+    },
+    "pomme": {
+        "gender": "feminine",
+        "meaning_ja": "りんご",
+        "level": "basic",
+        "category": "food",
+    },
+    "fromage": {
+        "gender": "masculine",
+        "meaning_ja": "チーズ",
+        "level": "standard",
+        "category": "food",
+    },
+    "poisson": {
+        "gender": "masculine",
+        "meaning_ja": "魚",
+        "level": "basic",
+        "category": "food",
+    },
+    # place
+    "gare": {
+        "gender": "feminine",
+        "meaning_ja": "駅",
+        "level": "basic",
+        "category": "place",
+    },
+    "restaurant": {
+        "gender": "masculine",
+        "meaning_ja": "レストラン",
+        "level": "basic",
+        "category": "place",
+    },
+    "hôtel": {
+        "gender": "masculine",
+        "meaning_ja": "ホテル",
+        "level": "standard",
+        "category": "place",
+    },
+    "parc": {
+        "gender": "masculine",
+        "meaning_ja": "公園",
+        "level": "basic",
+        "category": "place",
+    },
+    "mer": {
+        "gender": "feminine",
+        "meaning_ja": "海",
+        "level": "basic",
+        "category": "place",
+    },
+    # time
+    "jour": {
+        "gender": "masculine",
+        "meaning_ja": "日",
+        "level": "basic",
+        "category": "time",
+    },
+    "semaine": {
+        "gender": "feminine",
+        "meaning_ja": "週",
+        "level": "basic",
+        "category": "time",
+    },
+    "heure": {
+        "gender": "feminine",
+        "meaning_ja": "時間・時刻",
+        "level": "basic",
+        "category": "time",
+    },
+    "soir": {
+        "gender": "masculine",
+        "meaning_ja": "晩",
+        "level": "basic",
+        "category": "time",
+    },
+    # school
+    "classe": {
+        "gender": "feminine",
+        "meaning_ja": "クラス・教室",
+        "level": "basic",
+        "category": "school",
+    },
+    "professeur": {
+        "gender": "masculine",
+        "meaning_ja": "先生",
+        "level": "basic",
+        "category": "school",
+    },
+    "cahier": {
+        "gender": "masculine",
+        "meaning_ja": "ノート",
+        "level": "basic",
+        "category": "school",
+    },
+    "crayon": {
+        "gender": "masculine",
+        "meaning_ja": "鉛筆",
+        "level": "standard",
+        "category": "school",
+    },
+    # abstract
+    "idée": {
+        "gender": "feminine",
+        "meaning_ja": "考え",
+        "level": "standard",
+        "category": "abstract",
+    },
+    "question": {
+        "gender": "feminine",
+        "meaning_ja": "質問",
+        "level": "basic",
+        "category": "abstract",
+    },
+    "travail": {
+        "gender": "masculine",
+        "meaning_ja": "仕事",
+        "level": "basic",
+        "category": "abstract",
+    },
+    "nom": {
+        "gender": "masculine",
+        "meaning_ja": "名前",
+        "level": "basic",
+        "category": "abstract",
+    },
 }
 
 
