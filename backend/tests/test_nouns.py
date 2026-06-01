@@ -118,6 +118,41 @@ def test_noun_count():
     assert len(NOUNS) >= 20, "Should have at least 20 nouns"
 
 
+def test_all_nouns_have_level():
+    for noun, data in NOUNS.items():
+        assert "level" in data, f"{noun}: missing level"
+        assert isinstance(data["level"], str), f"{noun}: level should be str"
+
+
+def test_all_nouns_have_category():
+    for noun, data in NOUNS.items():
+        assert "category" in data, f"{noun}: missing category"
+        assert isinstance(data["category"], str), f"{noun}: category should be str"
+
+
+def test_all_nouns_level_valid():
+    valid_levels: set[str] = {"basic", "standard", "challenge"}
+    for noun, data in NOUNS.items():
+        assert data["level"] in valid_levels, f"{noun}: invalid level '{data['level']}'"
+
+
+def test_all_nouns_category_valid():
+    valid_categories: set[str] = {
+        "person",
+        "home",
+        "food",
+        "place",
+        "time",
+        "school",
+        "nature",
+        "abstract",
+    }
+    for noun, data in NOUNS.items():
+        assert data["category"] in valid_categories, (
+            f"{noun}: invalid category '{data['category']}'"
+        )
+
+
 # --- domain unit tests ---
 
 
