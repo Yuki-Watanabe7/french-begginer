@@ -1,9 +1,10 @@
 interface Props {
   onSelectVerb: () => void
   onSelectNoun: () => void
+  onSelectNounArticle: () => void
 }
 
-export function ModeSelector({ onSelectVerb, onSelectNoun }: Props) {
+export function ModeSelector({ onSelectVerb, onSelectNoun, onSelectNounArticle }: Props) {
   return (
     <div style={styles.container}>
       <h2 style={styles.heading}>練習モードを選択</h2>
@@ -16,6 +17,10 @@ export function ModeSelector({ onSelectVerb, onSelectNoun }: Props) {
         <button style={styles.card} onClick={onSelectNoun}>
           <span style={styles.label}>名詞の性クイズ</span>
           <span style={styles.desc}>名詞が男性名詞か女性名詞かを答える</span>
+        </button>
+        <button style={styles.card} onClick={onSelectNounArticle}>
+          <span style={styles.label}>冠詞付き名詞</span>
+          <span style={styles.desc}>日本語訳から un / une + 名詞を入力する</span>
         </button>
       </div>
     </div>

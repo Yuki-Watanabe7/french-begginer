@@ -42,7 +42,25 @@ export interface NounWrongAnswer {
   userAnswer: NounGender
 }
 
-export type QuizMode = 'verb_conjugation' | 'noun_gender'
+export interface NounArticleQuestion {
+  noun: string
+  meaning_ja: string | null
+}
+
+export interface NounArticleAnswerResult {
+  correct: boolean
+  expected: string
+  given: string
+}
+
+export interface NounArticleWrongAnswer {
+  noun: string
+  meaning_ja: string | null
+  correctAnswer: string
+  userAnswer: string
+}
+
+export type QuizMode = 'verb_conjugation' | 'noun_gender' | 'noun_article'
 
 export type NounLevel = 'basic' | 'standard' | 'challenge'
 export type NounCategory = 'person' | 'home' | 'food' | 'place' | 'time' | 'school' | 'nature' | 'abstract'

@@ -676,6 +676,42 @@ def check_noun_gender_answer(req: NounGenderAnswerCheck) -> NounGenderAnswerResu
     return NounGenderAnswerResult(correct=correct, expected=expected, given=req.answer)
 
 
+class NounArticleQuestion(BaseModel):
+    noun: str
+    meaning_ja: str | None = None
+
+
+class NounArticleAnswerCheck(BaseModel):
+    noun: str
+    answer: str
+
+
+class NounArticleAnswerResult(BaseModel):
+    correct: bool
+    expected: str
+    given: str
+
+
+def normalize_article_answer(s: str) -> str:
+    return " ".join(s.strip().lower().split())
+
+
+def get_noun_article_answer(noun: str) -> str | None:
+    data = NOUNS.get(noun)
+    if data is None:
+        return None
+    return f"{data['article_indefinite']} {noun}"
+
+
+def check_noun_article_answer(req: NounArticleAnswerCheck) -> NounArticleAnswerResult:
+    expected = get_noun_article_answer(req.noun)
+    if expected is None:
+        raise ValueError(f"Unknown noun: {req.noun}")
+    given_normalized = normalize_article_answer(req.answer)
+    correct = given_normalized == expected
+    return NounArticleAnswerResult(correct=correct, expected=expected, given=req.answer)
+
+
 def validate_noun_data(noun: str, data: NounData) -> None:
     """Validate internal consistency of noun data fields."""
     expected_indef = "un" if data["gender"] == "masculine" else "une"
