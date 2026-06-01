@@ -99,6 +99,135 @@ backend/app/
 > UIや学習モードを増やす前に、既存モードで自然に練習できるか確認すること。
 > 新しい時制や例文の追加は別Issueで扱う。
 
+## 学習モード抽象化の設計方針
+
+> このセクションは実装ではなく設計メモである。名詞版クイズなど動詞活用以外の学習モードを将来追加する際の指針として記載する。
+
+### 現状整理
+
+現在の学習モードは `verb_conjugation`（動詞活用練習）相当の1モードのみ。
+
+**現在の `Question` 型（動詞活用専用）**
+
+```ts
+// Frontend: src/types.ts
+type Question = {
+  verb: string
+  tense: string
+  pronoun: string
+}
+```
+
+```python
+# Backend: app/domain/conjugation.py
+class Question(BaseModel):
+    verb: str
+    tense: str
+    pronoun: str
+```
+
+**動詞活用前提になっている主要箇所**
+
+| 箇所 | 依存内容 |
+|------|----------|
+| `GET /api/questions/next` | `verb` / `tense` / `pronoun` を返す |
+| `POST /api/answers/check` | `{verb, tense, pronoun, answer}` を受け取る |
+| `QuizCard` コンポーネント | `pronoun` を表示し動詞活用の入力を促す |
+| `SessionResult` コンポーネント | 誤答を `verb + pronoun` 形式で一覧表示 |
+| `useQuiz.ts` | `Question` を動詞活用専用として扱う |
+
+このまま名詞版を直接追加すると、`Question` に optional field が増えて型安全性と見通しが悪化する恐れがある。
+
+### 将来の学習モード案
+
+最低限、以下2種類を想定する:
+
+| モード | 内容 |
+|--------|------|
+| `verb_conjugation` | 動詞活用練習（現行モード） |
+| `noun_gender` | 名詞の性クイズ（`le` / `la` を答える） |
+
+### 型・API設計の方向性
+
+discriminated union（判別共用体）パターンを用いて、`mode` フィールドで型を分岐させる。
+
+**Frontend 型設計案**
+
+```ts
+type QuizMode = 'verb_conjugation' | 'noun_gender'
+
+type VerbQuestion = {
+  mode: 'verb_conjugation'
+  verb: string
+  tense: string
+  pronoun: string
+}
+
+type NounGenderQuestion = {
+  mode: 'noun_gender'
+  noun: string
+  meaning?: string
+}
+
+type Question = VerbQuestion | NounGenderQuestion
+```
+
+**Backend 型設計案**
+
+```python
+from typing import Literal
+from pydantic import BaseModel
+
+class VerbQuestion(BaseModel):
+    mode: Literal["verb_conjugation"]
+    verb: str
+    tense: str
+    pronoun: str
+
+class NounGenderQuestion(BaseModel):
+    mode: Literal["noun_gender"]
+    noun: str
+    meaning: str | None = None
+
+Question = VerbQuestion | NounGenderQuestion
+```
+
+**API変更案**
+
+`/api/questions/next` に `mode` クエリパラメータを追加:
+
+```
+GET /api/questions/next?mode=verb_conjugation  # 現行と互換
+GET /api/questions/next?mode=noun_gender
+```
+
+レスポンスに `mode` フィールドを含め、クライアントが型を判別できるようにする。
+
+### 移行方針
+
+名詞版MVP実装時に必要最小限の抽象化を行う。段階的に進める:
+
+1. **現時点（このIssue）**: ドキュメント化のみ。既存APIとコードは変更しない
+2. **名詞版MVP実装時**: 以下の箇所を最小限変更する
+   - `Question` 型を discriminated union へ変更（Backend・Frontend 両方）
+   - `/api/questions/next` に `mode` パラメータ追加（デフォルト `verb_conjugation` で後方互換を維持）
+   - `/api/answers/check` を `mode` に応じた判定ロジックに分岐
+   - `QuizCard` を `mode` で描画を切り替え（`verb_conjugation` の動作は変更しない）
+3. **大規模汎用化はしない**: 汎用クイズエンジン化・プラグイン構造などは過剰設計。モード追加ごとに必要最小限の分岐を追加する方針とする
+
+### 名詞版MVP実装時に変更すべき主要箇所
+
+| ファイル | 変更内容 |
+|----------|----------|
+| `backend/app/domain/conjugation.py` | `NounGenderQuestion` モデル追加、名詞データ辞書追加 |
+| `backend/app/api/questions.py` | `mode` クエリパラメータ追加 |
+| `backend/app/api/answers.py` | `mode` に応じた判定分岐 |
+| `backend/app/services/question_service.py` | `mode` に応じた問題選択ロジック追加 |
+| `frontend/src/types.ts` | `Question` を discriminated union に変更 |
+| `frontend/src/hooks/useQuiz.ts` | `mode` に応じた状態管理分岐 |
+| `frontend/src/components/QuizCard.tsx` | `mode` に応じた表示切り替え |
+| `frontend/src/components/SessionResult.tsx` | `mode` に応じた誤答表示切り替え |
+
 ## 将来的なDB拡張方針
 
 現在は活用データをコード内辞書で保持しています。DB導入時の方針:
