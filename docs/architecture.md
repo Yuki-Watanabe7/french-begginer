@@ -26,7 +26,7 @@ SQLite (初期) → PostgreSQL (将来)
 | GET | `/health` | ヘルスチェック |
 | GET | `/api/questions/next` | 動詞活用問題を返す。クエリパラメータで絞り込み可能（下表参照） |
 | POST | `/api/answers/check` | 動詞活用回答の正誤判定 |
-| GET | `/api/nouns/next` | 名詞の性クイズ問題を返す |
+| GET | `/api/nouns/next` | 名詞の性クイズ問題を返す。クエリパラメータで絞り込み可能（下表参照） |
 | POST | `/api/nouns/check` | 名詞の性回答の正誤判定 |
 
 ### GET /api/questions/next クエリパラメータ
@@ -45,9 +45,20 @@ SQLite (初期) → PostgreSQL (将来)
 - `/api/questions/next?pattern=stem_change`
 - `/api/questions/next?group=er&pattern=spelling_change`
 
-### GET /api/nouns/next
+### GET /api/nouns/next クエリパラメータ
 
-名詞の性クイズ問題を1件返す。クエリパラメータなし。
+| パラメータ | 型 | デフォルト | 説明 |
+|------------|-----|------------|------|
+| `level` | `basic` \| `standard` \| `challenge` | （指定なし） | 難易度で絞り込み |
+| `category` | `person` \| `home` \| `food` \| `place` \| `time` \| `school` \| `nature` \| `abstract` | （指定なし） | カテゴリで絞り込み |
+
+複数パラメータを同時指定した場合はAND条件で絞り込まれる。
+不正な値を指定した場合は `422 Unprocessable Entity`、条件に一致する名詞が存在しない場合は `404 Not Found` を返す。
+
+例:
+- `/api/nouns/next?level=basic`
+- `/api/nouns/next?category=food`
+- `/api/nouns/next?level=basic&category=home`
 
 レスポンス例:
 ```json
