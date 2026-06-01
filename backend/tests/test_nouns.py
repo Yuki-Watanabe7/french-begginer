@@ -230,6 +230,12 @@ def test_check_feminine_incorrect():
         ("professeur", "masculine"),
         ("idée", "feminine"),
         ("travail", "masculine"),
+        ("fils", "masculine"),
+        ("fille", "feminine"),
+        ("oiseau", "masculine"),
+        ("lapin", "masculine"),
+        ("montagne", "feminine"),
+        ("vin", "masculine"),
     ],
 )
 def test_check_expanded_nouns_via_api(noun: str, expected_gender: str):
@@ -381,6 +387,19 @@ def test_validate_noun_data_catches_wrong_article_indefinite():
         )
 
 
+def test_nature_category_has_sufficient_nouns():
+    nature_nouns = [n for n, d in NOUNS.items() if d["category"] == "nature"]
+    assert len(nature_nouns) >= 6, f"Too few nature nouns: {len(nature_nouns)}"
+
+
+def test_no_empty_french_noun_keys():
+    for noun in NOUNS:
+        assert noun != "", "NOUNS dict has an empty string key"
+        assert noun.strip() == noun, (
+            f"Noun key has leading/trailing whitespace: '{noun}'"
+        )
+
+
 def test_validate_noun_data_catches_empty_plural():
     with pytest.raises(ValueError, match="plural"):
         validate_noun_data(
@@ -412,6 +431,12 @@ def test_validate_noun_data_catches_empty_plural():
         ("idée", "une", "l'", "idées"),
         ("bureau", "un", "le", "bureaux"),
         ("travail", "un", "le", "travaux"),
+        ("fils", "un", "le", "fils"),
+        ("fille", "une", "la", "filles"),
+        ("oiseau", "un", "l'", "oiseaux"),
+        ("lapin", "un", "le", "lapins"),
+        ("montagne", "une", "la", "montagnes"),
+        ("vin", "un", "le", "vins"),
     ],
 )
 def test_specific_noun_new_fields(
