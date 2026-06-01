@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { AnswerResult, Question } from '../types'
 
@@ -28,9 +29,20 @@ export function QuizCard({
   isReviewPhase,
   nextLabel,
 }: Props) {
+  useEffect(() => {
+    if (!result) return
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.isComposing) {
+        onNext()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [result, onNext])
+
   const handleKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      result ? onNext() : onSubmit()
+    if (e.key === 'Enter' && !result) {
+      onSubmit()
     }
   }
 

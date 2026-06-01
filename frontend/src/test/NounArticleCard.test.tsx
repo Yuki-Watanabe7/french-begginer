@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { NounArticleCard } from '../components/NounArticleCard'
 import type { NounArticleAnswerResult, NounArticleQuestion } from '../types'
@@ -102,6 +102,27 @@ describe('NounArticleCard', () => {
     it('回答後は入力欄が無効化される', () => {
       renderCard({ result: CORRECT })
       expect(screen.getByPlaceholderText('un / une + 名詞...')).toBeDisabled()
+    })
+
+    it('判定後にEnterを押すとonNextが呼ばれる', () => {
+      const onNext = vi.fn()
+      renderCard({ result: CORRECT, onNext })
+      fireEvent.keyDown(window, { key: 'Enter' })
+      expect(onNext).toHaveBeenCalled()
+    })
+
+    it('未判定状態ではEnterキーでonNextが呼ばれない', () => {
+      const onNext = vi.fn()
+      renderCard({ result: null, input: 'un livre', onNext })
+      fireEvent.keyDown(window, { key: 'Enter' })
+      expect(onNext).not.toHaveBeenCalled()
+    })
+
+    it('IME composition中のEnterでは次へ進まない', () => {
+      const onNext = vi.fn()
+      renderCard({ result: CORRECT, onNext })
+      fireEvent.keyDown(window, { key: 'Enter', isComposing: true })
+      expect(onNext).not.toHaveBeenCalled()
     })
   })
 
