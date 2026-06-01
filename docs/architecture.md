@@ -24,10 +24,15 @@ SQLite (初期) → PostgreSQL (将来)
 | Method | Path | 説明 |
 |--------|------|------|
 | GET | `/health` | ヘルスチェック |
-| GET | `/api/questions/next` | 動詞活用問題を返す。クエリパラメータで絞り込み可能（下表参照） |
+| GET | `/api/questions/next` | 動詞活用問題を1問返す。クエリパラメータで絞り込み可能（下表参照） |
+| GET | `/api/questions/session` | セッション用に重複なしで最大`count`問の動詞活用問題を返す |
 | POST | `/api/answers/check` | 動詞活用回答の正誤判定 |
-| GET | `/api/nouns/next` | 名詞の性クイズ問題を返す。クエリパラメータで絞り込み可能（下表参照） |
+| GET | `/api/nouns/next` | 名詞の性クイズ問題を1問返す。クエリパラメータで絞り込み可能（下表参照） |
+| GET | `/api/nouns/session` | セッション用に重複なしで最大`count`問の名詞の性問題を返す |
 | POST | `/api/nouns/check` | 名詞の性回答の正誤判定 |
+| GET | `/api/nouns/article/next` | 冠詞+名詞クイズ問題を1問返す |
+| GET | `/api/nouns/article/session` | セッション用に重複なしで最大`count`問の冠詞+名詞問題を返す |
+| POST | `/api/nouns/article/check` | 冠詞+名詞回答の正誤判定 |
 
 ### GET /api/questions/next クエリパラメータ
 

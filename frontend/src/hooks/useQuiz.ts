@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { checkAnswer, fetchNextQuestion } from '../api/client'
+import { checkAnswer, fetchSessionQuestions } from '../api/client'
 import type { AnswerResult, Question, VerbGroup, WrongAnswer } from '../types'
 
 type Phase = 'setup' | 'quiz-settings' | 'loading' | 'answering' | 'result' | 'session-result' | 'error'
@@ -20,6 +20,7 @@ interface State {
   isReviewPhase: boolean
   firstCorrectCount: number
   reviewCorrectCount: number
+  sessionQueue: Question[]
 }
 
 const DEFAULT_SESSION_SIZE = 10
@@ -40,6 +41,7 @@ const initialState = (): State => ({
   isReviewPhase: false,
   firstCorrectCount: 0,
   reviewCorrectCount: 0,
+  sessionQueue: [],
 })
 
 export function useQuiz() {
@@ -70,10 +72,19 @@ export function useQuiz() {
       isReviewPhase: false,
       firstCorrectCount: 0,
       reviewCorrectCount: 0,
+      sessionQueue: [],
     }))
     try {
-      const q = await fetchNextQuestion(group)
-      setState(s => ({ ...s, phase: 'answering', question: q }))
+      const questions = await fetchSessionQuestions(sessionSize, group)
+      const [first, ...rest] = questions
+      setState(s => ({
+        ...s,
+        phase: 'answering',
+        question: first,
+        sessionQueue: rest,
+        sessionTotal: questions.length,
+        normalSessionTotal: questions.length,
+      }))
       setTimeout(() => inputRef.current?.focus(), 50)
     } catch {
       setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
@@ -81,11 +92,18 @@ export function useQuiz() {
   }, [])
 
   const retryLoad = useCallback(async () => {
-    const { group } = stateRef.current
-    setState(s => ({ ...s, phase: 'loading', result: null, input: '', error: null }))
+    const { group, normalSessionTotal } = stateRef.current
+    setState(s => ({ ...s, phase: 'loading', result: null, input: '', error: null, questionNum: 1, sessionQueue: [] }))
     try {
-      const q = await fetchNextQuestion(group)
-      setState(s => ({ ...s, phase: 'answering', question: q }))
+      const questions = await fetchSessionQuestions(normalSessionTotal, group)
+      const [first, ...rest] = questions
+      setState(s => ({
+        ...s,
+        phase: 'answering',
+        question: first,
+        sessionQueue: rest,
+        sessionTotal: questions.length,
+      }))
       setTimeout(() => inputRef.current?.focus(), 50)
     } catch {
       setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
@@ -128,8 +146,8 @@ export function useQuiz() {
     }
   }, [])
 
-  const nextQuestion = useCallback(async () => {
-    const { questionNum, sessionTotal, reviewQueue, group, isReviewPhase, correctCount, wrongAnswers } =
+  const nextQuestion = useCallback(() => {
+    const { questionNum, sessionTotal, reviewQueue, isReviewPhase, correctCount, wrongAnswers } =
       stateRef.current
 
     if (isReviewPhase) {
@@ -181,14 +199,18 @@ export function useQuiz() {
     }
 
     const nextNum = questionNum + 1
-    setState(s => ({ ...s, phase: 'loading', result: null, input: '', error: null, questionNum: nextNum }))
-    try {
-      const q = await fetchNextQuestion(group)
-      setState(s => ({ ...s, phase: 'answering', question: q }))
-      setTimeout(() => inputRef.current?.focus(), 50)
-    } catch {
-      setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
-    }
+    const [nextQ, ...remainingQueue] = stateRef.current.sessionQueue
+    setState(s => ({
+      ...s,
+      phase: 'answering',
+      question: nextQ,
+      result: null,
+      input: '',
+      error: null,
+      questionNum: nextNum,
+      sessionQueue: remainingQueue,
+    }))
+    setTimeout(() => inputRef.current?.focus(), 50)
   }, [])
 
   const startNewSession = useCallback(async () => {
@@ -208,10 +230,19 @@ export function useQuiz() {
       isReviewPhase: false,
       firstCorrectCount: 0,
       reviewCorrectCount: 0,
+      sessionQueue: [],
     }))
     try {
-      const q = await fetchNextQuestion(group)
-      setState(s => ({ ...s, phase: 'answering', question: q }))
+      const questions = await fetchSessionQuestions(normalSessionTotal, group)
+      const [first, ...rest] = questions
+      setState(s => ({
+        ...s,
+        phase: 'answering',
+        question: first,
+        sessionQueue: rest,
+        sessionTotal: questions.length,
+        normalSessionTotal: questions.length,
+      }))
       setTimeout(() => inputRef.current?.focus(), 50)
     } catch {
       setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
