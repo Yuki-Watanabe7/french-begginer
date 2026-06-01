@@ -12,6 +12,12 @@ export async function fetchNextQuestion(group: VerbGroup = 'all'): Promise<Quest
   return json(await fetch(`${BASE}/api/questions/next${params}`))
 }
 
+export async function fetchSessionQuestions(count: number, group: VerbGroup = 'all'): Promise<Question[]> {
+  const params = new URLSearchParams({ count: String(count) })
+  if (group !== 'all') params.set('group', group)
+  return json(await fetch(`${BASE}/api/questions/session?${params.toString()}`))
+}
+
 export async function checkAnswer(
   verb: string,
   tense: string,
@@ -35,6 +41,13 @@ export async function fetchNextNounQuestion(filter?: NounFilter): Promise<NounGe
   return json(await fetch(`${BASE}/api/nouns/next${query}`))
 }
 
+export async function fetchNounSessionQuestions(count: number, filter?: NounFilter): Promise<NounGenderQuestion[]> {
+  const params = new URLSearchParams({ count: String(count) })
+  if (filter?.level) params.set('level', filter.level)
+  if (filter?.category) params.set('category', filter.category)
+  return json(await fetch(`${BASE}/api/nouns/session?${params.toString()}`))
+}
+
 export async function checkNounAnswer(noun: string, answer: NounGender): Promise<NounGenderAnswerResult> {
   return json(
     await fetch(`${BASE}/api/nouns/check`, {
@@ -51,6 +64,13 @@ export async function fetchNextNounArticleQuestion(filter?: NounFilter): Promise
   if (filter?.category) params.set('category', filter.category)
   const query = params.size > 0 ? `?${params.toString()}` : ''
   return json(await fetch(`${BASE}/api/nouns/article/next${query}`))
+}
+
+export async function fetchNounArticleSessionQuestions(count: number, filter?: NounFilter): Promise<NounArticleQuestion[]> {
+  const params = new URLSearchParams({ count: String(count) })
+  if (filter?.level) params.set('level', filter.level)
+  if (filter?.category) params.set('category', filter.category)
+  return json(await fetch(`${BASE}/api/nouns/article/session?${params.toString()}`))
 }
 
 export async function checkNounArticleAnswer(noun: string, answer: string): Promise<NounArticleAnswerResult> {

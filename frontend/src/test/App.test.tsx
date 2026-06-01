@@ -7,7 +7,7 @@ import type { Question, AnswerResult } from '../types'
 
 vi.mock('../api/client')
 
-const mockFetch = vi.mocked(client.fetchNextQuestion)
+const mockFetch = vi.mocked(client.fetchSessionQuestions)
 const mockCheck = vi.mocked(client.checkAnswer)
 
 const Q: Question = { verb: 'parler', tense: 'présent', pronoun: 'je' }
@@ -16,7 +16,7 @@ const CORRECT: AnswerResult = { correct: true, expected: 'parle', given: 'parle'
 const INCORRECT: AnswerResult = { correct: false, expected: 'parle', given: 'parles' }
 
 async function navigateToFirstQuestion() {
-  mockFetch.mockResolvedValue(Q)
+  mockFetch.mockResolvedValue([Q, Q, Q, Q, Q])
   render(<App />)
   await userEvent.click(screen.getByText('動詞活用練習'))
   await userEvent.click(screen.getByText('全動詞'))
@@ -69,7 +69,7 @@ describe('App — 主要学習フロー', () => {
 
   describe('次問遷移', () => {
     it('正解後に「次の問題」ボタンをクリックすると次の問題に遷移する', async () => {
-      mockFetch.mockResolvedValueOnce(Q).mockResolvedValueOnce(Q2)
+      mockFetch.mockResolvedValueOnce([Q, Q2, Q, Q, Q])
       mockCheck.mockResolvedValue(CORRECT)
       render(<App />)
       await userEvent.click(screen.getByText('動詞活用練習'))
@@ -86,7 +86,7 @@ describe('App — 主要学習フロー', () => {
     })
 
     it('不正解後に「次の問題」ボタンをクリックすると次の問題に遷移する', async () => {
-      mockFetch.mockResolvedValueOnce(Q).mockResolvedValueOnce(Q2)
+      mockFetch.mockResolvedValueOnce([Q, Q2, Q, Q, Q])
       mockCheck.mockResolvedValue(INCORRECT)
       render(<App />)
       await userEvent.click(screen.getByText('動詞活用練習'))
@@ -105,7 +105,7 @@ describe('App — 主要学習フロー', () => {
 
   describe('結果画面表示・セッション終了', () => {
     it('5問すべて正解後にセッション結果画面へ遷移し正答率100%が表示される', async () => {
-      mockFetch.mockResolvedValue(Q)
+      mockFetch.mockResolvedValue([Q, Q, Q, Q, Q])
       mockCheck.mockResolvedValue(CORRECT)
       render(<App />)
       await userEvent.click(screen.getByText('動詞活用練習'))
@@ -134,7 +134,7 @@ describe('App — 主要学習フロー', () => {
 
   describe('復習フェーズ遷移', () => {
     it('誤答がある場合にセッション終了後に復習フェーズへ遷移する', async () => {
-      mockFetch.mockResolvedValue(Q)
+      mockFetch.mockResolvedValue([Q, Q, Q, Q, Q])
       mockCheck
         .mockResolvedValueOnce(CORRECT)
         .mockResolvedValueOnce(CORRECT)
