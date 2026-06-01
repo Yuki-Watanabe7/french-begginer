@@ -24,8 +24,10 @@ SQLite (初期) → PostgreSQL (将来)
 | Method | Path | 説明 |
 |--------|------|------|
 | GET | `/health` | ヘルスチェック |
-| GET | `/api/questions/next` | 次の問題を返す。クエリパラメータで絞り込み可能（下表参照） |
-| POST | `/api/answers/check` | 回答の正誤判定 |
+| GET | `/api/questions/next` | 動詞活用問題を返す。クエリパラメータで絞り込み可能（下表参照） |
+| POST | `/api/answers/check` | 動詞活用回答の正誤判定 |
+| GET | `/api/nouns/next` | 名詞の性クイズ問題を返す |
+| POST | `/api/nouns/check` | 名詞の性回答の正誤判定 |
 
 ### GET /api/questions/next クエリパラメータ
 
@@ -43,17 +45,37 @@ SQLite (初期) → PostgreSQL (将来)
 - `/api/questions/next?pattern=stem_change`
 - `/api/questions/next?group=er&pattern=spelling_change`
 
+### GET /api/nouns/next
+
+名詞の性クイズ問題を1件返す。クエリパラメータなし。
+
+レスポンス例:
+```json
+{"noun": "livre", "meaning_ja": "本"}
+```
+
+### POST /api/nouns/check
+
+リクエスト: `{"noun": "livre", "answer": "masculine" | "feminine"}`
+
+レスポンス: `{"correct": true, "expected": "masculine", "given": "masculine"}`
+
+未知の名詞を指定した場合は `400 Bad Request`、不正な `answer` 値は `422 Unprocessable Entity` を返す。
+
 ## Backend 責務分担
 
 ```
 backend/app/
 ├── api/          # HTTPリクエスト/レスポンスの受け取り・返却のみ
 │   ├── questions.py
-│   └── answers.py
+│   ├── answers.py
+│   └── nouns.py
 ├── domain/       # ビジネスルール（活用データ、モデル定義、判定ロジック）
-│   └── conjugation.py
+│   ├── conjugation.py
+│   └── noun.py
 └── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
-    └── question_service.py
+    ├── question_service.py
+    └── noun_service.py
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。

@@ -19,3 +19,25 @@ export interface WrongAnswer {
   correctAnswer: string
   userAnswer: string
 }
+
+export type NounGender = 'masculine' | 'feminine'
+
+export interface NounGenderQuestion {
+  noun: string
+  meaning_ja: string | null
+}
+
+export interface NounGenderAnswerResult {
+  correct: boolean
+  expected: NounGender
+  given: NounGender
+}
+
+export interface NounWrongAnswer {
+  noun: string
+  meaning_ja: string | null
+  correctGender: NounGender
+  userAnswer: NounGender
+}
+
+export type QuizMode = 'verb_conjugation' | 'noun_gender'
