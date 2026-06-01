@@ -6,6 +6,7 @@ from app.domain.noun import (
     NounGenderAnswerCheck,
     check_noun_gender_answer,
     get_noun_gender,
+    validate_noun_data,
 )
 from app.main import app
 
@@ -322,3 +323,110 @@ def test_next_noun_question_filter_repeated_basic_food():
         noun = res.json()["noun"]
         assert NOUNS[noun]["level"] == "basic"
         assert NOUNS[noun]["category"] == "food"
+
+
+# --- new field data integrity tests ---
+
+
+def test_all_nouns_have_article_indefinite():
+    for noun, data in NOUNS.items():
+        assert "article_indefinite" in data, f"{noun}: missing article_indefinite"
+        assert data["article_indefinite"] in ("un", "une"), (
+            f"{noun}: invalid article_indefinite '{data['article_indefinite']}'"
+        )
+
+
+def test_all_nouns_have_article_definite():
+    for noun, data in NOUNS.items():
+        assert "article_definite" in data, f"{noun}: missing article_definite"
+        assert data["article_definite"] in ("le", "la", "l'"), (
+            f"{noun}: invalid article_definite '{data['article_definite']}'"
+        )
+
+
+def test_all_nouns_have_plural():
+    for noun, data in NOUNS.items():
+        assert "plural" in data, f"{noun}: missing plural"
+        assert isinstance(data["plural"], str), f"{noun}: plural should be str"
+        assert data["plural"] != "", f"{noun}: plural should not be empty"
+
+
+def test_article_indefinite_matches_gender():
+    for noun, data in NOUNS.items():
+        expected = "un" if data["gender"] == "masculine" else "une"
+        assert data["article_indefinite"] == expected, (
+            f"{noun}: article_indefinite '{data['article_indefinite']}' "
+            f"does not match gender '{data['gender']}'"
+        )
+
+
+def test_validate_noun_data_passes_all_nouns():
+    for noun, data in NOUNS.items():
+        validate_noun_data(noun, data)
+
+
+def test_validate_noun_data_catches_wrong_article_indefinite():
+    with pytest.raises(ValueError, match="article_indefinite"):
+        validate_noun_data(
+            "livre",
+            {
+                "gender": "masculine",
+                "meaning_ja": "本",
+                "level": "basic",
+                "category": "school",
+                "article_indefinite": "une",
+                "article_definite": "le",
+                "plural": "livres",
+            },
+        )
+
+
+def test_validate_noun_data_catches_empty_plural():
+    with pytest.raises(ValueError, match="plural"):
+        validate_noun_data(
+            "livre",
+            {
+                "gender": "masculine",
+                "meaning_ja": "本",
+                "level": "basic",
+                "category": "school",
+                "article_indefinite": "un",
+                "article_definite": "le",
+                "plural": "",
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    "noun,expected_indef,expected_def,expected_plural",
+    [
+        ("livre", "un", "le", "livres"),
+        ("maison", "une", "la", "maisons"),
+        ("arbre", "un", "l'", "arbres"),
+        ("eau", "une", "l'", "eaux"),
+        ("ami", "un", "l'", "amis"),
+        ("école", "une", "l'", "écoles"),
+        ("homme", "un", "l'", "hommes"),
+        ("hôtel", "un", "l'", "hôtels"),
+        ("heure", "une", "l'", "heures"),
+        ("idée", "une", "l'", "idées"),
+        ("bureau", "un", "le", "bureaux"),
+        ("travail", "un", "le", "travaux"),
+    ],
+)
+def test_specific_noun_new_fields(
+    noun: str,
+    expected_indef: str,
+    expected_def: str,
+    expected_plural: str,
+):
+    data = NOUNS[noun]
+    assert data["article_indefinite"] == expected_indef, (
+        f"{noun}: expected article_indefinite '{expected_indef}'"
+    )
+    assert data["article_definite"] == expected_def, (
+        f"{noun}: expected article_definite '{expected_def}'"
+    )
+    assert data["plural"] == expected_plural, (
+        f"{noun}: expected plural '{expected_plural}'"
+    )

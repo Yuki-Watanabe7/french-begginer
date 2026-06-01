@@ -21,6 +21,8 @@ export interface WrongAnswer {
 }
 
 export type NounGender = 'masculine' | 'feminine'
+export type ArticleIndefinite = 'un' | 'une'
+export type ArticleDefinite = 'le' | 'la' | "l'"
 
 export interface NounGenderQuestion {
   noun: string
