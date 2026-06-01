@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { ModeSelector } from './components/ModeSelector'
+import { NounArticleCard } from './components/NounArticleCard'
+import { NounArticleSessionResult } from './components/NounArticleSessionResult'
 import { NounCategorySelector } from './components/NounCategorySelector'
 import { NounGenderCard } from './components/NounGenderCard'
 import { NounSessionResult } from './components/NounSessionResult'
@@ -7,15 +9,17 @@ import { QuizCard } from './components/QuizCard'
 import { QuizSettings } from './components/QuizSettings'
 import { SessionResult } from './components/SessionResult'
 import { VerbGroupSelector } from './components/VerbGroupSelector'
+import { useNounArticleQuiz } from './hooks/useNounArticleQuiz'
 import { useNounQuiz } from './hooks/useNounQuiz'
 import { useQuiz } from './hooks/useQuiz'
 
-type AppMode = 'mode-select' | 'verb' | 'noun'
+type AppMode = 'mode-select' | 'verb' | 'noun' | 'noun_article'
 
 export default function App() {
   const [appMode, setAppMode] = useState<AppMode>('mode-select')
   const verbQuiz = useQuiz()
   const nounQuiz = useNounQuiz()
+  const nounArticleQuiz = useNounArticleQuiz()
 
   const handleSelectVerb = () => {
     setAppMode('verb')
@@ -25,9 +29,14 @@ export default function App() {
     setAppMode('noun')
   }
 
+  const handleSelectNounArticle = () => {
+    setAppMode('noun_article')
+  }
+
   const handleBackToModeSelect = () => {
     if (appMode === 'verb') verbQuiz.backToSetup()
     if (appMode === 'noun') nounQuiz.backToSetup()
+    if (appMode === 'noun_article') nounArticleQuiz.backToSetup()
     setAppMode('mode-select')
   }
 
@@ -55,6 +64,18 @@ export default function App() {
     return '次の問題 →'
   })()
 
+  const nounArticleNextLabel = (() => {
+    const { state } = nounArticleQuiz
+    if (state.phase !== 'result') return '次の問題 →'
+    if (state.isReviewPhase) {
+      return state.reviewQueue.length === 0 ? '結果を見る →' : '次の問題 →'
+    }
+    if (state.questionNum >= state.sessionTotal) {
+      return state.wrongAnswers.length > 0 ? '復習へ →' : '結果を見る →'
+    }
+    return '次の問題 →'
+  })()
+
   return (
     <div style={styles.root}>
       <header style={styles.header}>
@@ -63,7 +84,11 @@ export default function App() {
 
       <main style={styles.main}>
         {appMode === 'mode-select' && (
-          <ModeSelector onSelectVerb={handleSelectVerb} onSelectNoun={handleSelectNoun} />
+          <ModeSelector
+            onSelectVerb={handleSelectVerb}
+            onSelectNoun={handleSelectNoun}
+            onSelectNounArticle={handleSelectNounArticle}
+          />
         )}
 
         {/* 動詞活用練習 */}
@@ -158,6 +183,57 @@ export default function App() {
             wrongAnswers={nounQuiz.state.wrongAnswers}
             normalSessionTotal={nounQuiz.state.normalSessionTotal}
             onRetry={() => { void nounQuiz.startNewSession() }}
+            onBackToSetup={handleBackToModeSelect}
+          />
+        )}
+
+        {/* 冠詞付き名詞クイズ */}
+        {appMode === 'noun_article' && nounArticleQuiz.state.phase === 'noun-filter' && (
+          <NounCategorySelector
+            onSelect={nounArticleQuiz.selectFilter}
+            onBack={handleBackToModeSelect}
+          />
+        )}
+        {appMode === 'noun_article' && nounArticleQuiz.state.phase === 'quiz-settings' && (
+          <QuizSettings
+            onStart={size => { void nounArticleQuiz.startSession(size) }}
+            onBack={nounArticleQuiz.backToFilter}
+          />
+        )}
+        {appMode === 'noun_article' && nounArticleQuiz.state.phase === 'loading' && (
+          <p style={styles.msg}>読み込み中...</p>
+        )}
+        {appMode === 'noun_article' && nounArticleQuiz.state.phase === 'error' && (
+          <div style={styles.errorBox}>
+            <p>{nounArticleQuiz.state.error}</p>
+            <button style={styles.retryBtn} onClick={nounArticleQuiz.retryLoad}>再試行</button>
+          </div>
+        )}
+        {appMode === 'noun_article' &&
+          (nounArticleQuiz.state.phase === 'answering' || nounArticleQuiz.state.phase === 'result') &&
+          nounArticleQuiz.state.question && (
+            <NounArticleCard
+              question={nounArticleQuiz.state.question}
+              input={nounArticleQuiz.state.input}
+              result={nounArticleQuiz.state.result}
+              inputRef={nounArticleQuiz.inputRef}
+              onInputChange={nounArticleQuiz.setInput}
+              onSubmit={() => { void nounArticleQuiz.submit() }}
+              onNext={() => { void nounArticleQuiz.nextQuestion() }}
+              questionNum={nounArticleQuiz.state.questionNum}
+              sessionTotal={nounArticleQuiz.state.sessionTotal}
+              isReviewPhase={nounArticleQuiz.state.isReviewPhase}
+              nextLabel={nounArticleNextLabel}
+            />
+          )}
+        {appMode === 'noun_article' && nounArticleQuiz.state.phase === 'session-result' && (
+          <NounArticleSessionResult
+            firstCorrectCount={nounArticleQuiz.state.firstCorrectCount}
+            reviewCorrectCount={nounArticleQuiz.state.reviewCorrectCount}
+            unresolvedCount={Math.max(0, nounArticleQuiz.state.wrongAnswers.length - nounArticleQuiz.state.reviewCorrectCount)}
+            wrongAnswers={nounArticleQuiz.state.wrongAnswers}
+            normalSessionTotal={nounArticleQuiz.state.normalSessionTotal}
+            onRetry={() => { void nounArticleQuiz.startNewSession() }}
             onBackToSetup={handleBackToModeSelect}
           />
         )}

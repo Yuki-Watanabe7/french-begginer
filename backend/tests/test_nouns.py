@@ -3,9 +3,13 @@ from fastapi.testclient import TestClient
 
 from app.domain.noun import (
     NOUNS,
+    NounArticleAnswerCheck,
     NounGenderAnswerCheck,
+    check_noun_article_answer,
     check_noun_gender_answer,
+    get_noun_article_answer,
     get_noun_gender,
+    normalize_article_answer,
     validate_noun_data,
 )
 from app.main import app
@@ -455,3 +459,249 @@ def test_specific_noun_new_fields(
     assert data["plural"] == expected_plural, (
         f"{noun}: expected plural '{expected_plural}'"
     )
+
+
+# --- noun article domain tests ---
+
+
+def test_normalize_article_answer_strips_whitespace():
+    assert normalize_article_answer("  un livre  ") == "un livre"
+
+
+def test_normalize_article_answer_collapses_spaces():
+    assert normalize_article_answer("un  livre") == "un livre"
+
+
+def test_normalize_article_answer_lowercases():
+    assert normalize_article_answer("Un Livre") == "un livre"
+
+
+def test_normalize_article_answer_combined():
+    assert normalize_article_answer("  UNE   MAISON  ") == "une maison"
+
+
+def test_get_noun_article_answer_masculine():
+    assert get_noun_article_answer("livre") == "un livre"
+
+
+def test_get_noun_article_answer_feminine():
+    assert get_noun_article_answer("maison") == "une maison"
+
+
+def test_get_noun_article_answer_unknown():
+    assert get_noun_article_answer("unknown_xyz") is None
+
+
+def test_check_noun_article_answer_correct_masculine():
+    req = NounArticleAnswerCheck(noun="livre", answer="un livre")
+    result = check_noun_article_answer(req)
+    assert result.correct is True
+    assert result.expected == "un livre"
+    assert result.given == "un livre"
+
+
+def test_check_noun_article_answer_correct_feminine():
+    req = NounArticleAnswerCheck(noun="maison", answer="une maison")
+    result = check_noun_article_answer(req)
+    assert result.correct is True
+    assert result.expected == "une maison"
+
+
+def test_check_noun_article_answer_wrong_article():
+    req = NounArticleAnswerCheck(noun="maison", answer="un maison")
+    result = check_noun_article_answer(req)
+    assert result.correct is False
+    assert result.expected == "une maison"
+    assert result.given == "un maison"
+
+
+def test_check_noun_article_answer_wrong_noun():
+    req = NounArticleAnswerCheck(noun="livre", answer="un chat")
+    result = check_noun_article_answer(req)
+    assert result.correct is False
+    assert result.expected == "un livre"
+
+
+def test_check_noun_article_answer_case_insensitive():
+    req = NounArticleAnswerCheck(noun="livre", answer="UN LIVRE")
+    result = check_noun_article_answer(req)
+    assert result.correct is True
+
+
+def test_check_noun_article_answer_leading_trailing_spaces():
+    req = NounArticleAnswerCheck(noun="maison", answer="  une maison  ")
+    result = check_noun_article_answer(req)
+    assert result.correct is True
+
+
+def test_check_noun_article_answer_extra_spaces():
+    req = NounArticleAnswerCheck(noun="livre", answer="un  livre")
+    result = check_noun_article_answer(req)
+    assert result.correct is True
+
+
+def test_check_noun_article_answer_unknown_raises():
+    req = NounArticleAnswerCheck(noun="unknown_xyz", answer="un unknown_xyz")
+    with pytest.raises(ValueError, match="Unknown noun"):
+        check_noun_article_answer(req)
+
+
+# --- noun article API tests ---
+
+
+def test_next_noun_article_question():
+    res = client.get("/api/nouns/article/next")
+    assert res.status_code == 200
+    data = res.json()
+    assert "noun" in data
+    assert data["noun"] in NOUNS
+
+
+def test_next_noun_article_question_returns_meaning():
+    res = client.get("/api/nouns/article/next")
+    assert res.status_code == 200
+    data = res.json()
+    assert "meaning_ja" in data
+    assert isinstance(data["meaning_ja"], str)
+
+
+def test_next_noun_article_question_repeated_calls():
+    for _ in range(20):
+        res = client.get("/api/nouns/article/next")
+        assert res.status_code == 200
+        assert res.json()["noun"] in NOUNS
+
+
+def test_next_noun_article_question_filter_level_basic():
+    res = client.get("/api/nouns/article/next?level=basic")
+    assert res.status_code == 200
+    noun = res.json()["noun"]
+    assert NOUNS[noun]["level"] == "basic"
+
+
+def test_next_noun_article_question_filter_category_food():
+    res = client.get("/api/nouns/article/next?category=food")
+    assert res.status_code == 200
+    noun = res.json()["noun"]
+    assert NOUNS[noun]["category"] == "food"
+
+
+def test_next_noun_article_question_no_match_returns_404():
+    res = client.get("/api/nouns/article/next?level=challenge")
+    assert res.status_code == 404
+
+
+def test_next_noun_article_question_invalid_level_returns_422():
+    res = client.get("/api/nouns/article/next?level=unknown")
+    assert res.status_code == 422
+
+
+def test_check_noun_article_correct_masculine():
+    res = client.post(
+        "/api/nouns/article/check",
+        json={"noun": "livre", "answer": "un livre"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["correct"] is True
+    assert data["expected"] == "un livre"
+    assert data["given"] == "un livre"
+
+
+def test_check_noun_article_correct_feminine():
+    res = client.post(
+        "/api/nouns/article/check",
+        json={"noun": "maison", "answer": "une maison"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["correct"] is True
+    assert data["expected"] == "une maison"
+
+
+def test_check_noun_article_wrong_article():
+    res = client.post(
+        "/api/nouns/article/check",
+        json={"noun": "maison", "answer": "un maison"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["correct"] is False
+    assert data["expected"] == "une maison"
+    assert data["given"] == "un maison"
+
+
+def test_check_noun_article_wrong_noun():
+    res = client.post(
+        "/api/nouns/article/check",
+        json={"noun": "livre", "answer": "un stylo"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["correct"] is False
+    assert data["expected"] == "un livre"
+
+
+def test_check_noun_article_case_insensitive():
+    res = client.post(
+        "/api/nouns/article/check",
+        json={"noun": "livre", "answer": "UN LIVRE"},
+    )
+    assert res.status_code == 200
+    assert res.json()["correct"] is True
+
+
+def test_check_noun_article_leading_trailing_spaces():
+    res = client.post(
+        "/api/nouns/article/check",
+        json={"noun": "maison", "answer": "  une maison  "},
+    )
+    assert res.status_code == 200
+    assert res.json()["correct"] is True
+
+
+def test_check_noun_article_extra_spaces():
+    res = client.post(
+        "/api/nouns/article/check",
+        json={"noun": "livre", "answer": "un  livre"},
+    )
+    assert res.status_code == 200
+    assert res.json()["correct"] is True
+
+
+def test_check_noun_article_unknown_noun_returns_400():
+    res = client.post(
+        "/api/nouns/article/check",
+        json={"noun": "unknown_word_xyz", "answer": "un unknown_word_xyz"},
+    )
+    assert res.status_code == 400
+
+
+def test_check_noun_article_missing_field_returns_422():
+    res = client.post(
+        "/api/nouns/article/check",
+        json={"noun": "livre"},
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "noun,expected_answer",
+    [
+        ("livre", "un livre"),
+        ("maison", "une maison"),
+        ("chat", "un chat"),
+        ("fleur", "une fleur"),
+        ("arbre", "un arbre"),
+        ("eau", "une eau"),
+    ],
+)
+def test_check_noun_article_via_api_parametrized(noun: str, expected_answer: str):
+    res = client.post(
+        "/api/nouns/article/check",
+        json={"noun": noun, "answer": expected_answer},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["correct"] is True, f"{noun}: expected correct answer"
+    assert data["expected"] == expected_answer
