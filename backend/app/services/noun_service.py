@@ -22,7 +22,11 @@ def get_random_noun_question(
     if not candidates:
         return None
     noun = random.choice(list(candidates.keys()))
-    return NounGenderQuestion(noun=noun, meaning_ja=candidates[noun]["meaning_ja"])
+    return NounGenderQuestion(
+        noun=noun,
+        meaning_ja=candidates[noun]["meaning_ja"],
+        article_indefinite=candidates[noun]["article_indefinite"],
+    )
 
 
 def get_random_noun_article_question(
@@ -52,7 +56,11 @@ def get_noun_session_questions(
     without duplication rather than repeating questions.
     """
     candidates = [
-        NounGenderQuestion(noun=noun, meaning_ja=data["meaning_ja"])
+        NounGenderQuestion(
+            noun=noun,
+            meaning_ja=data["meaning_ja"],
+            article_indefinite=data["article_indefinite"],
+        )
         for noun, data in NOUNS.items()
         if (level is None or data["level"] == level)
         and (category is None or data["category"] == category)

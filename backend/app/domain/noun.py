@@ -648,6 +648,7 @@ NOUNS: dict[str, NounData] = {
 class NounGenderQuestion(BaseModel):
     noun: str
     meaning_ja: str | None = None
+    article_indefinite: ArticleIndefinite
 
 
 class NounGenderAnswerCheck(BaseModel):

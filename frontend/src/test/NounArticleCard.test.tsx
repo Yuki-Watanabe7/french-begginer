@@ -4,6 +4,10 @@ import userEvent from '@testing-library/user-event'
 import { NounArticleCard } from '../components/NounArticleCard'
 import type { NounArticleAnswerResult, NounArticleQuestion } from '../types'
 
+vi.mock('../hooks/useTTS', () => ({
+  useTTS: () => ({ play: vi.fn(), isLoading: false, error: null }),
+}))
+
 const Q: NounArticleQuestion = { noun: 'livre', meaning_ja: '本' }
 const Q_NO_MEANING: NounArticleQuestion = { noun: 'chat', meaning_ja: null }
 const CORRECT: NounArticleAnswerResult = { correct: true, expected: 'un livre', given: 'un livre' }
@@ -167,6 +171,33 @@ describe('NounArticleCard', () => {
       renderCard({ result: INCORRECT, onNext, nextLabel: '次の問題 →' })
       await userEvent.click(screen.getByRole('button', { name: '次の問題 →' }))
       expect(onNext).toHaveBeenCalled()
+    })
+  })
+
+  describe('音声再生ボタン', () => {
+    it('回答後に🔊ボタンが表示される（正解時）', () => {
+      renderCard({ result: CORRECT })
+      expect(screen.getByRole('button', { name: /読み上げる/ })).toBeInTheDocument()
+    })
+
+    it('回答後に🔊ボタンが表示される（不正解時）', () => {
+      renderCard({ result: INCORRECT })
+      expect(screen.getByRole('button', { name: /読み上げる/ })).toBeInTheDocument()
+    })
+
+    it('ボタンのaria-labelに正解の冠詞付き名詞が含まれる', () => {
+      renderCard({ result: CORRECT })
+      expect(screen.getByLabelText('un livreを読み上げる')).toBeInTheDocument()
+    })
+
+    it('回答前は🔊ボタンが表示されない', () => {
+      renderCard({ result: null })
+      expect(screen.queryByRole('button', { name: /読み上げる/ })).not.toBeInTheDocument()
+    })
+
+    it('通常時はボタンがdisabledでない', () => {
+      renderCard({ result: CORRECT })
+      expect(screen.getByRole('button', { name: /読み上げる/ })).not.toBeDisabled()
     })
   })
 })

@@ -10,7 +10,7 @@ vi.mock('../api/client')
 const mockFetchNoun = vi.mocked(client.fetchNounSessionQuestions)
 const mockCheckNoun = vi.mocked(client.checkNounAnswer)
 
-const Q: NounGenderQuestion = { noun: 'livre', meaning_ja: '本' }
+const Q: NounGenderQuestion = { noun: 'livre', meaning_ja: '本', article_indefinite: 'un' }
 const CORRECT: NounGenderAnswerResult = { correct: true, expected: 'masculine', given: 'masculine' }
 
 async function navigateToNounFilter() {
