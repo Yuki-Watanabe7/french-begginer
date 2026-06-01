@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createRef } from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QuizCard } from '../components/QuizCard'
 import type { Question, AnswerResult } from '../types'
@@ -127,6 +127,27 @@ describe('QuizCard', () => {
       renderCard({ input: 'parle', onSubmit })
       await userEvent.type(screen.getByPlaceholderText('活用形を入力...'), '{Enter}')
       expect(onSubmit).toHaveBeenCalled()
+    })
+
+    it('判定後にEnterを押すとonNextが呼ばれる', () => {
+      const onNext = vi.fn()
+      renderCard({ result: CORRECT, onNext })
+      fireEvent.keyDown(window, { key: 'Enter' })
+      expect(onNext).toHaveBeenCalled()
+    })
+
+    it('未判定状態ではEnterキーでonNextが呼ばれない', () => {
+      const onNext = vi.fn()
+      renderCard({ result: null, input: 'parle', onNext })
+      fireEvent.keyDown(window, { key: 'Enter' })
+      expect(onNext).not.toHaveBeenCalled()
+    })
+
+    it('IME composition中のEnterでは次へ進まない', () => {
+      const onNext = vi.fn()
+      renderCard({ result: CORRECT, onNext })
+      fireEvent.keyDown(window, { key: 'Enter', isComposing: true })
+      expect(onNext).not.toHaveBeenCalled()
     })
   })
 })
