@@ -13,6 +13,9 @@ node_modules/
 dist/
 .vite/
 
+# TTS cache
+backend/.cache/
+
 # Misc
 .DS_Store
 *.env
