@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState } from 'react'
 import { checkNounAnswer, fetchNextNounQuestion } from '../api/client'
-import type { NounGender, NounGenderAnswerResult, NounGenderQuestion, NounWrongAnswer } from '../types'
+import type { NounFilter, NounGender, NounGenderAnswerResult, NounGenderQuestion, NounWrongAnswer } from '../types'
 
-type NounPhase = 'quiz-settings' | 'loading' | 'answering' | 'result' | 'session-result' | 'error'
+type NounPhase = 'noun-filter' | 'quiz-settings' | 'loading' | 'answering' | 'result' | 'session-result' | 'error'
 
 interface NounState {
   phase: NounPhase
+  filter: NounFilter
   question: NounGenderQuestion | null
   result: NounGenderAnswerResult | null
   error: string | null
@@ -23,7 +24,8 @@ interface NounState {
 const DEFAULT_SESSION_SIZE = 10
 
 const initialNounState = (): NounState => ({
-  phase: 'quiz-settings',
+  phase: 'noun-filter',
+  filter: {},
   question: null,
   result: null,
   error: null,
@@ -43,7 +45,16 @@ export function useNounQuiz() {
   const stateRef = useRef(state)
   stateRef.current = state
 
+  const selectFilter = useCallback((filter: NounFilter) => {
+    setState(s => ({ ...s, filter, phase: 'quiz-settings' }))
+  }, [])
+
+  const backToFilter = useCallback(() => {
+    setState(s => ({ ...s, phase: 'noun-filter' }))
+  }, [])
+
   const startSession = useCallback(async (sessionSize: number) => {
+    const { filter } = stateRef.current
     setState(s => ({
       ...s,
       phase: 'loading',
@@ -61,7 +72,7 @@ export function useNounQuiz() {
       reviewCorrectCount: 0,
     }))
     try {
-      const q = await fetchNextNounQuestion()
+      const q = await fetchNextNounQuestion(filter)
       setState(s => ({ ...s, phase: 'answering', question: q }))
     } catch {
       setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
@@ -69,9 +80,10 @@ export function useNounQuiz() {
   }, [])
 
   const retryLoad = useCallback(async () => {
+    const { filter } = stateRef.current
     setState(s => ({ ...s, phase: 'loading', result: null, error: null }))
     try {
-      const q = await fetchNextNounQuestion()
+      const q = await fetchNextNounQuestion(filter)
       setState(s => ({ ...s, phase: 'answering', question: q }))
     } catch {
       setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
@@ -112,7 +124,7 @@ export function useNounQuiz() {
   }, [])
 
   const nextQuestion = useCallback(async () => {
-    const { questionNum, sessionTotal, reviewQueue, isReviewPhase, correctCount, wrongAnswers } =
+    const { questionNum, sessionTotal, reviewQueue, isReviewPhase, correctCount, wrongAnswers, filter } =
       stateRef.current
 
     if (isReviewPhase) {
@@ -160,7 +172,7 @@ export function useNounQuiz() {
     const nextNum = questionNum + 1
     setState(s => ({ ...s, phase: 'loading', result: null, error: null, questionNum: nextNum }))
     try {
-      const q = await fetchNextNounQuestion()
+      const q = await fetchNextNounQuestion(filter)
       setState(s => ({ ...s, phase: 'answering', question: q }))
     } catch {
       setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
@@ -168,7 +180,7 @@ export function useNounQuiz() {
   }, [])
 
   const startNewSession = useCallback(async () => {
-    const { normalSessionTotal } = stateRef.current
+    const { normalSessionTotal, filter } = stateRef.current
     setState(s => ({
       ...s,
       phase: 'loading',
@@ -185,7 +197,7 @@ export function useNounQuiz() {
       reviewCorrectCount: 0,
     }))
     try {
-      const q = await fetchNextNounQuestion()
+      const q = await fetchNextNounQuestion(filter)
       setState(s => ({ ...s, phase: 'answering', question: q }))
     } catch {
       setState(s => ({ ...s, phase: 'error', error: 'サーバーに接続できませんでした' }))
@@ -202,6 +214,8 @@ export function useNounQuiz() {
     nextQuestion,
     startSession,
     startNewSession,
+    selectFilter,
+    backToFilter,
     backToSetup,
     retryLoad,
   }

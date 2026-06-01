@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ModeSelector } from './components/ModeSelector'
+import { NounCategorySelector } from './components/NounCategorySelector'
 import { NounGenderCard } from './components/NounGenderCard'
 import { NounSessionResult } from './components/NounSessionResult'
 import { QuizCard } from './components/QuizCard'
@@ -114,10 +115,16 @@ export default function App() {
         )}
 
         {/* 名詞の性クイズ */}
+        {appMode === 'noun' && nounQuiz.state.phase === 'noun-filter' && (
+          <NounCategorySelector
+            onSelect={nounQuiz.selectFilter}
+            onBack={handleBackToModeSelect}
+          />
+        )}
         {appMode === 'noun' && nounQuiz.state.phase === 'quiz-settings' && (
           <QuizSettings
             onStart={size => { void nounQuiz.startSession(size) }}
-            onBack={handleBackToModeSelect}
+            onBack={nounQuiz.backToFilter}
           />
         )}
         {appMode === 'noun' && nounQuiz.state.phase === 'loading' && (

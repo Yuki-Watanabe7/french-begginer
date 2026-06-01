@@ -41,3 +41,11 @@ export interface NounWrongAnswer {
 }
 
 export type QuizMode = 'verb_conjugation' | 'noun_gender'
+
+export type NounLevel = 'basic' | 'standard' | 'challenge'
+export type NounCategory = 'person' | 'home' | 'food' | 'place' | 'time' | 'school' | 'nature' | 'abstract'
+
+export interface NounFilter {
+  level?: NounLevel
+  category?: NounCategory
+}
