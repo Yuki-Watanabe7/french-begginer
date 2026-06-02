@@ -131,49 +131,112 @@ diff:
 
 ---
 
-## 将来の実装ステップ
+## 実装状況
 
-### Phase 1（現在）: 機械的検証のみ
+### Phase 1（実装済み）: 機械的検証
+
 - `tests/test_domain_validation.py` による構造検証
 - `french_reference/present_conjugations.json` による golden file 照合
 - 既存CIの `uv run pytest` に自動的に含まれる
 
-### Phase 2: GitHub Actions での差分抽出
-```yaml
-# .github/workflows/ci.yml に追加予定（要権限）
-- name: Backend domain data validation
-  if: contains(github.event.pull_request.labels.*.name, 'domain-change')
-  run: |
-    git diff origin/main...HEAD -- backend/app/domain/ > /tmp/domain_diff.txt
-    uv run pytest tests/test_domain_validation.py -v
-```
+### Phase 2（実装済み）: LLM API レビュースクリプト
 
-または path filter を使用:
+`scripts/llm_domain_review.py` が実装済みです。
+
+#### 必要な Secrets
+
+| Secret | 用途 |
+|--------|------|
+| `OPENAI_API_KEY` | OpenAI API使用時（デフォルト） |
+| `ANTHROPIC_API_KEY` | Anthropic API使用時 |
+| `GITHUB_TOKEN` | PRコメント投稿（GitHub Actionsが自動提供） |
+
+#### 環境変数（設定オプション）
+
+| 変数名 | デフォルト | 説明 |
+|--------|-----------|------|
+| `LLM_PROVIDER` | `openai` | `openai` または `anthropic` |
+| `LLM_MODEL` | `gpt-4o-mini`（OpenAI）/ `claude-sonnet-4-6`（Anthropic） | 使用するモデル |
+| `BASE_SHA` | `origin/main` | 差分の起点コミット |
+| `LLM_DOMAIN_REVIEW_FAIL_ON_ERROR` | `false` | `true` にすると errors 検出時にCI失敗 |
+
+#### CI失敗条件
+
+| 状況 | 挙動 |
+|------|------|
+| APIキー未設定 | スキップ（CIは成功） |
+| domain変更なし | スキップ（LLM APIを呼ばない） |
+| LLM出力がJSON不正 | warningコメント投稿、CIは成功 |
+| `errors` あり + `FAIL_ON_ERROR=false` | コメント投稿、CIは成功 |
+| `errors` あり + `FAIL_ON_ERROR=true` | コメント投稿、CIは失敗 |
+| `warnings` / `suggestions` のみ | コメント投稿、CIは成功 |
+
+#### PRコメント再利用方針
+
+コメント本文に `<!-- llm-domain-review-v1 -->` マーカーを埋め込み、同一PRでの再実行時は既存コメントを更新します（コメント増殖なし）。
+
+#### GitHub Actions ワークフロー（手動追加が必要）
+
+GitHub App の権限制限により `.github/workflows/` への書き込みは自動化できません。
+以下の内容で `.github/workflows/llm-domain-review.yml` を手動作成してください：
+
 ```yaml
+name: LLM Domain Review
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/app/domain/**"
+
 jobs:
-  domain-validation:
-    name: Backend domain data validation
+  backend-domain-llm-review:
+    name: Backend domain LLM review
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    # path filtering は paths-filter action などで実現
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --extra dev
+
+      - name: Run existing pytest (Layer 1)
+        working-directory: backend
+        run: uv run pytest tests/test_domain_validation.py -v
+
+      - name: Run LLM domain review (Layer 2)
+        env:
+          # デフォルトはOpenAI。Anthropicを使う場合は LLM_PROVIDER: anthropic に変更
+          LLM_PROVIDER: openai
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # Anthropic使用時
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          LLM_DOMAIN_REVIEW_FAIL_ON_ERROR: "false"
+        run: python scripts/llm_domain_review.py
 ```
 
-### Phase 3: LLM API 呼び出し
+Repository Settings → Secrets and variables → Actions に使用するAPIキーを追加してください。
 
-```python
-# scripts/llm_domain_review.py（設計メモ）
-#
-# 1. git diff で backend/app/domain/ の変更を取得
-# 2. 上記プロンプトテンプレートに差分を埋め込む
-# 3. Anthropic API (Claude) を呼び出す
-# 4. errors があればCI失敗・PR コメントで報告
-# 5. warnings はPRコメントで報告（CIは通過させる）
-#
-# 注意:
-# - LLM単独でのマージブロックは行わない
-# - Layer 1（pytest）が通過している前提で実行
-# - API呼び出しコストを考慮し、domain変更がある場合のみ実行
-```
+### Phase 3: ネイティブ人間レビュー（別Issue）
+
+LLM レビューは Layer 2 の参考情報であり、最終判断は人間レビューです。
+`error` が検出された場合は Layer 3 のネイティブレビューを推奨します。
 
 ---
 
