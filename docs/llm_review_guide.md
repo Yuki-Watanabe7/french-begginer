@@ -175,63 +175,6 @@ diff:
 
 コメント本文に `<!-- llm-domain-review-v1 -->` マーカーを埋め込み、同一PRでの再実行時は既存コメントを更新します（コメント増殖なし）。
 
-#### GitHub Actions ワークフロー（手動追加が必要）
-
-GitHub App の権限制限により `.github/workflows/` への書き込みは自動化できません。
-以下の内容で `.github/workflows/llm-domain-review.yml` を手動作成してください：
-
-```yaml
-name: LLM Domain Review
-
-on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "backend/app/domain/**"
-
-jobs:
-  backend-domain-llm-review:
-    name: Backend domain LLM review
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install backend dependencies
-        working-directory: backend
-        run: uv sync --extra dev
-
-      - name: Run existing pytest (Layer 1)
-        working-directory: backend
-        run: uv run pytest tests/test_domain_validation.py -v
-
-      - name: Run LLM domain review (Layer 2)
-        env:
-          # デフォルトはOpenAI。Anthropicを使う場合は LLM_PROVIDER: anthropic に変更
-          LLM_PROVIDER: openai
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # Anthropic使用時
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          LLM_DOMAIN_REVIEW_FAIL_ON_ERROR: "false"
-        run: python scripts/llm_domain_review.py
-```
-
-Repository Settings → Secrets and variables → Actions に使用するAPIキーを追加してください。
 
 ### Phase 3: ネイティブ人間レビュー（別Issue）
 
