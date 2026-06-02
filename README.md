@@ -89,6 +89,18 @@ docker compose down
 
 ---
 
+## TTS（音声読み上げ）機能
+
+フランス語テキストを OpenAI TTS API で音声化する機能が利用可能。
+
+- **`OPENAI_API_KEY` の設定が必要なのは TTS機能を使う場合のみ**
+- 動詞活用・名詞クイズなどの基本機能は APIキーなしで利用可能
+- APIキー未設定時、`/api/tts/speak` は 503 を返す（他の機能への影響なし）
+
+設定方法や CI での取り扱い方針は [docs/tts_verification.md](docs/tts_verification.md) を参照。
+
+---
+
 ## API 概要
 
 | Method | Path | 説明 |
@@ -96,6 +108,7 @@ docker compose down
 | GET | `/health` | ヘルスチェック |
 | GET | `/api/questions/next` | 次の問題を取得 |
 | POST | `/api/answers/check` | 回答を送信して正誤判定 |
+| GET | `/api/tts/speak` | フランス語テキストを音声化（`OPENAI_API_KEY` が必要） |
 
 ### `GET /api/questions/next` レスポンス例
 
