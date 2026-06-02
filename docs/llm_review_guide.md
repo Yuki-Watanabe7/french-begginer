@@ -131,49 +131,55 @@ diff:
 
 ---
 
-## 将来の実装ステップ
+## 実装状況
 
-### Phase 1（現在）: 機械的検証のみ
+### Phase 1（実装済み）: 機械的検証
+
 - `tests/test_domain_validation.py` による構造検証
 - `french_reference/present_conjugations.json` による golden file 照合
 - 既存CIの `uv run pytest` に自動的に含まれる
 
-### Phase 2: GitHub Actions での差分抽出
-```yaml
-# .github/workflows/ci.yml に追加予定（要権限）
-- name: Backend domain data validation
-  if: contains(github.event.pull_request.labels.*.name, 'domain-change')
-  run: |
-    git diff origin/main...HEAD -- backend/app/domain/ > /tmp/domain_diff.txt
-    uv run pytest tests/test_domain_validation.py -v
-```
+### Phase 2（実装済み）: LLM API レビュースクリプト
 
-または path filter を使用:
-```yaml
-jobs:
-  domain-validation:
-    name: Backend domain data validation
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    # path filtering は paths-filter action などで実現
-```
+`scripts/llm_domain_review.py` が実装済みです。
 
-### Phase 3: LLM API 呼び出し
+#### 必要な Secrets
 
-```python
-# scripts/llm_domain_review.py（設計メモ）
-#
-# 1. git diff で backend/app/domain/ の変更を取得
-# 2. 上記プロンプトテンプレートに差分を埋め込む
-# 3. Anthropic API (Claude) を呼び出す
-# 4. errors があればCI失敗・PR コメントで報告
-# 5. warnings はPRコメントで報告（CIは通過させる）
-#
-# 注意:
-# - LLM単独でのマージブロックは行わない
-# - Layer 1（pytest）が通過している前提で実行
-# - API呼び出しコストを考慮し、domain変更がある場合のみ実行
-```
+| Secret | 用途 |
+|--------|------|
+| `OPENAI_API_KEY` | OpenAI API使用時（デフォルト） |
+| `ANTHROPIC_API_KEY` | Anthropic API使用時 |
+| `GITHUB_TOKEN` | PRコメント投稿（GitHub Actionsが自動提供） |
+
+#### 環境変数（設定オプション）
+
+| 変数名 | デフォルト | 説明 |
+|--------|-----------|------|
+| `LLM_PROVIDER` | `openai` | `openai` または `anthropic` |
+| `LLM_MODEL` | `gpt-4o-mini`（OpenAI）/ `claude-sonnet-4-6`（Anthropic） | 使用するモデル |
+| `BASE_SHA` | `origin/main` | 差分の起点コミット |
+| `LLM_DOMAIN_REVIEW_FAIL_ON_ERROR` | `false` | `true` にすると errors 検出時にCI失敗 |
+
+#### CI失敗条件
+
+| 状況 | 挙動 |
+|------|------|
+| APIキー未設定 | スキップ（CIは成功） |
+| domain変更なし | スキップ（LLM APIを呼ばない） |
+| LLM出力がJSON不正 | warningコメント投稿、CIは成功 |
+| `errors` あり + `FAIL_ON_ERROR=false` | コメント投稿、CIは成功 |
+| `errors` あり + `FAIL_ON_ERROR=true` | コメント投稿、CIは失敗 |
+| `warnings` / `suggestions` のみ | コメント投稿、CIは成功 |
+
+#### PRコメント再利用方針
+
+コメント本文に `<!-- llm-domain-review-v1 -->` マーカーを埋め込み、同一PRでの再実行時は既存コメントを更新します（コメント増殖なし）。
+
+
+### Phase 3: ネイティブ人間レビュー（別Issue）
+
+LLM レビューは Layer 2 の参考情報であり、最終判断は人間レビューです。
+`error` が検出された場合は Layer 3 のネイティブレビューを推奨します。
 
 ---
 
