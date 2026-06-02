@@ -45,21 +45,37 @@ DOMAIN_PATH = "backend/app/domain"
 SYSTEM_PROMPT = """\
 あなたは厳格なフランス語ネイティブ校正者です。
 このPRで変更された backend/app/domain 配下のフランス語学習データについて、
-初級学習者向けアプリの正解データとして不適切な点を検出してください。
+フランス語として正確かどうかを検証してください。
 
 【重要な前提】
 - CONJUGATIONS の値は「活用形のみ」です（主語付き表現ではありません）
 - 例: écouter/je = "écoute"（"j'écoute" ではない）
 - elision は表示層で処理されます
 
+【確認対象】
+確認対象は「標準フランス語としての正誤」に限定する。
+不規則活用・語幹変化・初学者に難しい活用形であること自体をwarningにしてはならない。
+正しい活用であれば、初学者にとって難しい・混乱しやすいという理由で指摘しない。
+
 確認観点:
 - 動詞活用が標準フランス語として正しいか
 - アクセント記号（é, è, ê, à, â, î, ô, û, ù, ç など）が正しいか
-- 初級教材（A1/A2レベル）として適切な動詞・活用形か
 - 同じ概念に対する表記揺れがないか（特に il/elle, ils/elles の扱い）
-- データ構造上は正しくても、学習者が混乱する活用形でないか
 - ç の使用（commençons など）が正しいか
 - -ger 動詞の nous 形（mangeons など）が正しいか
+
+【warningを出してよい条件】
+- 標準形として複数の許容表記があり得る場合（具体的な代替形を expected に示すこと）
+- 地域差・文体差として採用可否を確認すべき場合
+- 辞書・文法書で確認すべき具体的な根拠がある場合
+
+【warningとして禁止する条件 - 以下の理由だけではwarningにしないこと】
+- 初学者が混乱する可能性がある
+- 不規則活用である
+- 語幹変化がある
+- 見慣れない形である
+- 「標準的でない」「使用されない」と主張するが、具体的な代替正答（expected）を提示できない
+- partir→part、sortir→sort、dormir→dort など正しい不規則活用を疑問視する
 
 出力形式（JSON のみ。説明文は不要）:
 {
@@ -69,8 +85,10 @@ SYSTEM_PROMPT = """\
       "verb": "動詞名",
       "pronoun": "人称",
       "value": "問題のある値",
-      "reason": "問題の説明",
-      "suggestion": "修正案"
+      "expected": "正しいと考える形（必須）",
+      "reason": "問題の説明（具体的な根拠を含むこと）",
+      "suggestion": "修正案",
+      "confidence": "high"
     }
   ],
   "warnings": [
@@ -78,8 +96,11 @@ SYSTEM_PROMPT = """\
       "file": "ファイルパス",
       "verb": "動詞名",
       "pronoun": "人称（省略可）",
-      "reason": "疑義の説明",
-      "action": "確認が必要な点"
+      "value": "疑義のある値（省略可）",
+      "expected": "正しいと考える代替形（あれば必ず記入）",
+      "reason": "疑義の説明（具体的な根拠を含むこと）",
+      "action": "確認が必要な点",
+      "confidence": "low|medium|high"
     }
   ],
   "suggestions": [
@@ -91,8 +112,8 @@ SYSTEM_PROMPT = """\
   ]
 }
 
-- error: マージ前に必ず修正すべき誤り（LLMの確信度が高い場合のみ）
-- warning: 人間確認が必要な疑義（LLMが確信を持てない場合はこちら）
+- error: マージ前に必ず修正すべき誤り（LLMの確信度が高い場合のみ。expected は必須）
+- warning: 人間確認が必要な疑義（具体的な根拠と expected が必要。混乱・不規則のみを理由にしない）
 - suggestion: 改善提案（必須ではない）
 
 LLMの判断は Layer 2 の参考情報です。error であっても人間レビューを経てください。
@@ -117,8 +138,61 @@ diff:
 
 MAX_DIFF_CHARS = 40_000
 
+# Keywords that indicate a warning is only about beginner confusion, not correctness
+_CONFUSION_KEYWORDS = frozenset(["混乱", "初学者", "初級", "初心者"])
+# Keywords that indicate a warning claims a value is incorrect
+_INCORRECTNESS_KEYWORDS = frozenset([
+    "使用されない", "正しくない", "誤り", "間違い",
+    "標準でない", "標準的でない", "存在しない", "使われない",
+])
+
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
+
+
+def filter_warnings(warnings: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Filter low-quality LLM warnings.
+
+    Returns (kept_warnings, demoted_to_suggestions).
+
+    Removes:
+    - Warnings whose reason only cites beginner confusion (not a correctness issue)
+    - Warnings that claim a specific value is incorrect without providing an expected form
+    - Warnings where value == expected (nonsensical)
+    - Low-confidence warnings (moved to suggestions)
+    """
+    kept: list[dict] = []
+    demoted: list[dict] = []
+
+    for w in warnings:
+        reason = w.get("reason", "")
+        value = w.get("value", "")
+        expected = w.get("expected", "")
+        confidence = w.get("confidence", "medium")
+
+        # Filter 1: reason only mentions beginner confusion — not a French correctness issue
+        if any(kw in reason for kw in _CONFUSION_KEYWORDS):
+            demoted.append(w)
+            continue
+
+        # Filter 2: claims a specific value is incorrect but provides no alternative
+        if value and not expected and any(kw in reason for kw in _INCORRECTNESS_KEYWORDS):
+            demoted.append(w)
+            continue
+
+        # Filter 3: value and expected are identical — nonsensical warning
+        if value and expected and value.strip() == expected.strip():
+            demoted.append(w)
+            continue
+
+        # Filter 4: low confidence — demote to suggestion
+        if confidence == "low":
+            demoted.append(w)
+            continue
+
+        kept.append(w)
+
+    return kept, demoted
 
 
 def run(cmd: list[str], **kwargs: object) -> str:
@@ -232,11 +306,14 @@ def format_markdown(review: dict, changed_files: list[str]) -> str:
             verb = e.get("verb", "")
             pronoun = e.get("pronoun", "")
             value = e.get("value", "")
+            expected = e.get("expected", "")
             reason = e.get("reason", "")
             suggestion = e.get("suggestion", "")
             location = " / ".join(p for p in [verb, pronoun] if p)
             lines.append(f"- **`{location}`** (`{value}`): {reason}")
-            if suggestion:
+            if expected and expected != value:
+                lines.append(f"  - 期待される形: `{expected}`")
+            elif suggestion:
                 lines.append(f"  - 修正案: `{suggestion}`")
     else:
         lines.append("なし")
@@ -247,13 +324,21 @@ def format_markdown(review: dict, changed_files: list[str]) -> str:
         for w in warnings:
             verb = w.get("verb", "")
             pronoun = w.get("pronoun", "")
+            value = w.get("value", "")
+            expected = w.get("expected", "")
             reason = w.get("reason", "")
             action = w.get("action", "")
+            confidence = w.get("confidence", "")
             location = " / ".join(p for p in [verb, pronoun] if p)
             label = f"`{location}`" if location else "(全般)"
-            lines.append(f"- {label}: {reason}")
+            val_part = f" (`{value}`)" if value else ""
+            lines.append(f"- {label}{val_part}: {reason}")
+            if expected and expected != value:
+                lines.append(f"  - 期待される形: `{expected}`")
             if action:
                 lines.append(f"  - 要確認: {action}")
+            if confidence and confidence != "medium":
+                lines.append(f"  - 確信度: {confidence}")
     else:
         lines.append("なし")
 
@@ -419,8 +504,21 @@ def main() -> int:
         return 0
 
     errors = review.get("errors", [])
-    warnings = review.get("warnings", [])
+    raw_warnings = review.get("warnings", [])
     suggestions = review.get("suggestions", [])
+
+    kept_warnings, demoted = filter_warnings(raw_warnings)
+    if demoted:
+        print(f"Filtered {len(demoted)} low-quality warning(s) → moved to suggestions")
+    demoted_suggestions = [
+        {**w, "reason": f"[参考] {w.get('reason', '')}"}
+        for w in demoted
+    ]
+    review["warnings"] = kept_warnings
+    review["suggestions"] = suggestions + demoted_suggestions
+
+    warnings = kept_warnings
+    suggestions = review["suggestions"]
     print(f"Review: {len(errors)} error(s), {len(warnings)} warning(s), {len(suggestions)} suggestion(s)")
 
     comment_body = format_markdown(review, changed_files)
