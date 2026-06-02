@@ -1,0 +1,137 @@
+{
+  "_schema_version": "1.0",
+  "_description": "A1/A2レベル学習者向けフランス語現在形活用参照データ（レビュー済み正解データ）",
+  "_last_reviewed": "2026-06-02",
+  "_note": "このファイルはgolden fileです。変更はPR差分として明示的に確認され、ネイティブまたは専門家によるレビューを経ること。将来的に名詞・冠詞・例文セクションを追加できる構造にしています。",
+  "_elision_note": "活用形は動詞形のみを保持します（例: écouter の je は 'écoute'）。j'écoute のようなelision表記は表示層で処理します。詳細は docs/llm_review_guide.md の elision セクションを参照。",
+  "present": {
+    "être": {
+      "je": "suis",
+      "tu": "es",
+      "il/elle": "est",
+      "nous": "sommes",
+      "vous": "êtes",
+      "ils/elles": "sont"
+    },
+    "avoir": {
+      "je": "ai",
+      "tu": "as",
+      "il/elle": "a",
+      "nous": "avons",
+      "vous": "avez",
+      "ils/elles": "ont"
+    },
+    "aller": {
+      "je": "vais",
+      "tu": "vas",
+      "il/elle": "va",
+      "nous": "allons",
+      "vous": "allez",
+      "ils/elles": "vont"
+    },
+    "faire": {
+      "je": "fais",
+      "tu": "fais",
+      "il/elle": "fait",
+      "nous": "faisons",
+      "vous": "faites",
+      "ils/elles": "font"
+    },
+    "venir": {
+      "je": "viens",
+      "tu": "viens",
+      "il/elle": "vient",
+      "nous": "venons",
+      "vous": "venez",
+      "ils/elles": "viennent"
+    },
+    "prendre": {
+      "je": "prends",
+      "tu": "prends",
+      "il/elle": "prend",
+      "nous": "prenons",
+      "vous": "prenez",
+      "ils/elles": "prennent"
+    },
+    "pouvoir": {
+      "je": "peux",
+      "tu": "peux",
+      "il/elle": "peut",
+      "nous": "pouvons",
+      "vous": "pouvez",
+      "ils/elles": "peuvent"
+    },
+    "vouloir": {
+      "je": "veux",
+      "tu": "veux",
+      "il/elle": "veut",
+      "nous": "voulons",
+      "vous": "voulez",
+      "ils/elles": "veulent"
+    },
+    "devoir": {
+      "je": "dois",
+      "tu": "dois",
+      "il/elle": "doit",
+      "nous": "devons",
+      "vous": "devez",
+      "ils/elles": "doivent"
+    },
+    "savoir": {
+      "je": "sais",
+      "tu": "sais",
+      "il/elle": "sait",
+      "nous": "savons",
+      "vous": "savez",
+      "ils/elles": "savent"
+    },
+    "parler": {
+      "je": "parle",
+      "tu": "parles",
+      "il/elle": "parle",
+      "nous": "parlons",
+      "vous": "parlez",
+      "ils/elles": "parlent"
+    },
+    "aimer": {
+      "je": "aime",
+      "tu": "aimes",
+      "il/elle": "aime",
+      "nous": "aimons",
+      "vous": "aimez",
+      "ils/elles": "aiment"
+    },
+    "finir": {
+      "je": "finis",
+      "tu": "finis",
+      "il/elle": "finit",
+      "nous": "finissons",
+      "vous": "finissez",
+      "ils/elles": "finissent"
+    },
+    "choisir": {
+      "je": "choisis",
+      "tu": "choisis",
+      "il/elle": "choisit",
+      "nous": "choisissons",
+      "vous": "choisissez",
+      "ils/elles": "choisissent"
+    },
+    "écouter": {
+      "je": "écoute",
+      "tu": "écoutes",
+      "il/elle": "écoute",
+      "nous": "écoutons",
+      "vous": "écoutez",
+      "ils/elles": "écoutent"
+    },
+    "étudier": {
+      "je": "étudie",
+      "tu": "étudies",
+      "il/elle": "étudie",
+      "nous": "étudions",
+      "vous": "étudiez",
+      "ils/elles": "étudient"
+    }
+  }
+}
