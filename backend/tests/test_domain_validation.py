@@ -216,6 +216,28 @@ def test_golden_file_verb_exists_in_conjugations(verb: str):
     )
 
 
+def test_all_conjugation_verbs_have_golden_file_entry(golden_data: dict):
+    """CONJUGATIONS の全動詞が golden file に登録されていること。"""
+    golden_verbs = set(golden_data["present"].keys())
+    conjugation_verbs = set(CONJUGATIONS.keys())
+    missing = sorted(conjugation_verbs - golden_verbs)
+    assert not missing, (
+        f"CONJUGATIONS にあるが golden file にない動詞: {missing}\n"
+        "→ present_conjugations.json に活用形を追加してください。"
+    )
+
+
+def test_golden_file_verb_count_matches_conjugations(golden_data: dict):
+    """golden file の動詞数が CONJUGATIONS と完全に一致すること。"""
+    golden_count = len(golden_data["present"])
+    conjugation_count = len(CONJUGATIONS)
+    assert golden_count == conjugation_count, (
+        f"動詞数が一致しません: golden file={golden_count}, "
+        f"CONJUGATIONS={conjugation_count}\n"
+        "→ どちらかに動詞の過不足があります。"
+    )
+
+
 @pytest.mark.parametrize(
     "verb,pronoun,expected",
     [
