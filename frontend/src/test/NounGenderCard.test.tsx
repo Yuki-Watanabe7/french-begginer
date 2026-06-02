@@ -4,8 +4,12 @@ import userEvent from '@testing-library/user-event'
 import { NounGenderCard } from '../components/NounGenderCard'
 import type { NounGenderAnswerResult, NounGenderQuestion } from '../types'
 
-const Q: NounGenderQuestion = { noun: 'livre', meaning_ja: '本' }
-const Q_NO_MEANING: NounGenderQuestion = { noun: 'chat', meaning_ja: null }
+vi.mock('../hooks/useTTS', () => ({
+  useTTS: () => ({ play: vi.fn(), isLoading: false, error: null }),
+}))
+
+const Q: NounGenderQuestion = { noun: 'livre', meaning_ja: '本', article_indefinite: 'un' }
+const Q_NO_MEANING: NounGenderQuestion = { noun: 'chat', meaning_ja: null, article_indefinite: 'un' }
 const CORRECT: NounGenderAnswerResult = { correct: true, expected: 'masculine', given: 'masculine' }
 const INCORRECT: NounGenderAnswerResult = { correct: false, expected: 'masculine', given: 'feminine' }
 
@@ -95,6 +99,34 @@ describe('NounGenderCard', () => {
     it('正解時に次のボタンが表示される', () => {
       renderCard({ result: CORRECT, nextLabel: '次の問題 →' })
       expect(screen.getByRole('button', { name: '次の問題 →' })).toBeInTheDocument()
+    })
+  })
+
+  describe('音声再生ボタン', () => {
+    it('🔊ボタンが表示される', () => {
+      renderCard()
+      expect(screen.getByRole('button', { name: /読み上げる/ })).toBeInTheDocument()
+    })
+
+    it('男性名詞のaria-labelに「un livre」が含まれる', () => {
+      renderCard()
+      expect(screen.getByLabelText('un livreを読み上げる')).toBeInTheDocument()
+    })
+
+    it('女性名詞のaria-labelに「une maison」が含まれる', () => {
+      const femQ: NounGenderQuestion = { noun: 'maison', meaning_ja: '家', article_indefinite: 'une' }
+      renderCard({ question: femQ })
+      expect(screen.getByLabelText('une maisonを読み上げる')).toBeInTheDocument()
+    })
+
+    it('通常時はボタンがdisabledでない', () => {
+      renderCard()
+      expect(screen.getByRole('button', { name: /読み上げる/ })).not.toBeDisabled()
+    })
+
+    it('ボタンをクリックしてもエラーが発生しない', async () => {
+      renderCard()
+      await userEvent.click(screen.getByRole('button', { name: /読み上げる/ }))
     })
   })
 

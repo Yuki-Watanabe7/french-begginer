@@ -27,6 +27,7 @@ export type ArticleDefinite = 'le' | 'la' | "l'"
 export interface NounGenderQuestion {
   noun: string
   meaning_ja: string | null
+  article_indefinite: ArticleIndefinite
 }
 
 export interface NounGenderAnswerResult {
@@ -38,6 +39,7 @@ export interface NounGenderAnswerResult {
 export interface NounWrongAnswer {
   noun: string
   meaning_ja: string | null
+  article_indefinite: ArticleIndefinite
   correctGender: NounGender
   userAnswer: NounGender
 }
