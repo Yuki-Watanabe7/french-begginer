@@ -1,4 +1,12 @@
 export type VerbGroup = 'all' | 'er' | 'ir' | 'irregular'
+export type VerbLevel = 'basic' | 'standard' | 'challenge'
+export type VerbPattern = 'regular' | 'stem_change' | 'spelling_change' | 'irregular'
+
+export interface VerbFilter {
+  group: VerbGroup
+  level?: VerbLevel
+  pattern?: VerbPattern
+}
 
 export interface Question {
   verb: string

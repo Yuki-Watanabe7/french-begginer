@@ -20,6 +20,7 @@ async function navigateToFirstQuestion() {
   render(<App />)
   await userEvent.click(screen.getByText('動詞活用練習'))
   await userEvent.click(screen.getByText('全動詞'))
+  await userEvent.click(screen.getByText('次へ →'))
   await userEvent.click(screen.getByText('5問'))
   await screen.findByRole('button', { name: '判定する' })
 }
@@ -74,6 +75,7 @@ describe('App — 主要学習フロー', () => {
       render(<App />)
       await userEvent.click(screen.getByText('動詞活用練習'))
       await userEvent.click(screen.getByText('全動詞'))
+      await userEvent.click(screen.getByText('次へ →'))
       await userEvent.click(screen.getByText('5問'))
       await screen.findByText('parler')
 
@@ -91,6 +93,7 @@ describe('App — 主要学習フロー', () => {
       render(<App />)
       await userEvent.click(screen.getByText('動詞活用練習'))
       await userEvent.click(screen.getByText('全動詞'))
+      await userEvent.click(screen.getByText('次へ →'))
       await userEvent.click(screen.getByText('5問'))
       await screen.findByText('parler')
 
@@ -110,6 +113,7 @@ describe('App — 主要学習フロー', () => {
       render(<App />)
       await userEvent.click(screen.getByText('動詞活用練習'))
       await userEvent.click(screen.getByText('全動詞'))
+      await userEvent.click(screen.getByText('次へ →'))
       await userEvent.click(screen.getByText('5問'))
       await screen.findByRole('button', { name: '判定する' })
 
@@ -144,6 +148,7 @@ describe('App — 主要学習フロー', () => {
       render(<App />)
       await userEvent.click(screen.getByText('動詞活用練習'))
       await userEvent.click(screen.getByText('全動詞'))
+      await userEvent.click(screen.getByText('次へ →'))
       await userEvent.click(screen.getByText('5問'))
       await screen.findByRole('button', { name: '判定する' })
 
