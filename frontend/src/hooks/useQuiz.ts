@@ -1,12 +1,14 @@
 import { useCallback, useRef, useState } from 'react'
 import { checkAnswer, fetchSessionQuestions } from '../api/client'
-import type { AnswerResult, Question, VerbGroup, WrongAnswer } from '../types'
+import type { AnswerResult, Question, VerbFilter, VerbGroup, VerbLevel, VerbPattern, WrongAnswer } from '../types'
 
 type Phase = 'setup' | 'quiz-settings' | 'loading' | 'answering' | 'result' | 'session-result' | 'error'
 
 interface State {
   phase: Phase
   group: VerbGroup
+  level: VerbLevel | undefined
+  pattern: VerbPattern | undefined
   question: Question | null
   result: AnswerResult | null
   input: string
@@ -28,6 +30,8 @@ const DEFAULT_SESSION_SIZE = 10
 const initialState = (): State => ({
   phase: 'setup',
   group: 'all',
+  level: undefined,
+  pattern: undefined,
   question: null,
   result: null,
   input: '',
@@ -50,12 +54,12 @@ export function useQuiz() {
   stateRef.current = state
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const selectGroup = useCallback((group: VerbGroup) => {
-    setState(s => ({ ...s, phase: 'quiz-settings', group }))
+  const selectGroup = useCallback((filter: VerbFilter) => {
+    setState(s => ({ ...s, phase: 'quiz-settings', group: filter.group, level: filter.level, pattern: filter.pattern }))
   }, [])
 
   const startSession = useCallback(async (sessionSize: number) => {
-    const { group } = stateRef.current
+    const { group, level, pattern } = stateRef.current
     setState(s => ({
       ...s,
       phase: 'loading',
@@ -75,7 +79,7 @@ export function useQuiz() {
       sessionQueue: [],
     }))
     try {
-      const questions = await fetchSessionQuestions(sessionSize, group)
+      const questions = await fetchSessionQuestions(sessionSize, group, level, pattern)
       const [first, ...rest] = questions
       setState(s => ({
         ...s,
@@ -92,10 +96,10 @@ export function useQuiz() {
   }, [])
 
   const retryLoad = useCallback(async () => {
-    const { group, normalSessionTotal } = stateRef.current
+    const { group, level, pattern, normalSessionTotal } = stateRef.current
     setState(s => ({ ...s, phase: 'loading', result: null, input: '', error: null, questionNum: 1, sessionQueue: [] }))
     try {
-      const questions = await fetchSessionQuestions(normalSessionTotal, group)
+      const questions = await fetchSessionQuestions(normalSessionTotal, group, level, pattern)
       const [first, ...rest] = questions
       setState(s => ({
         ...s,
@@ -214,7 +218,7 @@ export function useQuiz() {
   }, [])
 
   const startNewSession = useCallback(async () => {
-    const { group, normalSessionTotal } = stateRef.current
+    const { group, level, pattern, normalSessionTotal } = stateRef.current
     setState(s => ({
       ...s,
       phase: 'loading',
@@ -233,7 +237,7 @@ export function useQuiz() {
       sessionQueue: [],
     }))
     try {
-      const questions = await fetchSessionQuestions(normalSessionTotal, group)
+      const questions = await fetchSessionQuestions(normalSessionTotal, group, level, pattern)
       const [first, ...rest] = questions
       setState(s => ({
         ...s,

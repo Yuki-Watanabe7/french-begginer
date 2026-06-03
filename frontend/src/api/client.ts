@@ -1,4 +1,4 @@
-import type { AnswerResult, NounArticleAnswerResult, NounArticleQuestion, NounFilter, NounGender, NounGenderAnswerResult, NounGenderQuestion, Question, VerbGroup } from '../types'
+import type { AnswerResult, NounArticleAnswerResult, NounArticleQuestion, NounFilter, NounGender, NounGenderAnswerResult, NounGenderQuestion, Question, VerbGroup, VerbLevel, VerbPattern } from '../types'
 
 const BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -12,9 +12,16 @@ export async function fetchNextQuestion(group: VerbGroup = 'all'): Promise<Quest
   return json(await fetch(`${BASE}/api/questions/next${params}`))
 }
 
-export async function fetchSessionQuestions(count: number, group: VerbGroup = 'all'): Promise<Question[]> {
+export async function fetchSessionQuestions(
+  count: number,
+  group: VerbGroup = 'all',
+  level?: VerbLevel,
+  pattern?: VerbPattern,
+): Promise<Question[]> {
   const params = new URLSearchParams({ count: String(count) })
   if (group !== 'all') params.set('group', group)
+  if (level) params.set('level', level)
+  if (pattern) params.set('pattern', pattern)
   return json(await fetch(`${BASE}/api/questions/session?${params.toString()}`))
 }
 
