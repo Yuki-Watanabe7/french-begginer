@@ -125,6 +125,21 @@ describe('useTTS', () => {
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(1)
   })
 
+  it('clearErrorを呼ぶとerrorがnullになる', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockErrorResponse(503))
+
+    const { result } = renderHook(() => useTTS())
+    await act(async () => {
+      await result.current.play('un livre')
+    })
+    expect(result.current.error).toBe('音声を読み込めませんでした')
+
+    act(() => {
+      result.current.clearError()
+    })
+    expect(result.current.error).toBeNull()
+  })
+
   it("fetchのURLにtextパラメータがエンコードされて渡される（l'école）", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockSuccessResponse())
 
