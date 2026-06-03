@@ -1,9 +1,19 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createRef } from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QuizCard } from '../components/QuizCard'
 import type { Question, AnswerResult } from '../types'
+
+let mockTTSError: string | null = null
+
+vi.mock('../hooks/useTTS', () => ({
+  useTTS: () => ({ play: vi.fn(), isLoading: false, error: mockTTSError, clearError: vi.fn() }),
+}))
+
+beforeEach(() => {
+  mockTTSError = null
+})
 
 const Q: Question = { verb: 'parler', tense: 'présent', pronoun: 'je' }
 const CORRECT: AnswerResult = { correct: true, expected: 'parle', given: 'parle' }
@@ -148,6 +158,51 @@ describe('QuizCard', () => {
       renderCard({ result: CORRECT, onNext })
       fireEvent.keyDown(window, { key: 'Enter', isComposing: true })
       expect(onNext).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('音声再生ボタン', () => {
+    it('回答後に🔊ボタンが表示される（正解時）', () => {
+      renderCard({ result: CORRECT })
+      expect(screen.getByRole('button', { name: /読み上げる/ })).toBeInTheDocument()
+    })
+
+    it('回答後に🔊ボタンが表示される（不正解時）', () => {
+      renderCard({ result: INCORRECT })
+      expect(screen.getByRole('button', { name: /読み上げる/ })).toBeInTheDocument()
+    })
+
+    it('ボタンのaria-labelに主語と正解活用形が含まれる', () => {
+      renderCard({ result: CORRECT })
+      expect(screen.getByLabelText('je parleを読み上げる')).toBeInTheDocument()
+    })
+
+    it('回答前は🔊ボタンが表示されない', () => {
+      renderCard({ result: null })
+      expect(screen.queryByRole('button', { name: /読み上げる/ })).not.toBeInTheDocument()
+    })
+
+    it('通常時はボタンがdisabledでない', () => {
+      renderCard({ result: CORRECT })
+      expect(screen.getByRole('button', { name: /読み上げる/ })).not.toBeDisabled()
+    })
+
+    it('TTSエラー時に回答後のエリアにエラーメッセージが表示される', () => {
+      mockTTSError = '音声を読み込めませんでした'
+      renderCard({ result: CORRECT })
+      expect(screen.getByRole('alert')).toHaveTextContent('音声を読み込めませんでした')
+    })
+
+    it('TTSエラーがnullの場合はエラーメッセージが表示されない', () => {
+      mockTTSError = null
+      renderCard({ result: CORRECT })
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('回答前はTTSエラーが表示されない（🔊ボタン自体が非表示）', () => {
+      mockTTSError = '音声を読み込めませんでした'
+      renderCard({ result: null })
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
   })
 })
