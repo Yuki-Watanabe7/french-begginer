@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import type { KeyboardEvent } from 'react'
+import { useTTS } from '../hooks/useTTS'
 import type { AnswerResult, Question } from '../types'
 
 interface Props {
@@ -29,6 +30,12 @@ export function QuizCard({
   isReviewPhase,
   nextLabel,
 }: Props) {
+  const { play, isLoading: ttsLoading, error: ttsError, clearError: ttsClearError } = useTTS()
+
+  useEffect(() => {
+    ttsClearError()
+  }, [question, ttsClearError])
+
   useEffect(() => {
     if (!result) return
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
@@ -86,8 +93,22 @@ export function QuizCard({
       {result && (
         <div style={result.correct ? styles.correct : styles.incorrect}>
           <div style={styles.resultLabel}>{result.correct ? '✓ 正解' : '✗ 不正解'}</div>
-          {!result.correct && (
-            <div style={styles.answer}>正解: <strong>{result.expected}</strong></div>
+          <div style={styles.answerRow}>
+            {!result.correct && (
+              <div style={styles.answer}>正解: <strong>{result.expected}</strong></div>
+            )}
+            <button
+              style={styles.ttsBtn}
+              onClick={() => play(`${question.pronoun} ${result.expected}`)}
+              disabled={ttsLoading}
+              aria-label={`${question.pronoun} ${result.expected}を読み上げる`}
+              title={`${question.pronoun} ${result.expected}`}
+            >
+              {ttsLoading ? '…' : '🔊'}
+            </button>
+          </div>
+          {ttsError && (
+            <span style={styles.ttsError} role="alert">{ttsError}</span>
           )}
           <button style={styles.nextBtn} onClick={onNext}>
             {nextLabel}
@@ -194,9 +215,34 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 22,
     fontWeight: 700,
   },
+  answerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  },
   answer: {
     fontSize: 18,
     color: '#333',
+  },
+  ttsBtn: {
+    background: 'none',
+    border: '1.5px solid #c0c8d8',
+    borderRadius: 8,
+    padding: '4px 8px',
+    fontSize: 18,
+    cursor: 'pointer',
+    color: '#555',
+    lineHeight: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  ttsError: {
+    fontSize: 12,
+    color: '#dc2626',
+    textAlign: 'center',
+    wordBreak: 'break-word',
   },
   nextBtn: {
     fontSize: 17,

@@ -85,6 +85,86 @@
       "vous": "savez",
       "ils/elles": "savent"
     },
+    "dire": {
+      "je": "dis",
+      "tu": "dis",
+      "il/elle": "dit",
+      "nous": "disons",
+      "vous": "dites",
+      "ils/elles": "disent"
+    },
+    "lire": {
+      "je": "lis",
+      "tu": "lis",
+      "il/elle": "lit",
+      "nous": "lisons",
+      "vous": "lisez",
+      "ils/elles": "lisent"
+    },
+    "écrire": {
+      "je": "écris",
+      "tu": "écris",
+      "il/elle": "écrit",
+      "nous": "écrivons",
+      "vous": "écrivez",
+      "ils/elles": "écrivent"
+    },
+    "voir": {
+      "je": "vois",
+      "tu": "vois",
+      "il/elle": "voit",
+      "nous": "voyons",
+      "vous": "voyez",
+      "ils/elles": "voient"
+    },
+    "mettre": {
+      "je": "mets",
+      "tu": "mets",
+      "il/elle": "met",
+      "nous": "mettons",
+      "vous": "mettez",
+      "ils/elles": "mettent"
+    },
+    "partir": {
+      "je": "pars",
+      "tu": "pars",
+      "il/elle": "part",
+      "nous": "partons",
+      "vous": "partez",
+      "ils/elles": "partent"
+    },
+    "sortir": {
+      "je": "sors",
+      "tu": "sors",
+      "il/elle": "sort",
+      "nous": "sortons",
+      "vous": "sortez",
+      "ils/elles": "sortent"
+    },
+    "dormir": {
+      "je": "dors",
+      "tu": "dors",
+      "il/elle": "dort",
+      "nous": "dormons",
+      "vous": "dormez",
+      "ils/elles": "dorment"
+    },
+    "attendre": {
+      "je": "attends",
+      "tu": "attends",
+      "il/elle": "attend",
+      "nous": "attendons",
+      "vous": "attendez",
+      "ils/elles": "attendent"
+    },
+    "répondre": {
+      "je": "réponds",
+      "tu": "réponds",
+      "il/elle": "répond",
+      "nous": "répondons",
+      "vous": "répondez",
+      "ils/elles": "répondent"
+    },
     "parler": {
       "je": "parle",
       "tu": "parles",
@@ -100,6 +180,126 @@
       "nous": "aimons",
       "vous": "aimez",
       "ils/elles": "aiment"
+    },
+    "habiter": {
+      "je": "habite",
+      "tu": "habites",
+      "il/elle": "habite",
+      "nous": "habitons",
+      "vous": "habitez",
+      "ils/elles": "habitent"
+    },
+    "regarder": {
+      "je": "regarde",
+      "tu": "regardes",
+      "il/elle": "regarde",
+      "nous": "regardons",
+      "vous": "regardez",
+      "ils/elles": "regardent"
+    },
+    "écouter": {
+      "je": "écoute",
+      "tu": "écoutes",
+      "il/elle": "écoute",
+      "nous": "écoutons",
+      "vous": "écoutez",
+      "ils/elles": "écoutent"
+    },
+    "travailler": {
+      "je": "travaille",
+      "tu": "travailles",
+      "il/elle": "travaille",
+      "nous": "travaillons",
+      "vous": "travaillez",
+      "ils/elles": "travaillent"
+    },
+    "étudier": {
+      "je": "étudie",
+      "tu": "étudies",
+      "il/elle": "étudie",
+      "nous": "étudions",
+      "vous": "étudiez",
+      "ils/elles": "étudient"
+    },
+    "chercher": {
+      "je": "cherche",
+      "tu": "cherches",
+      "il/elle": "cherche",
+      "nous": "cherchons",
+      "vous": "cherchez",
+      "ils/elles": "cherchent"
+    },
+    "donner": {
+      "je": "donne",
+      "tu": "donnes",
+      "il/elle": "donne",
+      "nous": "donnons",
+      "vous": "donnez",
+      "ils/elles": "donnent"
+    },
+    "demander": {
+      "je": "demande",
+      "tu": "demandes",
+      "il/elle": "demande",
+      "nous": "demandons",
+      "vous": "demandez",
+      "ils/elles": "demandent"
+    },
+    "commencer": {
+      "je": "commence",
+      "tu": "commences",
+      "il/elle": "commence",
+      "nous": "commençons",
+      "vous": "commencez",
+      "ils/elles": "commencent"
+    },
+    "manger": {
+      "je": "mange",
+      "tu": "manges",
+      "il/elle": "mange",
+      "nous": "mangeons",
+      "vous": "mangez",
+      "ils/elles": "mangent"
+    },
+    "acheter": {
+      "je": "achète",
+      "tu": "achètes",
+      "il/elle": "achète",
+      "nous": "achetons",
+      "vous": "achetez",
+      "ils/elles": "achètent"
+    },
+    "appeler": {
+      "je": "appelle",
+      "tu": "appelles",
+      "il/elle": "appelle",
+      "nous": "appelons",
+      "vous": "appelez",
+      "ils/elles": "appellent"
+    },
+    "préférer": {
+      "je": "préfère",
+      "tu": "préfères",
+      "il/elle": "préfère",
+      "nous": "préférons",
+      "vous": "préférez",
+      "ils/elles": "préfèrent"
+    },
+    "espérer": {
+      "je": "espère",
+      "tu": "espères",
+      "il/elle": "espère",
+      "nous": "espérons",
+      "vous": "espérez",
+      "ils/elles": "espèrent"
+    },
+    "envoyer": {
+      "je": "envoie",
+      "tu": "envoies",
+      "il/elle": "envoie",
+      "nous": "envoyons",
+      "vous": "envoyez",
+      "ils/elles": "envoient"
     },
     "finir": {
       "je": "finis",
@@ -117,21 +317,29 @@
       "vous": "choisissez",
       "ils/elles": "choisissent"
     },
-    "écouter": {
-      "je": "écoute",
-      "tu": "écoutes",
-      "il/elle": "écoute",
-      "nous": "écoutons",
-      "vous": "écoutez",
-      "ils/elles": "écoutent"
+    "réussir": {
+      "je": "réussis",
+      "tu": "réussis",
+      "il/elle": "réussit",
+      "nous": "réussissons",
+      "vous": "réussissez",
+      "ils/elles": "réussissent"
     },
-    "étudier": {
-      "je": "étudie",
-      "tu": "étudies",
-      "il/elle": "étudie",
-      "nous": "étudions",
-      "vous": "étudiez",
-      "ils/elles": "étudient"
+    "remplir": {
+      "je": "remplis",
+      "tu": "remplis",
+      "il/elle": "remplit",
+      "nous": "remplissons",
+      "vous": "remplissez",
+      "ils/elles": "remplissent"
+    },
+    "grandir": {
+      "je": "grandis",
+      "tu": "grandis",
+      "il/elle": "grandit",
+      "nous": "grandissons",
+      "vous": "grandissez",
+      "ils/elles": "grandissent"
     }
   }
 }

@@ -1,12 +1,18 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { NounArticleCard } from '../components/NounArticleCard'
 import type { NounArticleAnswerResult, NounArticleQuestion } from '../types'
 
+let mockTTSError: string | null = null
+
 vi.mock('../hooks/useTTS', () => ({
-  useTTS: () => ({ play: vi.fn(), isLoading: false, error: null }),
+  useTTS: () => ({ play: vi.fn(), isLoading: false, error: mockTTSError, clearError: vi.fn() }),
 }))
+
+beforeEach(() => {
+  mockTTSError = null
+})
 
 const Q: NounArticleQuestion = { noun: 'livre', meaning_ja: '本' }
 const Q_NO_MEANING: NounArticleQuestion = { noun: 'chat', meaning_ja: null }
@@ -198,6 +204,24 @@ describe('NounArticleCard', () => {
     it('通常時はボタンがdisabledでない', () => {
       renderCard({ result: CORRECT })
       expect(screen.getByRole('button', { name: /読み上げる/ })).not.toBeDisabled()
+    })
+
+    it('TTSエラー時に回答後のエリアにエラーメッセージが表示される', () => {
+      mockTTSError = '音声を読み込めませんでした'
+      renderCard({ result: CORRECT })
+      expect(screen.getByRole('alert')).toHaveTextContent('音声を読み込めませんでした')
+    })
+
+    it('TTSエラーがnullの場合はエラーメッセージが表示されない', () => {
+      mockTTSError = null
+      renderCard({ result: CORRECT })
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('回答前はTTSエラーが表示されない（🔊ボタン自体が非表示）', () => {
+      mockTTSError = '音声を読み込めませんでした'
+      renderCard({ result: null })
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
   })
 })

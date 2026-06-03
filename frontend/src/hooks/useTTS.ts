@@ -8,6 +8,8 @@ export function useTTS() {
   const isLoadingRef = useRef(false)
   const blobUrlRef = useRef<string | null>(null)
 
+  const clearError = useCallback(() => setError(null), [])
+
   const play = useCallback(async (text: string) => {
     if (isLoadingRef.current) return
 
@@ -39,5 +41,5 @@ export function useTTS() {
     }
   }, [])
 
-  return { play, isLoading, error }
+  return { play, isLoading, error, clearError }
 }

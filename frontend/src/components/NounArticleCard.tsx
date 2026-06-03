@@ -30,7 +30,11 @@ export function NounArticleCard({
   isReviewPhase,
   nextLabel,
 }: Props) {
-  const { play, isLoading: ttsLoading } = useTTS()
+  const { play, isLoading: ttsLoading, error: ttsError, clearError: ttsClearError } = useTTS()
+
+  useEffect(() => {
+    ttsClearError()
+  }, [question, ttsClearError])
 
   useEffect(() => {
     if (!result) return
@@ -104,6 +108,9 @@ export function NounArticleCard({
               {ttsLoading ? '…' : '🔊'}
             </button>
           </div>
+          {ttsError && (
+            <span style={styles.ttsError} role="alert">{ttsError}</span>
+          )}
           <button style={styles.nextBtn} onClick={onNext}>
             {nextLabel}
           </button>
@@ -224,6 +231,12 @@ const styles: Record<string, React.CSSProperties> = {
   answer: {
     fontSize: 18,
     color: '#333',
+  },
+  ttsError: {
+    fontSize: 12,
+    color: '#dc2626',
+    textAlign: 'center',
+    wordBreak: 'break-word',
   },
   ttsBtn: {
     background: 'none',

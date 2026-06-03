@@ -420,6 +420,65 @@ def test_validate_noun_data_catches_empty_plural():
         )
 
 
+def test_validate_noun_data_catches_invalid_article_definite():
+    with pytest.raises(ValueError, match="article_definite"):
+        validate_noun_data(
+            "livre",
+            {
+                "gender": "masculine",
+                "meaning_ja": "本",
+                "level": "basic",
+                "category": "school",
+                "article_indefinite": "un",
+                "article_definite": "les",
+                "plural": "livres",
+            },
+        )
+
+
+# --- vowel elision tests ---
+
+_FRENCH_VOWELS = set("aeiouàâäéèêëîïôùûüœæ")
+
+# Nouns in NOUNS that start with a mute h (require l' elision).
+# Aspirate-h nouns would use le/la; all current h-nouns in the data are mute.
+_MUTE_H_NOUNS = {"homme", "hôtel", "heure"}
+
+
+def _starts_with_vowel_letter(word: str) -> bool:
+    return bool(word) and word[0].lower() in _FRENCH_VOWELS
+
+
+def test_vowel_starting_nouns_use_elision():
+    """Vowel-starting nouns must use article_definite=\"l'\"."""
+    for noun, data in NOUNS.items():
+        if _starts_with_vowel_letter(noun):
+            assert data["article_definite"] == "l'", (
+                f"{noun}: starts with '{noun[0]}' but "
+                f"article_definite='{data['article_definite']}' (expected \"l'\")"
+            )
+
+
+def test_mute_h_nouns_use_elision():
+    """Known mute-h nouns must use article_definite=\"l'\"."""
+    for noun in _MUTE_H_NOUNS:
+        assert noun in NOUNS, f"Expected mute-h noun '{noun}' in NOUNS"
+        art = NOUNS[noun]["article_definite"]
+        assert art == "l'", (
+            f"{noun}: mute-h noun but article_definite='{art}' (expected \"l'\")"
+        )
+
+
+def test_le_la_nouns_do_not_start_with_vowel():
+    """Nouns with article_definite='le'/'la' must not start with a vowel."""
+    for noun, data in NOUNS.items():
+        if data["article_definite"] in ("le", "la"):
+            assert not _starts_with_vowel_letter(noun), (
+                f"{noun}: article_definite='{data['article_definite']}' "
+                f"but starts with vowel '{noun[0]}' (should be \"l'\")"
+            )
+
+
 @pytest.mark.parametrize(
     "noun,expected_indef,expected_def,expected_plural",
     [
