@@ -38,7 +38,7 @@ jobs:
 
       - name: Install dependencies of backend
         working-directory: backend
-        run: uv sync --locked --extra dev
+        run: uv sync --group dev
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
