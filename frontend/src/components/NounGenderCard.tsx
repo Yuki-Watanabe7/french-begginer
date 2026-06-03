@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useTTS } from '../hooks/useTTS'
 import type { NounGender, NounGenderAnswerResult, NounGenderQuestion } from '../types'
 
@@ -37,8 +38,12 @@ export function NounGenderCard({
   nextLabel,
 }: Props) {
   const answered = !!result
-  const { play, isLoading: ttsLoading } = useTTS()
+  const { play, isLoading: ttsLoading, error: ttsError, clearError: ttsClearError } = useTTS()
   const ttsText = `${question.article_indefinite} ${question.noun}`
+
+  useEffect(() => {
+    ttsClearError()
+  }, [question, ttsClearError])
 
   return (
     <div style={styles.card}>
@@ -64,6 +69,9 @@ export function NounGenderCard({
             {ttsLoading ? '…' : '🔊'}
           </button>
         </div>
+        {ttsError && (
+          <span style={styles.ttsError} role="alert">{ttsError}</span>
+        )}
         {question.meaning_ja && (
           <span style={styles.meaning}>{question.meaning_ja}</span>
         )}
@@ -174,6 +182,12 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+  },
+  ttsError: {
+    fontSize: 12,
+    color: '#dc2626',
+    textAlign: 'center',
+    wordBreak: 'break-word',
   },
   meaning: {
     fontSize: 16,
