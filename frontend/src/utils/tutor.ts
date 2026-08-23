@@ -1,6 +1,44 @@
-import { ApiError } from '../api/tutor'
+import { ApiError, isNotFoundError } from '../api/tutor'
 
 const NOTE_KEY = 'note'
+
+const DATE_FORMAT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+}
+
+/** Backend は UTC。ブラウザのローカルタイム（または指定 TZ）で自然に表示する。 */
+export function formatTutorDateTime(
+  iso: string,
+  locales: Intl.LocalesArgument = 'ja-JP',
+  timeZone?: string,
+): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return new Intl.DateTimeFormat(locales, {
+    ...DATE_FORMAT,
+    ...(timeZone ? { timeZone } : {}),
+  }).format(date)
+}
+
+export function tutorFetchErrorMessage(
+  error: unknown,
+  kind: 'list' | 'detail',
+): string {
+  if (isNotFoundError(error) && kind === 'detail') {
+    return 'Sourceが見つかりません'
+  }
+  if (error instanceof ApiError && error.status >= 500) {
+    return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+  }
+  return kind === 'list'
+    ? '一覧の取得に失敗しました。通信環境を確認して再度お試しください'
+    : '詳細の取得に失敗しました。通信環境を確認して再度お試しください'
+}
 
 export function tutorNoteFromMetadata(
   metadata: Record<string, unknown> | undefined,

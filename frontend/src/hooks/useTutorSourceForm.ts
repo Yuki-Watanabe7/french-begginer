@@ -16,14 +16,13 @@ function isBlank(value: string): boolean {
   return value.trim() === ''
 }
 
-export function useTutorSourceForm() {
+export function useTutorSourceForm(onSaved: (source: SourceDocument) => void) {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [note, setNote] = useState('')
   const [fieldErrors, setFieldErrors] = useState<TutorSourceFieldErrors>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [saved, setSaved] = useState<SourceDocument | null>(null)
   const submittingRef = useRef(false)
 
   const validate = useCallback((): TutorSourceFieldErrors => {
@@ -55,7 +54,7 @@ export function useTutorSourceForm() {
         language: 'fr',
         metadata: tutorNoteMetadata(note),
       })
-      setSaved(created)
+      onSaved(created)
     } catch (error) {
       if (error instanceof ApiError) {
         const fromBody = fieldErrorsFromTutorApiBody(error.body)
@@ -68,18 +67,7 @@ export function useTutorSourceForm() {
       submittingRef.current = false
       setIsSubmitting(false)
     }
-  }, [title, content, note, validate])
-
-  const resetForAnother = useCallback(() => {
-    setTitle('')
-    setContent('')
-    setNote('')
-    setFieldErrors({})
-    setSubmitError(null)
-    setSaved(null)
-    submittingRef.current = false
-    setIsSubmitting(false)
-  }, [])
+  }, [title, content, note, validate, onSaved])
 
   return {
     title,
@@ -91,8 +79,6 @@ export function useTutorSourceForm() {
     fieldErrors,
     submitError,
     isSubmitting,
-    saved,
     submit,
-    resetForAnother,
   }
 }
