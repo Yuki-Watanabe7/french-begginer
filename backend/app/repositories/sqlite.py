@@ -116,6 +116,32 @@ class SqliteLearnerStateRepository:
         return state
 
 
+class SqliteLearningProgressRepository:
+    """event 保存と state 更新を 1 トランザクションに閉じる。"""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    def append_event_and_upsert_state(
+        self, event: LearningEvent, state: LearnerState
+    ) -> tuple[LearningEvent, LearnerState]:
+        if event.learning_item_id != state.learning_item_id:
+            raise ValueError(
+                "LearningEvent と LearnerState の learning_item_id が一致しない: "
+                f"event={event.learning_item_id}, state={state.learning_item_id}"
+            )
+        with self._sessions() as session:
+            _require_learning_item(session, event.learning_item_id)
+            try:
+                session.add(LearningEventRow.from_domain(event))
+                session.merge(LearnerStateRow.from_domain(state))
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                raise DuplicateEntityError("LearningEvent", event.id) from exc
+        return event, state
+
+
 class SqliteReviewScheduleRepository:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
@@ -149,6 +175,7 @@ class TutorRepositories:
     learning_items: SqliteLearningItemRepository
     learning_events: SqliteLearningEventRepository
     learner_states: SqliteLearnerStateRepository
+    learning_progress: SqliteLearningProgressRepository
     review_schedules: SqliteReviewScheduleRepository
 
 
@@ -157,14 +184,15 @@ class TutorSqliteStore:
 
     def __init__(self, database_url: str | None = None) -> None:
         self.engine = create_initialized_engine(database_url)
-        sessions: sessionmaker[Session] = sessionmaker(
+        self._sessions: sessionmaker[Session] = sessionmaker(
             bind=self.engine, expire_on_commit=False
         )
-        self.source_documents = SqliteSourceDocumentRepository(sessions)
-        self.learning_items = SqliteLearningItemRepository(sessions)
-        self.learning_events = SqliteLearningEventRepository(sessions)
-        self.learner_states = SqliteLearnerStateRepository(sessions)
-        self.review_schedules = SqliteReviewScheduleRepository(sessions)
+        self.source_documents = SqliteSourceDocumentRepository(self._sessions)
+        self.learning_items = SqliteLearningItemRepository(self._sessions)
+        self.learning_events = SqliteLearningEventRepository(self._sessions)
+        self.learner_states = SqliteLearnerStateRepository(self._sessions)
+        self.learning_progress = SqliteLearningProgressRepository(self._sessions)
+        self.review_schedules = SqliteReviewScheduleRepository(self._sessions)
 
     def repositories(self) -> TutorRepositories:
         return TutorRepositories(
@@ -172,6 +200,7 @@ class TutorSqliteStore:
             learning_items=self.learning_items,
             learning_events=self.learning_events,
             learner_states=self.learner_states,
+            learning_progress=self.learning_progress,
             review_schedules=self.review_schedules,
         )
 

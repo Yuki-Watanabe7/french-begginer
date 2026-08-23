@@ -43,6 +43,14 @@ class LearnerStateRepository(Protocol):
     def upsert(self, state: LearnerState) -> LearnerState: ...
 
 
+class LearningProgressRepository(Protocol):
+    """event の append と state の upsert を同一トランザクションで行う。"""
+
+    def append_event_and_upsert_state(
+        self, event: LearningEvent, state: LearnerState
+    ) -> tuple[LearningEvent, LearnerState]: ...
+
+
 class ReviewScheduleRepository(Protocol):
     def get(self, item_id: str) -> ReviewSchedule | None: ...
     def upsert(self, schedule: ReviewSchedule) -> ReviewSchedule: ...

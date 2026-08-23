@@ -22,6 +22,8 @@ from app.domain.tutor import (
     ReviewSchedule,
     SourceDocument,
     SourceRef,
+    apply_review_event,
+    compute_mastery_score,
     new_id,
     utcnow,
 )
@@ -471,3 +473,174 @@ def test_review_schedule_allows_sub_day_interval():
         learning_item_id="item-1", due_at=utcnow(), interval_days=0.0
     )
     assert schedule.interval_days == 0.0
+
+
+# ---------------------------------------------------------------------------
+# apply_review_event / compute_mastery_score
+# ---------------------------------------------------------------------------
+
+REVIEW_SEQUENCE = (
+    "correct",
+    "correct",
+    "incorrect",
+    "correct",
+    "incorrect",
+    "incorrect",
+    "correct",
+)
+
+
+def _review_event(item_id: str, result: str, **overrides) -> LearningEvent:
+    values = {
+        "learning_item_id": item_id,
+        "exercise_type": "fr_to_ja",
+        "result": result,
+    }
+    values.update(overrides)
+    return LearningEvent(**values)
+
+
+def test_compute_mastery_score_is_accuracy():
+    assert compute_mastery_score(correct_count=0, attempt_count=0) == 0.0
+    assert compute_mastery_score(correct_count=0, attempt_count=1) == 0.0
+    assert compute_mastery_score(correct_count=1, attempt_count=1) == 1.0
+    assert compute_mastery_score(correct_count=2, attempt_count=3) == pytest.approx(
+        2 / 3
+    )
+
+
+@pytest.mark.parametrize(
+    ("correct_count", "attempt_count"),
+    [(0, 0), (0, 1), (1, 1), (2, 3), (5, 5)],
+)
+def test_mastery_score_does_not_worsen_on_correct(
+    correct_count: int, attempt_count: int
+):
+    before = compute_mastery_score(
+        correct_count=correct_count, attempt_count=attempt_count
+    )
+    after = compute_mastery_score(
+        correct_count=correct_count + 1, attempt_count=attempt_count + 1
+    )
+    assert after >= before
+
+
+@pytest.mark.parametrize(
+    ("correct_count", "attempt_count"),
+    [(0, 0), (0, 1), (1, 1), (2, 3), (5, 5)],
+)
+def test_mastery_score_does_not_improve_on_incorrect(
+    correct_count: int, attempt_count: int
+):
+    before = compute_mastery_score(
+        correct_count=correct_count, attempt_count=attempt_count
+    )
+    after = compute_mastery_score(
+        correct_count=correct_count, attempt_count=attempt_count + 1
+    )
+    assert after <= before
+
+
+def test_apply_review_event_creates_state_from_first_correct():
+    occurred_at = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
+    event = _review_event("item-1", "correct", occurred_at=occurred_at)
+    state = apply_review_event(None, event)
+    assert state.learning_item_id == "item-1"
+    assert state.attempt_count == 1
+    assert state.correct_count == 1
+    assert state.incorrect_count == 0
+    assert state.consecutive_correct == 1
+    assert state.last_reviewed_at == occurred_at
+    assert state.mastery_score == 1.0
+    assert state.by_direction == {}
+
+
+def test_apply_review_event_creates_state_from_first_incorrect():
+    occurred_at = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
+    event = _review_event("item-1", "incorrect", occurred_at=occurred_at)
+    state = apply_review_event(None, event)
+    assert state.attempt_count == 1
+    assert state.correct_count == 0
+    assert state.incorrect_count == 1
+    assert state.consecutive_correct == 0
+    assert state.last_reviewed_at == occurred_at
+    assert state.mastery_score == 0.0
+
+
+def test_apply_review_event_resets_consecutive_correct_on_incorrect():
+    item_id = "item-1"
+    state = apply_review_event(None, _review_event(item_id, "correct"))
+    state = apply_review_event(state, _review_event(item_id, "correct"))
+    assert state.consecutive_correct == 2
+    state = apply_review_event(state, _review_event(item_id, "incorrect"))
+    assert state.consecutive_correct == 0
+    assert state.correct_count == 2
+    assert state.incorrect_count == 1
+
+
+def test_apply_review_event_updates_last_reviewed_at_to_event_time():
+    item_id = "item-1"
+    first_at = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
+    second_at = datetime(2026, 1, 1, 11, 0, tzinfo=UTC)
+    state = apply_review_event(
+        None, _review_event(item_id, "correct", occurred_at=first_at)
+    )
+    state = apply_review_event(
+        state, _review_event(item_id, "incorrect", occurred_at=second_at)
+    )
+    assert state.last_reviewed_at == second_at
+
+
+def test_apply_review_event_does_not_mutate_previous_state():
+    event = _review_event("item-1", "correct")
+    original = LearnerState(learning_item_id="item-1")
+    updated = apply_review_event(original, event)
+    assert original.attempt_count == 0
+    assert updated.attempt_count == 1
+
+
+def test_apply_review_event_rejects_mismatched_item_id():
+    state = LearnerState(learning_item_id="item-a")
+    with pytest.raises(ValueError, match="learning_item_id が一致しない"):
+        apply_review_event(state, _review_event("item-b", "correct"))
+
+
+def test_apply_review_event_preserves_by_direction_without_updating_it():
+    reviewed_at = utcnow()
+    by_direction = {
+        "recognition": MasteryStats(
+            attempt_count=1,
+            correct_count=1,
+            last_reviewed_at=reviewed_at,
+            mastery_score=1.0,
+        )
+    }
+    state = LearnerState(learning_item_id="item-1", by_direction=by_direction)
+    updated = apply_review_event(state, _review_event("item-1", "correct"))
+    assert updated.by_direction == by_direction
+    assert updated.attempt_count == 1
+
+
+def test_apply_review_event_sequence_is_deterministic():
+    item_id = "item-1"
+    events = [
+        _review_event(item_id, result, occurred_at=datetime(2026, 1, 1, i, tzinfo=UTC))
+        for i, result in enumerate(REVIEW_SEQUENCE, start=10)
+    ]
+
+    def fold(sequence: list[LearningEvent]) -> LearnerState:
+        state: LearnerState | None = None
+        for event in sequence:
+            state = apply_review_event(state, event)
+        assert state is not None
+        return state
+
+    first = fold(events)
+    second = fold(events)
+    assert first == second
+    assert first.attempt_count == 7
+    assert first.correct_count == 4
+    assert first.incorrect_count == 3
+    assert first.consecutive_correct == 1
+    assert first.mastery_score == pytest.approx(4 / 7)
+    assert first.last_reviewed_at == events[-1].occurred_at

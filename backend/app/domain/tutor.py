@@ -2,7 +2,7 @@
 Tutor機能の中核ドメインモデル（Phase 0）。
 
 責務: ユーザーが触れたフランス語ソースを教材化し、学習履歴・習熟状態・
-復習予定を追跡するための「型と不変条件」だけを定義する。
+復習予定を追跡するための型・不変条件・LearnerState更新を定義する。
 
 このモジュールが依存してよいのは Python 標準ライブラリと Pydantic のみ。
 DB / FastAPI / OpenAI API には依存しない（domain層の原則）。
@@ -19,10 +19,8 @@ DB / FastAPI / OpenAI API には依存しない（domain層の原則）。
 永続化は `app/repositories` / `app/persistence` が担う。
 このモジュールは永続化実装に依存しない。
 
-Phase 0のスコープ外（後続Issueで追加する）:
-  - LLMによる学習項目抽出
-  - LearnerState更新ロジック・SRSアルゴリズム
-  - API / UI
+LearnerState の更新は `apply_review_event` が担う（Issue #110）。
+SRS / LLM / API / UI は後続Issue。
 """
 
 import uuid
@@ -247,6 +245,63 @@ class LearnerState(MasteryStats):
 
     learning_item_id: str = Field(min_length=1)
     by_direction: dict[SkillDirection, MasteryStats] = Field(default_factory=dict)
+
+
+def compute_mastery_score(*, correct_count: int, attempt_count: int) -> float:
+    """Phase 0 の習熟度。正答率そのもの。
+
+    mastery_score = correct_count / attempt_count （未学習は 0.0）
+
+    - 値域は [0.0, 1.0]
+    - 正答で悪化しない: (c+1)/(a+1) >= c/a （a > 0）
+    - 誤答で改善しない: c/(a+1) <= c/a （a > 0）
+    - 同じカウンタから常に同じ値になる
+    """
+    if attempt_count <= 0:
+        return 0.0
+    return correct_count / attempt_count
+
+
+def apply_review_event(
+    state: LearnerState | None, event: LearningEvent
+) -> LearnerState:
+    """LearningEvent 1件を LearnerState に適用した新しい状態を返す。
+
+    現在の state は変更しない。同じ (state, event) からは常に同じ結果になる。
+    Phase 0 では全体集計のみ更新し、by_direction は引き継ぐだけにする。
+    """
+    if event.event_type != "review":
+        raise ValueError(f"未対応の event_type: {event.event_type}")
+    if state is None:
+        state = LearnerState(learning_item_id=event.learning_item_id)
+    elif state.learning_item_id != event.learning_item_id:
+        raise ValueError(
+            "LearnerState と LearningEvent の learning_item_id が一致しない: "
+            f"state={state.learning_item_id}, event={event.learning_item_id}"
+        )
+
+    attempt_count = state.attempt_count + 1
+    if event.result == "correct":
+        correct_count = state.correct_count + 1
+        incorrect_count = state.incorrect_count
+        consecutive_correct = state.consecutive_correct + 1
+    else:
+        correct_count = state.correct_count
+        incorrect_count = state.incorrect_count + 1
+        consecutive_correct = 0
+
+    return LearnerState(
+        learning_item_id=state.learning_item_id,
+        attempt_count=attempt_count,
+        correct_count=correct_count,
+        incorrect_count=incorrect_count,
+        consecutive_correct=consecutive_correct,
+        last_reviewed_at=event.occurred_at,
+        mastery_score=compute_mastery_score(
+            correct_count=correct_count, attempt_count=attempt_count
+        ),
+        by_direction=state.by_direction,
+    )
 
 
 # ---------------------------------------------------------------------------
