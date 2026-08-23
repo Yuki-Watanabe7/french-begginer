@@ -115,6 +115,8 @@ backend/app/
 - **service層**: ユースケース実装。domain層を組み合わせてビジネスフローを実現。
 
 > Tutor機能（Source取り込み〜長期復習）のドメインモデル設計は [tutor_architecture.md](./tutor_architecture.md) を参照。
+> Phase 0 の学習ループ（Source -> Item -> Event -> State -> Schedule -> due）は
+> `backend/tests/test_tutor_vertical_slice.py` で統合テストする。
 
 ## 動詞データ管理方針
 
