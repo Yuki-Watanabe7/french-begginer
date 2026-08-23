@@ -4,8 +4,8 @@
 
 このドキュメントは Phase 0 の中核ドメインモデル（Issue #108）、
 永続化層（Issue #109）、学習状態更新（Issue #110）、
-初期 Review Scheduler（Issue #111）、最小 API（Issue #112）の
-責務分離・不変条件を記録する。
+初期 Review Scheduler（Issue #111）、最小 API（Issue #112）、
+vertical slice 統合テスト（Issue #113）の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
 - 永続化: `backend/app/repositories/` / `backend/app/persistence/`
@@ -18,6 +18,7 @@
   / `backend/tests/test_review_service.py`
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
+- 統合: `backend/tests/test_tutor_vertical_slice.py`
 
 ## 目指す学習ループ
 
@@ -31,6 +32,50 @@ French source
   -> ReviewScheduleに従い再出題
   -> 定着後は頻度を下げ、新規項目へ進む
 ```
+
+## 責務
+
+HTTP から永続化までの層は次の一方向に依存する。下位層は上位層を知らない。
+
+```text
+api
+  -> application/service
+     -> domain
+     -> repository interface
+        -> SQLite persistence
+```
+
+| 層 | 置き場所 | やってよいこと | やってはいけないこと |
+|----|----------|----------------|----------------------|
+| api | `backend/app/api/tutor.py` | パス・status・request/response schema | domain ルール、SQL、repository の直接利用 |
+| application/service | `backend/app/services/` | ユースケースの組み立て、存在確認、例外の意味づけ | ORM / SQLAlchemy の import |
+| domain | `backend/app/domain/` | モデル不変条件、状態更新、間隔算出 | FastAPI / SQLAlchemy / HTTP |
+| repository interface | `backend/app/repositories/protocols.py` | 永続化操作の契約 | 実装詳細 |
+| SQLite persistence | `backend/app/persistence/` と `repositories/sqlite.py` | schema・TX・SQL | 学習ルールの再実装 |
+
+## データフロー
+
+Phase 0 で成立させる学習データの流れ。
+
+```text
+SourceDocument
+  -> LearningItem
+  -> LearningEvent
+  -> LearnerState
+  -> ReviewSchedule
+```
+
+1. `SourceDocument` を手入力で保存する（どこで出会ったか）
+2. その Source に紐づく `LearningItem` を固定 fixture として登録する（何を覚えるか）
+3. review を記録すると `LearningEvent` が append される
+4. 同じ review から `LearnerState` が更新される
+5. 同じ review から `ReviewSchedule` が更新される
+6. `list_due(now)` が `due_at <= now` かつ active な項目だけを返す
+
+Phase 0 の fixture は LLM で抽出しない。例:
+
+- Source: `Je me suis rendu compte qu'il fallait changer de stratégie.`
+- LearningItem: `se rendre compte de`（type: `expression`、meaning: `〜に気づく`）
 
 ## 中核モデル
 
@@ -49,8 +94,8 @@ French source
 
 ### 1. SourceDocument と LearningItem を統合しない
 
-**Source は「触れた素材」、LearningItem は「覚える対象」であり、粒度も
-ライフサイクルも異なる。**
+**Source は「どこで出会ったか」、LearningItem は「何を覚えるか」。**
+粒度もライフサイクルも異なる。
 
 - 1つのSourceから複数のLearningItemが生まれる（1対多）
 - 同じ表現（例: `il s'agit de`）が複数のSourceに現れても、
@@ -63,7 +108,7 @@ Sourceの本文をLearningItem側にコピーしない。
 
 ### 2. LearningEvent と LearnerState を分ける
 
-**LearningEvent は「起きた事実の履歴」、LearnerState は「現在の状態」。**
+**Event は履歴、State は現在値。State は event から更新される。**
 
 分離する理由:
 
@@ -122,11 +167,8 @@ UI層の責務とし、domain層はUTCで一貫させる。
 
 ### 6. LLMを真実のデータベースにしない
 
-`SourceRef` は Phase 2（LLM抽出）に備えて `evidence_span` と `confidence` を
-optionalで持てる形にしてある。LLMの出力は必ずこの型付きデータへ正規化し、
-「原文のどこを根拠にしたか」「どれくらい確信があるか」を保持する。
-
-Phase 0ではどちらも `None` のままでよい。
+詳細は「LLM境界」を参照。Phase 0 では LLM を使わず、
+`evidence_span` / `confidence` は `None` のままでよい。
 
 ## 不変条件（バリデーション）
 
@@ -151,12 +193,27 @@ enum相当の値はすべて `Literal` で定義しており、未知の値は
 
 ## 既存クイズとの関係
 
-`ExerciseType` には既存の学習モード（`verb_conjugation` / `noun_gender` /
-`noun_article`）を含めてある。既存の動詞・名詞クイズの結果も
-`LearningEvent` として記録できる方向へ段階的に接続する想定。
+現行の動詞・名詞・冠詞クイズは当面、独立した既存 Exercise layer として維持する。
+
+- Phase 0 では既存 quiz 結果を自動で `LearningEvent` へ変換しない
+- 既存の動詞・名詞データは Tutor DB へ移行しない（`conjugation.py` / `noun.py` のまま）
+- Phase 3 で `LearningItem -> Exercise` 接続を行う際に、既存 quiz 基盤を再利用する
+
+`ExerciseType` には既存モード（`verb_conjugation` / `noun_gender` /
+`noun_article`）を含めてある。これは将来の接続のための型であり、
+Phase 0 の API が quiz 回答を Tutor 履歴へ書き込むことはない。
 
 Phase 0時点では `backend/app/domain/conjugation.py` /
 `backend/app/domain/noun.py` に一切変更を加えていない（破壊的変更なし）。
+
+## LLM境界
+
+- Phase 0 は LLM 非依存。Source / LearningItem は手入力またはテスト fixture で与える
+- Phase 2 で Source から LearningItem 候補を生成する
+- LLM 生成結果は正規化・ validation 後に domain へ入れる。出力をそのまま正解データにしない
+
+`SourceRef` は Phase 2 に備えて `evidence_span` と `confidence` を
+optional で持てる。Phase 0 ではどちらも `None` のままでよい。
 
 ## 永続化層（Issue #109）
 
@@ -207,6 +264,24 @@ SQLite 実装の入口は `TutorSqliteStore`。
 - 日時は timezone-aware のみ受け付け、UTC の ISO 8601
   （`YYYY-MM-DDTHH:MM:SS.ffffff+00:00`）で保存する。
   この形式なら文字列比較が時系列順と一致し、`due_at <= now` を SQL で判定できる
+
+### トランザクションの保証範囲
+
+`TutorService.record_review` は次の2段階で書き込む。
+
+1. **LearningEvent と LearnerState** — `LearningProgressRepository.append_event_and_upsert_state`
+   が同一トランザクションで保存する。state 書き込み失敗時は event も残らない
+   （`test_state_upsert_failure_rolls_back_event`）。重複 event ID も
+   このトランザクションで拒否し、state を二重適用しない。
+2. **ReviewSchedule** — event/state 確定後に `ReviewService.schedule_after_review`
+   が別トランザクションで upsert する。schedule 書き込みが失敗しても
+   event/state は残る（`test_schedule_write_failure_leaves_event_and_state`）。
+
+Phase 0 では event / state / schedule 三者の完全な原子性は保証しない。
+schedule が欠けた場合、LearnerState と LearningEvent 履歴から再計算できる。
+`review_count` は previous schedule に依存するため、欠けた状態で次の
+review を入れると 1 から再カウントされる。三者を1トランザクションに
+閉じるのは後続Issueの対象とする。
 
 ### schema versioning
 
@@ -368,3 +443,56 @@ LearningItem の `source_refs` は空でよい（出典なしの synthetic item�
 | 重複 event ID | 409 |
 | 不正な `result` / `exercise_type` / 空文字 / naive datetime | 422 |
 | 存在しない Source を参照する LearningItem 作成 | 422 |
+
+## Vertical slice 統合テスト（Issue #113）
+
+`backend/tests/test_tutor_vertical_slice.py` が Phase 0 の学習ループを
+HTTP API + SQLite で通す。clock は `TutorService` に注入し、
+`datetime.now()` に依存しない。
+
+必須 fixture:
+
+- Source: `Je me suis rendu compte qu'il fallait changer de stratégie.`
+- LearningItem: `se rendre compte de` / `expression` / `〜に気づく`
+
+| 観点 | テスト |
+|------|--------|
+| Source -> Item -> Event -> State -> Schedule -> due 前後 -> 再review | `test_vertical_slice_source_to_due_to_rereview` |
+| file DB 再 open 後の永続性 | 同上 |
+| clock 固定による due 前後 | 同上 / `test_future_due_is_excluded_until_due_at` |
+| correct 後の interval 延長 | 同上（1日 -> 3日） |
+| incorrect による lapse 増加と interval 短縮 | `test_incorrect_review_increases_lapse_and_shortens_interval` |
+| 複数 review 後も event history が残る | `test_multiple_reviews_preserve_event_history` |
+| 存在しない item への review | `test_review_missing_item_returns_404` |
+| duplicate event | `test_duplicate_event_is_rejected_without_double_apply` |
+| timezone 境界 | `test_due_query_uses_timezone_boundary` |
+| suspended / mastered の due 除外 | `test_suspended_and_mastered_items_are_not_due` |
+| schedule 書き込み失敗時の保証 | `test_schedule_write_failure_leaves_event_and_state` |
+| 既存 quiz / TTS 契約の回帰 | `test_existing_quiz_and_tts_contracts_are_unchanged` |
+
+## Phase 0 Exit Criteria（Issue #107）との対応
+
+Issue #107 の Phase 0 Exit Criteria は、synthetic な LearningItem について
+次が一貫して動くこと、かつ既存クイズが回帰しないこと。
+
+```text
+LearningItem作成
+ -> 学習イベント記録
+ -> LearnerState更新
+ -> ReviewSchedule更新
+ -> due review取得
+```
+
+| Exit Criteria | 満たした実装 | 自動テスト |
+|---------------|--------------|------------|
+| LearningItem 作成 | `TutorService.create_item` / `POST /api/tutor/items` | `test_vertical_slice_source_to_due_to_rereview` / `test_create_and_get_learning_item` |
+| 学習イベント記録 | `TutorService.record_review` → `LearningStateService.record_event` | `test_vertical_slice_source_to_due_to_rereview` / `test_review_persists_event_and_updates_state_and_schedule` |
+| LearnerState 更新 | domain `apply_review_event` + 同一TX upsert | `test_record_event_updates_counters_for_correct_and_incorrect` |
+| ReviewSchedule 更新 | domain `schedule_next_review` + `ReviewService` | `test_schedule_after_review_sets_next_due_for_first_review` |
+| due review 取得 | `ReviewScheduleRepository.list_due` / `GET /api/tutor/reviews/due` | `test_vertical_slice_source_to_due_to_rereview` / `test_list_due_uses_injected_now_not_wall_clock` |
+| 既存動詞・名詞クイズの回帰なし | quiz API は Tutor DB を使わない | `test_existing_quiz_and_tts_contracts_are_unchanged` / `tests/test_api.py` / `tests/test_nouns.py` |
+| 永続化境界 | Repository Protocol + SQLite | `tests/test_tutor_persistence.py` |
+| LLM 非依存 | Phase 0 の service / API に LLM 呼び出しなし | 実装上 import せず、本ドキュメントの LLM境界で明記 |
+
+Phase 1 以降へ進む前提は、上記が `bash scripts/quality-check.sh` で
+継続して通ることである。
