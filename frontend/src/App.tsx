@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ModeSelector } from './components/ModeSelector'
+import { TutorSourceForm } from './components/TutorSourceForm'
 import { NounArticleCard } from './components/NounArticleCard'
 import { NounArticleSessionResult } from './components/NounArticleSessionResult'
 import { NounCategorySelector } from './components/NounCategorySelector'
@@ -13,7 +14,7 @@ import { useNounArticleQuiz } from './hooks/useNounArticleQuiz'
 import { useNounQuiz } from './hooks/useNounQuiz'
 import { useQuiz } from './hooks/useQuiz'
 
-type AppMode = 'mode-select' | 'verb' | 'noun' | 'noun_article'
+type AppMode = 'mode-select' | 'verb' | 'noun' | 'noun_article' | 'tutor'
 
 export default function App() {
   const [appMode, setAppMode] = useState<AppMode>('mode-select')
@@ -31,6 +32,10 @@ export default function App() {
 
   const handleSelectNounArticle = () => {
     setAppMode('noun_article')
+  }
+
+  const handleSelectTutor = () => {
+    setAppMode('tutor')
   }
 
   const handleBackToModeSelect = () => {
@@ -88,7 +93,12 @@ export default function App() {
             onSelectVerb={handleSelectVerb}
             onSelectNoun={handleSelectNoun}
             onSelectNounArticle={handleSelectNounArticle}
+            onSelectTutor={handleSelectTutor}
           />
+        )}
+
+        {appMode === 'tutor' && (
+          <TutorSourceForm onBack={handleBackToModeSelect} />
         )}
 
         {/* 動詞活用練習 */}

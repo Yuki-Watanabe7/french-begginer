@@ -2,9 +2,15 @@ interface Props {
   onSelectVerb: () => void
   onSelectNoun: () => void
   onSelectNounArticle: () => void
+  onSelectTutor: () => void
 }
 
-export function ModeSelector({ onSelectVerb, onSelectNoun, onSelectNounArticle }: Props) {
+export function ModeSelector({
+  onSelectVerb,
+  onSelectNoun,
+  onSelectNounArticle,
+  onSelectTutor,
+}: Props) {
   return (
     <div style={styles.container}>
       <h2 style={styles.heading}>練習モードを選択</h2>
@@ -21,6 +27,10 @@ export function ModeSelector({ onSelectVerb, onSelectNoun, onSelectNounArticle }
         <button style={styles.card} onClick={onSelectNounArticle}>
           <span style={styles.label}>冠詞付き名詞</span>
           <span style={styles.desc}>日本語訳から un / une + 名詞を入力する</span>
+        </button>
+        <button style={styles.card} onClick={onSelectTutor}>
+          <span style={styles.label}>自分の教材</span>
+          <span style={styles.desc}>読んだフランス語テキストを保存する</span>
         </button>
       </div>
     </div>

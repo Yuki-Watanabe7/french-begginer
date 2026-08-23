@@ -25,6 +25,26 @@ async function navigateToFirstQuestion() {
   await screen.findByRole('button', { name: '判定する' })
 }
 
+describe('App — モード選択', () => {
+  it('既存の練習モードと自分の教材が表示される', () => {
+    render(<App />)
+    expect(screen.getByText('動詞活用練習')).toBeInTheDocument()
+    expect(screen.getByText('名詞の性クイズ')).toBeInTheDocument()
+    expect(screen.getByText('冠詞付き名詞')).toBeInTheDocument()
+    expect(screen.getByText('自分の教材')).toBeInTheDocument()
+  })
+
+  it('自分の教材からテキスト保存画面へ進み、モード選択に戻れる', async () => {
+    render(<App />)
+    await userEvent.click(screen.getByText('自分の教材'))
+    expect(screen.getByLabelText(/タイトル/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/本文/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'モード選択に戻る' }))
+    expect(screen.getByText('練習モードを選択')).toBeInTheDocument()
+    expect(screen.getByText('動詞活用練習')).toBeInTheDocument()
+  })
+})
+
 describe('App — 主要学習フロー', () => {
   beforeEach(() => {
     vi.resetAllMocks()
