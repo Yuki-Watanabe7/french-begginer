@@ -1,0 +1,196 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { TutorSourceForm } from '../components/TutorSourceForm'
+import { ApiError, createTutorSource } from '../api/tutor'
+import type { SourceDocument } from '../types'
+
+vi.mock('../api/tutor', async importOriginal => {
+  const actual = await importOriginal<typeof import('../api/tutor')>()
+  return {
+    ...actual,
+    createTutorSource: vi.fn(),
+  }
+})
+
+const mockCreate = vi.mocked(createTutorSource)
+
+const SAVED: SourceDocument = {
+  id: 'src-1',
+  source_type: 'manual_text',
+  title: 'Le Monde',
+  content: "Il s'agit d'un article.",
+  language: 'fr',
+  created_at: '2026-08-23T12:00:00+00:00',
+  metadata: { note: '新聞の社説' },
+}
+
+async function fillRequiredFields(
+  title = 'Le Monde',
+  content = "Il s'agit d'un article.",
+) {
+  await userEvent.type(screen.getByLabelText(/タイトル/), title)
+  await userEvent.type(screen.getByLabelText(/本文/), content)
+}
+
+describe('TutorSourceForm', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+  })
+
+  describe('表示', () => {
+    it('title / content / note の入力欄が表示される', () => {
+      render(<TutorSourceForm onBack={() => {}} />)
+
+      expect(screen.getByLabelText(/タイトル/)).toBeInTheDocument()
+      expect(screen.getByLabelText(/本文/)).toBeInTheDocument()
+      expect(screen.getByLabelText(/メモ/)).toBeInTheDocument()
+      expect(screen.getAllByText('必須')).toHaveLength(2)
+    })
+
+    it('本文欄はスマホ幅でも貼り付けやすい高さを持つ', () => {
+      render(<TutorSourceForm onBack={() => {}} />)
+      expect(screen.getByLabelText(/本文/)).toHaveStyle({ minHeight: '40vh' })
+    })
+  })
+
+  describe('validation', () => {
+    it('空入力では保存されず、必須エラーを表示する', async () => {
+      render(<TutorSourceForm onBack={() => {}} />)
+
+      await userEvent.click(screen.getByRole('button', { name: '保存する' }))
+
+      expect(mockCreate).not.toHaveBeenCalled()
+      expect(screen.getByText('タイトルを入力してください')).toBeInTheDocument()
+      expect(screen.getByText('フランス語の本文を入力してください')).toBeInTheDocument()
+    })
+
+    it('whitespaceのみも空として扱い、APIを呼ばない', async () => {
+      render(<TutorSourceForm onBack={() => {}} />)
+
+      await userEvent.type(screen.getByLabelText(/タイトル/), '   ')
+      await userEvent.type(screen.getByLabelText(/本文/), '     ')
+      await userEvent.click(screen.getByRole('button', { name: '保存する' }))
+
+      expect(mockCreate).not.toHaveBeenCalled()
+      expect(screen.getByText('タイトルを入力してください')).toBeInTheDocument()
+      expect(screen.getByText('フランス語の本文を入力してください')).toBeInTheDocument()
+    })
+  })
+
+  describe('保存', () => {
+    it('正常入力で createTutorSource が language=fr と note metadata で呼ばれる', async () => {
+      mockCreate.mockResolvedValueOnce(SAVED)
+      render(<TutorSourceForm onBack={() => {}} />)
+
+      await fillRequiredFields()
+      await userEvent.type(screen.getByLabelText(/メモ/), '新聞の社説')
+      await userEvent.click(screen.getByRole('button', { name: '保存する' }))
+
+      expect(mockCreate).toHaveBeenCalledWith({
+        title: 'Le Monde',
+        content: "Il s'agit d'un article.",
+        language: 'fr',
+        metadata: { note: '新聞の社説' },
+      })
+    })
+
+    it('note未入力時は空の metadata を送る', async () => {
+      mockCreate.mockResolvedValueOnce({ ...SAVED, metadata: {} })
+      render(<TutorSourceForm onBack={() => {}} />)
+
+      await fillRequiredFields()
+      await userEvent.click(screen.getByRole('button', { name: '保存する' }))
+
+      expect(mockCreate).toHaveBeenCalledWith({
+        title: 'Le Monde',
+        content: "Il s'agit d'un article.",
+        language: 'fr',
+        metadata: {},
+      })
+    })
+
+    it('保存中は多重送信されない', async () => {
+      let resolveCreate: (value: SourceDocument) => void = () => {}
+      mockCreate.mockImplementation(
+        () => new Promise(resolve => {
+          resolveCreate = resolve
+        }),
+      )
+      render(<TutorSourceForm onBack={() => {}} />)
+
+      await fillRequiredFields()
+      await userEvent.click(screen.getByRole('button', { name: '保存する' }))
+      expect(screen.getByRole('button', { name: '保存中...' })).toBeDisabled()
+
+      await userEvent.click(screen.getByRole('button', { name: '保存中...' }))
+      expect(mockCreate).toHaveBeenCalledTimes(1)
+
+      resolveCreate(SAVED)
+      await screen.findByText('保存しました')
+    })
+
+    it('APIエラー時に入力内容が保持され、再試行できる', async () => {
+      mockCreate
+        .mockRejectedValueOnce(new ApiError(500, { detail: 'boom' }))
+        .mockResolvedValueOnce(SAVED)
+      render(<TutorSourceForm onBack={() => {}} />)
+
+      await fillRequiredFields()
+      await userEvent.type(screen.getByLabelText(/メモ/), '新聞の社説')
+      await userEvent.click(screen.getByRole('button', { name: '保存する' }))
+
+      await screen.findByText('サーバーでエラーが発生しました。時間をおいて再度お試しください')
+      expect(screen.getByLabelText(/タイトル/)).toHaveValue('Le Monde')
+      expect(screen.getByLabelText(/本文/)).toHaveValue("Il s'agit d'un article.")
+      expect(screen.getByLabelText(/メモ/)).toHaveValue('新聞の社説')
+
+      await userEvent.click(screen.getByRole('button', { name: '保存する' }))
+      await screen.findByText('保存しました')
+      expect(mockCreate).toHaveBeenCalledTimes(2)
+    })
+
+    it('Backend 422 を理解可能な文言へ変換する', async () => {
+      mockCreate.mockRejectedValueOnce(
+        new ApiError(422, {
+          detail: [
+            { loc: ['body', 'title'], msg: 'String should have at least 1 character' },
+          ],
+        }),
+      )
+      render(<TutorSourceForm onBack={() => {}} />)
+
+      await fillRequiredFields()
+      await userEvent.click(screen.getByRole('button', { name: '保存する' }))
+
+      await screen.findByText('入力内容を確認してください')
+      expect(screen.getByText('タイトルを入力してください')).toBeInTheDocument()
+      expect(screen.getByLabelText(/タイトル/)).toHaveValue('Le Monde')
+    })
+
+    it('保存成功後に保存内容の確認画面へ進む', async () => {
+      mockCreate.mockResolvedValueOnce(SAVED)
+      render(<TutorSourceForm onBack={() => {}} />)
+
+      await fillRequiredFields()
+      await userEvent.type(screen.getByLabelText(/メモ/), '新聞の社説')
+      await userEvent.click(screen.getByRole('button', { name: '保存する' }))
+
+      await screen.findByText('保存しました')
+      expect(screen.getByRole('heading', { name: 'Le Monde' })).toBeInTheDocument()
+      expect(screen.getByText("Il s'agit d'un article.")).toBeInTheDocument()
+      expect(screen.getByText('新聞の社説')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '保存する' })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('戻る', () => {
+    it('モード選択に戻るができる', async () => {
+      const onBack = vi.fn()
+      render(<TutorSourceForm onBack={onBack} />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'モード選択に戻る' }))
+      expect(onBack).toHaveBeenCalledTimes(1)
+    })
+  })
+})
