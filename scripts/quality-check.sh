@@ -2,10 +2,10 @@
 set -euo pipefail
 
 cd backend
-uv sync --locked --extra dev
-uv run --extra dev ruff check .
-uv run --extra dev ruff format --check .
-uv run --extra dev pytest
+uv sync --locked --group dev
+uv run --group dev ruff check .
+uv run --group dev ruff format --check .
+uv run --group dev pytest
 
 cd ../frontend
 npm ci --include=dev

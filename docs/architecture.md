@@ -89,7 +89,8 @@ backend/app/
 │   └── nouns.py
 ├── domain/       # ビジネスルール（活用データ、モデル定義、判定ロジック）
 │   ├── conjugation.py
-│   └── noun.py
+│   ├── noun.py
+│   └── tutor.py      # Tutor機能の中核モデル（docs/tutor_architecture.md）
 └── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
     ├── question_service.py
     └── noun_service.py
@@ -98,6 +99,8 @@ backend/app/
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。
 - **domain層**: 活用データと判定ロジック。フレームワーク非依存。テストが書きやすい。
 - **service層**: ユースケース実装。domain層を組み合わせてビジネスフローを実現。
+
+> Tutor機能（Source取り込み〜長期復習）のドメインモデル設計は [tutor_architecture.md](./tutor_architecture.md) を参照。
 
 ## 動詞データ管理方針
 
