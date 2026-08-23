@@ -11,7 +11,7 @@
 | Package管理 (FE) | npm |
 | Package管理 (BE) | uv |
 | 開発環境 | Docker Compose / Dev Container / GitHub Codespaces |
-| DB (初期) | SQLite（コード内辞書） |
+| DB (初期) | SQLite（Tutor学習データ） / 動詞・名詞はコード内辞書 |
 | CI | GitHub Actions |
 
 ---

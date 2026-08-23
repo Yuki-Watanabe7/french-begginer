@@ -16,8 +16,10 @@ DB / FastAPI / OpenAI API には依存しない（domain層の原則）。
 
 詳細な設計意図は docs/tutor_architecture.md を参照。
 
+永続化は `app/repositories` / `app/persistence` が担う。
+このモジュールは永続化実装に依存しない。
+
 Phase 0のスコープ外（後続Issueで追加する）:
-  - 永続化 / repository
   - LLMによる学習項目抽出
   - LearnerState更新ロジック・SRSアルゴリズム
   - API / UI

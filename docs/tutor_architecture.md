@@ -2,9 +2,12 @@
 
 関心ベースの個人フランス語家庭教師機能（Roadmap: Issue #107）の設計ドキュメント。
 
-このドキュメントは Phase 0（Issue #108）で定義した中核ドメインモデルの
-責務分離と不変条件を記録する。実装は `backend/app/domain/tutor.py`、
-検証は `backend/tests/test_tutor_domain.py`。
+このドキュメントは Phase 0 の中核ドメインモデル（Issue #108）と
+永続化層（Issue #109）の責務分離・不変条件を記録する。
+
+- ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
+- 永続化: `backend/app/repositories/` / `backend/app/persistence/`
+  / `backend/tests/test_tutor_persistence.py`
 
 ## 目指す学習ループ
 
@@ -145,13 +148,64 @@ enum相当の値はすべて `Literal` で定義しており、未知の値は
 Phase 0時点では `backend/app/domain/conjugation.py` /
 `backend/app/domain/noun.py` に一切変更を加えていない（破壊的変更なし）。
 
-## Phase 0のスコープ外
+## 永続化層（Issue #109）
 
-以下は後続Issueで扱う。
+Tutor機能の可変ユーザーデータだけを永続化する。
+既存の動詞・名詞正解データ（`conjugation.py` / `noun.py`）はコード内管理のままにする。
 
-- 永続化 / repository実装
-- `LearnerState` の更新ロジック
-- SRSアルゴリズム（`ReviewSchedule` の算出）
-- LLMによる学習項目抽出
-- API / UI
-- ユーザー認証
+### 採用した実装
+
+**SQLAlchemy 2.x（同期）+ SQLite + 明示的 Repository。**
+
+| 候補 | 判断 |
+|------|------|
+| SQLAlchemy 2.x + SQLite | 採用。JSON列・FK・将来の PostgreSQL 切替を dialect 差ごと吸収できる |
+| Python 標準 `sqlite3` | 不採用。クエリ拡張と PostgreSQL 移行時に SQL を二重管理することになる |
+| Alembic | Phase 0 では未導入。初期スキーマが1版のみのため |
+
+`architecture.md` は将来の PostgreSQL 移行で Alembic を使う想定を残している。
+Phase 0 ではテーブルが domain モデルと 1:1 で、破壊的変更もまだない。
+Alembic の env / revision 一式を今足すより、`schema_migrations` で現行バージョンを
+記録する方が小さい。連続した ALTER または PostgreSQL 移行が必要になった時点で
+Alembic へ移す。
+
+### Repository 境界
+
+service / domain は SQLite や ORM を直接 import しない。
+`backend/app/repositories/protocols.py` が Phase 0 で必要な操作だけを定義する。
+
+| Repository | 操作 | 備考 |
+|------------|------|------|
+| `SourceDocumentRepository` | create / get / list | 削除なし |
+| `LearningItemRepository` | create / get / list | 削除なし |
+| `LearningEventRepository` | append / list_by_item | append-only。`occurred_at`, `id` 順 |
+| `LearnerStateRepository` | get / upsert | LearningItem につき1件（PK） |
+| `ReviewScheduleRepository` | get / upsert / list_due | LearningItem につき1件（PK） |
+
+SQLite 実装の入口は `TutorSqliteStore`。
+接続先は `TUTOR_DATABASE_URL`、未指定時は `backend/data/tutor.db`。
+テストは `TutorSqliteStore.in_memory()` または temporary file URL を使う。
+
+### データ整合性
+
+- `LearningEvent` / `LearnerState` / `ReviewSchedule` は存在する
+  `LearningItem` を参照する（FK + repository 側の存在チェック）
+- `LearnerState` と `ReviewSchedule` は `learning_item_id` を主キーにし、1件に制限する
+- `ON DELETE RESTRICT` により、履歴がある LearningItem を SQL から消しても失敗する
+- repository に `delete` を置かない（履歴消失を安易に許可しない）
+- 日時は timezone-aware のみ受け付け、UTC の ISO 8601
+  （`YYYY-MM-DDTHH:MM:SS.ffffff+00:00`）で保存する。
+  この形式なら文字列比較が時系列順と一致し、`due_at <= now` を SQL で判定できる
+
+### schema versioning
+
+`schema_migrations` テーブルが適用済み version を保持する。
+
+1. version 0（未初期化）: `create_all` で現行スキーマを作り version 1 を記録する
+2. version < 現行: `UPGRADE_STEPS` の upgrade 関数を順に適用する
+3. version > 現行: `SchemaVersionError`（新しいDBを古いコードで開いた）
+
+Phase 0 の現行 version は `1`。`UPGRADE_STEPS` は空である。
+次の破壊的変更時に version 2 の upgrade 関数を追加する。
+
+ローカルで生成される `*.db` は git 管理対象外（`.gitignore`）。

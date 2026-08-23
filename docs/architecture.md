@@ -91,6 +91,8 @@ backend/app/
 │   ├── conjugation.py
 │   ├── noun.py
 │   └── tutor.py      # Tutor機能の中核モデル（docs/tutor_architecture.md）
+├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
+├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
     ├── question_service.py
     └── noun_service.py
@@ -98,6 +100,7 @@ backend/app/
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。
 - **domain層**: 活用データと判定ロジック。フレームワーク非依存。テストが書きやすい。
+- **persistence / repository層**: Tutor可変データの永続化。serviceは Protocol に依存し、SQLite を直接見ない。
 - **service層**: ユースケース実装。domain層を組み合わせてビジネスフローを実現。
 
 > Tutor機能（Source取り込み〜長期復習）のドメインモデル設計は [tutor_architecture.md](./tutor_architecture.md) を参照。
@@ -272,19 +275,31 @@ GET /api/questions/next?mode=noun_gender
 
 ## 将来的なDB拡張方針
 
-現在は活用データをコード内辞書で保持しています。DB導入時の方針:
+### 現状（Issue #109）
+
+Tutor機能の可変ユーザーデータだけを SQLite に永続化する。
+
+- 対象: `SourceDocument` / `LearningItem` / `LearningEvent` /
+  `LearnerState` / `ReviewSchedule`
+- 実装: SQLAlchemy 2.x（同期）+ Repository Protocol
+- 接続: 環境変数 `TUTOR_DATABASE_URL`（未指定時は `backend/data/tutor.db`）
+- schema version: `schema_migrations` テーブル（Alembic は未導入）
+- 動詞・名詞の正解データは `conjugation.py` / `noun.py` のコード内管理のまま
+
+詳細は [tutor_architecture.md](./tutor_architecture.md) の永続化層を参照。
+
+### 将来
 
 1. **SQLite → PostgreSQL 移行**
-   - SQLAlchemy (非同期: `sqlalchemy[asyncio]`) + Alembic でマイグレーション管理
-   - Docker Compose に `db` サービスを追加し、接続文字列を環境変数 `DATABASE_URL` で切り替え
-   - SQLite: `sqlite+aiosqlite:///./french.db`
+   - SQLAlchemy の接続先を切り替える
+   - 連続した schema 変更または複数環境向け migration が必要になった時点で Alembic を導入する
+   - Docker Compose に `db` サービスを追加し、接続文字列を環境変数で切り替える
+   - SQLite: `sqlite:///./data/tutor.db`
    - PostgreSQL: `postgresql+asyncpg://user:pass@db:5432/french`
 
-2. **想定テーブル**
-   - `verbs`: 動詞一覧
-   - `conjugations`: (verb_id, tense, pronoun, form) の活用データ
-   - `quiz_results`: ユーザーの回答履歴（ユーザー認証追加後）
+2. **動詞・名詞データのDB移行は別Issue**
+   - 既存クイズの正解データは、Tutor永続化とは独立してコード内辞書を維持する
 
 3. **移行タイミング**
-   - 学習履歴の永続化が必要になった時点でPostgreSQLへ移行
-   - それまではSQLiteで十分
+   - ユーザー認証・複数環境・PostgreSQL が必要になった時点
+   - 単一学習者のローカル履歴だけなら SQLite で十分
