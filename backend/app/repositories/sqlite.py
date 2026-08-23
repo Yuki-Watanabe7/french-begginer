@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.domain.review_scheduler import DUE_ITEM_STATUS
 from app.domain.tutor import (
     LearnerState,
     LearningEvent,
@@ -163,7 +164,12 @@ class SqliteReviewScheduleRepository:
         with self._sessions() as session:
             rows = session.scalars(
                 select(ReviewScheduleRow)
+                .join(
+                    LearningItemRow,
+                    ReviewScheduleRow.learning_item_id == LearningItemRow.id,
+                )
                 .where(ReviewScheduleRow.due_at <= now_iso)
+                .where(LearningItemRow.status == DUE_ITEM_STATUS)
                 .order_by(ReviewScheduleRow.due_at, ReviewScheduleRow.learning_item_id)
             ).all()
             return [row.to_domain() for row in rows]

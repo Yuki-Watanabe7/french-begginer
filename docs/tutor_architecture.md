@@ -3,13 +3,18 @@
 関心ベースの個人フランス語家庭教師機能（Roadmap: Issue #107）の設計ドキュメント。
 
 このドキュメントは Phase 0 の中核ドメインモデル（Issue #108）、
-永続化層（Issue #109）、学習状態更新（Issue #110）の責務分離・不変条件を記録する。
+永続化層（Issue #109）、学習状態更新（Issue #110）、
+初期 Review Scheduler（Issue #111）の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
 - 永続化: `backend/app/repositories/` / `backend/app/persistence/`
   / `backend/tests/test_tutor_persistence.py`
 - 状態更新: `backend/app/services/learning_state_service.py`
   / `backend/tests/test_learning_state_service.py`
+- 復習予定: `backend/app/domain/review_scheduler.py`
+  / `backend/app/services/review_service.py`
+  / `backend/tests/test_review_scheduler.py`
+  / `backend/tests/test_review_service.py`
 
 ## 目指す学習ループ
 
@@ -252,3 +257,58 @@ LearnerState は LearningEvent のキャッシュである。event と state の
 書き込みは同一トランザクションだが、万一 state だけ欠けた場合は
 `LearningStateService.recompute_learner_state` が履歴を `occurred_at, id`
 順に畳み込んで state を再構築できる。
+
+## 復習スケジューラ（Issue #111）
+
+`schedule_next_review(state, event, previous_schedule)` が次の
+ReviewSchedule を決める。更新ルール自体は domain の純関数に置き、
+service は存在確認と永続化、due 取得を担う。
+
+```text
+LearnerState（当該event適用後）と LearningEvent
+  -> schedule_next_review で次予定を算出
+  -> ReviewSchedule を upsert
+  -> list_due(now) で due_at <= now かつ active の項目を取得
+```
+
+`datetime.now()` は domain からも service からも呼ばない。
+due 算出の基準は `event.occurred_at`、due 取得の基準は引数 `now`。
+
+### 初期スケジューリング方針
+
+Phase 0 では SM-2 / FSRS は導入しない。日数の最適性は狙わず、
+後からアルゴリズムを差し替えられる **単純・deterministic・説明可能な
+baseline** にする。同じ (state, event, previous_schedule) からは
+常に同じ ReviewSchedule になる。
+
+| 条件 | interval_days |
+|------|----------------|
+| incorrect（lapse） | 1 |
+| 連続1回正解（初回学習後を含む） | 1 |
+| 連続2回正解 | 3 |
+| 連続3回正解 | 7 |
+| 連続4回以上 | 14（上限） |
+
+- due_at = `event.occurred_at + interval_days`
+- 連続正解が増えても interval は短くならない
+- incorrect では interval を 1 日に戻し、`lapse_count` を +1
+- `review_count` は previous があれば +1、なければ 1
+- `scheduler_version` は現行アルゴリズムの版（`v0`）を書き込む
+- 過去の schedule 履歴は残さず、現行予定だけを上書きする
+
+### due 取得
+
+`ReviewScheduleRepository.list_due(now)` / `ReviewService.list_due(now)`:
+
+- `due_at <= now` の予定だけ返す
+- **active な LearningItem のみ**。`suspended`（ユーザーが一時除外）と
+  `mastered`（定着済み）は、予定が残っていても出題対象にしない。
+  schedule 自体は消さないので、status を active に戻せば再開できる
+- 返却順は `due_at` 昇順、同じ due_at なら `learning_item_id` 昇順
+
+### 将来拡張への備え
+
+- `scheduler_version` でアルゴリズムを識別する
+- 間隔計算（domain）と due query（repository）を分離している
+- Phase 4 で SM-2 / FSRS 等と比較・移行できる
+- 過去 schedule を再計算して履歴を書き換える設計にはしない

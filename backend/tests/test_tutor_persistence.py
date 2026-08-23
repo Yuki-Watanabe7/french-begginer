@@ -255,6 +255,19 @@ def test_list_due_rejects_naive_datetime(store: TutorSqliteStore):
         store.review_schedules.list_due(datetime(2026, 1, 1, 12, 0))
 
 
+def test_list_due_excludes_suspended_and_mastered_items(store: TutorSqliteStore):
+    now = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+    active = _item(canonical_form="active", meaning_ja="学習中")
+    suspended = _item(canonical_form="suspended", meaning_ja="停止", status="suspended")
+    mastered = _item(canonical_form="mastered", meaning_ja="定着", status="mastered")
+    for item in (active, suspended, mastered):
+        store.learning_items.create(item)
+        store.review_schedules.upsert(_schedule(item.id, now - timedelta(hours=1)))
+
+    due = store.review_schedules.list_due(now)
+    assert [schedule.learning_item_id for schedule in due] == [active.id]
+
+
 def test_temporary_file_db_is_isolated(tmp_path: Path):
     path_a = tmp_path / "a.db"
     path_b = tmp_path / "b.db"

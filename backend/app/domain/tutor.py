@@ -20,6 +20,7 @@ DB / FastAPI / OpenAI API には依存しない（domain層の原則）。
 このモジュールは永続化実装に依存しない。
 
 LearnerState の更新は `apply_review_event` が担う（Issue #110）。
+復習予定の算出は `review_scheduler.schedule_next_review` が担う（Issue #111）。
 SRS / LLM / API / UI は後続Issue。
 """
 

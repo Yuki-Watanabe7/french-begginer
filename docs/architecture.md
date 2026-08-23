@@ -90,13 +90,15 @@ backend/app/
 ├── domain/       # ビジネスルール（活用データ、モデル定義、判定ロジック）
 │   ├── conjugation.py
 │   ├── noun.py
-│   └── tutor.py      # Tutor機能の中核モデル（docs/tutor_architecture.md）
+│   ├── tutor.py              # Tutor機能の中核モデル（docs/tutor_architecture.md）
+│   └── review_scheduler.py   # 初期復習間隔の算出（Issue #111）
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
     ├── question_service.py
     ├── noun_service.py
-    └── learning_state_service.py  # LearningEvent → LearnerState 更新
+    ├── learning_state_service.py  # LearningEvent → LearnerState 更新
+    └── review_service.py          # 復習予定の保存と due 取得
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。
