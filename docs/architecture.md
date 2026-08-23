@@ -34,6 +34,12 @@ SQLite (初期) → PostgreSQL (将来)
 | GET | `/api/nouns/article/session` | セッション用に重複なしで最大`count`問の冠詞+名詞問題を返す |
 | POST | `/api/nouns/article/check` | 冠詞+名詞回答の正誤判定 |
 | GET | `/api/tts/speak` | フランス語テキストをOpenAI TTSで音声化してaudio/mpegを返す。`OPENAI_API_KEY`未設定時は503を返す |
+| POST | `/api/tutor/sources` | 手入力の SourceDocument を作成する |
+| GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得する |
+| POST | `/api/tutor/items` | 手入力の LearningItem を作成する |
+| GET | `/api/tutor/items/{item_id}` | LearningItem と現在の LearnerState / ReviewSchedule を返す |
+| POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録し、LearnerState と ReviewSchedule を更新する |
+| GET | `/api/tutor/reviews/due` | 現在 due の LearningItem を返す。任意時刻の query は持たない |
 
 ### GET /api/questions/next クエリパラメータ
 
@@ -86,7 +92,8 @@ backend/app/
 ├── api/          # HTTPリクエスト/レスポンスの受け取り・返却のみ
 │   ├── questions.py
 │   ├── answers.py
-│   └── nouns.py
+│   ├── nouns.py
+│   └── tutor.py              # Tutor最小API（Issue #112）
 ├── domain/       # ビジネスルール（活用データ、モデル定義、判定ロジック）
 │   ├── conjugation.py
 │   ├── noun.py
@@ -98,7 +105,8 @@ backend/app/
     ├── question_service.py
     ├── noun_service.py
     ├── learning_state_service.py  # LearningEvent → LearnerState 更新
-    └── review_service.py          # 復習予定の保存と due 取得
+    ├── review_service.py          # 復習予定の保存と due 取得
+    └── tutor_service.py           # Tutor最小APIのユースケース
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。
