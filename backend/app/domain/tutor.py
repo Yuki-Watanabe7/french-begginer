@@ -24,6 +24,8 @@ LearnerState の更新は `apply_review_event` が担う（Issue #110）。
 復習予定の算出は `review_scheduler.schedule_next_review` が担う（Issue #111）。
 Candidate の状態遷移は `apply_candidate_status` が担う（Issue #131）。
 LLM 抽出は `services/extraction_service` が担う（Issue #132）。
+Candidate の evidence 検証・正規化・重複統合は
+`candidate_normalization` が担う（Issue #133）。
 SRS / 採否 API / UI は後続Issue。
 """
 

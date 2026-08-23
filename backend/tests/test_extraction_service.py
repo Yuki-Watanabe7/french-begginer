@@ -278,3 +278,37 @@ def test_domain_and_service_work_without_openai_api_key(monkeypatch):
     result = ExtractionService(fake).extract(_source())
     assert len(result.candidates) == 1
     assert _source().content == CONTENT
+
+
+def test_extract_excludes_out_of_range_span_and_keeps_valid():
+    valid, *rest = _four_types()
+    invalid = _extracted(
+        canonical_form="hors texte",
+        fragment="stratégie",
+        evidence_span=ExtractedEvidenceSpan(start=0, end=len(CONTENT) + 8),
+    )
+    fake = FakeLearningItemExtractor(result=_result((valid, invalid)))
+    result = ExtractionService(fake).extract(_source())
+
+    assert [c.canonical_form for c in result.candidates] == [valid.canonical_form]
+    assert len(result.exclusions) == 1
+    assert result.exclusions[0].reason == "evidence_span_out_of_range"
+    assert result.exclusions[0].source_index == 1
+
+
+def test_extract_merges_duplicates_from_fake_llm_response():
+    fake = FakeLearningItemExtractor(
+        result=_result(
+            (
+                _extracted(canonical_form="  Se Rendre Compte  ", confidence=0.4),
+                _extracted(canonical_form="se rendre compte", confidence=0.95),
+            )
+        )
+    )
+    result = ExtractionService(fake).extract(_source())
+
+    assert len(result.candidates) == 1
+    assert result.candidates[0].canonical_form == "se rendre compte"
+    assert result.candidates[0].confidence == 0.95
+    assert result.exclusions[0].reason == "duplicate"
+    assert result.candidates[0].metadata["normalization_key"]

@@ -42,7 +42,8 @@ backend/app/
 ├── api/           # HTTP の関心事のみ（パス・ステータスコード・Pydantic モデルの受け渡し）
 ├── domain/        # ビジネスルール。フレームワーク非依存
 │   ├── conjugation.py  # 活用データ辞書・Pydantic モデル・判定ロジック
-│   └── review_scheduler.py  # 初期復習間隔の算出
+│   ├── review_scheduler.py  # 初期復習間隔の算出
+│   └── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/      # ユースケース（domain を組み合わせる処理）

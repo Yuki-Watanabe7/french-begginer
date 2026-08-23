@@ -107,6 +107,7 @@ backend/app/
 │   ├── conjugation.py
 │   ├── noun.py
 │   ├── tutor.py              # Tutor機能の中核モデル（docs/tutor_architecture.md）
+│   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合（Issue #133）
 │   └── review_scheduler.py   # 初期復習間隔の算出（Issue #111）
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
@@ -115,7 +116,8 @@ backend/app/
     ├── noun_service.py
     ├── learning_state_service.py  # LearningEvent → LearnerState 更新
     ├── review_service.py          # 復習予定の保存と due 取得
-    └── tutor_service.py           # Tutor最小APIのユースケース
+    ├── tutor_service.py           # Tutor最小APIのユースケース
+    └── extraction_service.py      # Source から Candidate を抽出し正規化する
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。
