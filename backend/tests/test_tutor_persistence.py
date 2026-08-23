@@ -74,7 +74,36 @@ def test_source_document_create_get_list(store: TutorSqliteStore):
 
     assert store.source_documents.get(first.id) == first
     listed = store.source_documents.list()
-    assert [doc.id for doc in listed] == [second.id, first.id]
+    assert [doc.id for doc in listed] == [first.id, second.id]
+
+
+def test_source_document_list_is_stable_for_same_created_at(store: TutorSqliteStore):
+    same_time = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+    older = SourceDocument(
+        id="src-old",
+        title="old",
+        content="old",
+        created_at=same_time - timedelta(days=1),
+    )
+    a = SourceDocument(id="src-a", title="A", content="a", created_at=same_time)
+    b = SourceDocument(id="src-b", title="B", content="b", created_at=same_time)
+    newer = SourceDocument(
+        id="src-new",
+        title="new",
+        content="new",
+        created_at=same_time + timedelta(days=1),
+    )
+    store.source_documents.create(a)
+    store.source_documents.create(newer)
+    store.source_documents.create(older)
+    store.source_documents.create(b)
+
+    listed = store.source_documents.list()
+    assert [doc.id for doc in listed] == ["src-new", "src-a", "src-b", "src-old"]
+    assert [doc.id for doc in store.source_documents.list(limit=2)] == [
+        "src-new",
+        "src-a",
+    ]
 
 
 def test_learning_item_create_and_get_are_persisted(store: TutorSqliteStore):

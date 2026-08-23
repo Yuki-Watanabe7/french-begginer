@@ -35,11 +35,20 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/nouns/article/check` | 冠詞+名詞回答の正誤判定 |
 | GET | `/api/tts/speak` | フランス語テキストをOpenAI TTSで音声化してaudio/mpegを返す。`OPENAI_API_KEY`未設定時は503を返す |
 | POST | `/api/tutor/sources` | 手入力の SourceDocument を作成する |
+| GET | `/api/tutor/sources` | 保存済み Source の一覧（`created_at` 降順）。全文ではなく SourceSummary を返す |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得する |
 | POST | `/api/tutor/items` | 手入力の LearningItem を作成する |
 | GET | `/api/tutor/items/{item_id}` | LearningItem と現在の LearnerState / ReviewSchedule を返す |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録し、LearnerState と ReviewSchedule を更新する |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem を返す。任意時刻の query は持たない |
+
+### GET /api/tutor/sources クエリパラメータ
+
+| パラメータ | 型 | デフォルト | 説明 |
+|------------|-----|------------|------|
+| `limit` | 1〜100 の整数 | `50` | 取得件数。`created_at` 降順（同一時刻は `id` 昇順）。不正値は 422 |
+
+レスポンスは全文ではなく `SourceSummary`（`content_preview` は先頭120文字）。0件でも 200 + `[]`。
 
 ### GET /api/questions/next クエリパラメータ
 
