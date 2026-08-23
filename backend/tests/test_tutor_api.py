@@ -7,6 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_tutor_store
+from app.api.tutor import SOURCE_CONTENT_PREVIEW_MAX_CHARS
+from app.domain.tutor import SourceDocument
 from app.main import app
 from app.repositories.sqlite import TutorSqliteStore
 
@@ -68,6 +70,75 @@ def test_get_source_not_found(client: TestClient):
 def test_create_source_rejects_empty_title(client: TestClient):
     res = client.post("/api/tutor/sources", json={"title": "", "content": "bonjour"})
     assert res.status_code == 422
+
+
+def test_list_sources_empty(client: TestClient):
+    res = client.get("/api/tutor/sources")
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+def test_list_sources_returns_created_sources_newest_first(client: TestClient):
+    first = _create_source(client, title="first", content="un")
+    second = _create_source(client, title="second", content="deux")
+
+    res = client.get("/api/tutor/sources")
+    assert res.status_code == 200
+    body = res.json()
+    assert [row["id"] for row in body] == [second["id"], first["id"]]
+    assert "content" not in body[0]
+    assert body[0]["title"] == "second"
+    assert body[0]["content_preview"] == "deux"
+    assert body[0]["language"] == "fr"
+
+    detail = client.get(f"/api/tutor/sources/{first['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["content"] == "un"
+
+
+def test_list_sources_order_is_stable_for_same_created_at(
+    client: TestClient, store: TutorSqliteStore
+):
+    same_time = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+    store.source_documents.create(
+        SourceDocument(id="src-b", title="B", content="b", created_at=same_time)
+    )
+    store.source_documents.create(
+        SourceDocument(id="src-a", title="A", content="a", created_at=same_time)
+    )
+
+    res = client.get("/api/tutor/sources")
+    assert res.status_code == 200
+    assert [row["id"] for row in res.json()] == ["src-a", "src-b"]
+
+
+def test_list_sources_truncates_content_preview(client: TestClient):
+    content = "é" * (SOURCE_CONTENT_PREVIEW_MAX_CHARS + 20)
+    created = _create_source(client, content=content)
+
+    res = client.get("/api/tutor/sources")
+    assert res.status_code == 200
+    row = res.json()[0]
+    assert row["id"] == created["id"]
+    assert row["content_preview"] == content[:SOURCE_CONTENT_PREVIEW_MAX_CHARS]
+    assert "content" not in row
+
+
+def test_list_sources_honors_limit(client: TestClient):
+    _create_source(client, title="a", content="a")
+    _create_source(client, title="b", content="b")
+    _create_source(client, title="c", content="c")
+
+    res = client.get("/api/tutor/sources?limit=2")
+    assert res.status_code == 200
+    assert len(res.json()) == 2
+
+
+def test_list_sources_rejects_invalid_limit(client: TestClient):
+    assert client.get("/api/tutor/sources?limit=0").status_code == 422
+    assert client.get("/api/tutor/sources?limit=-1").status_code == 422
+    assert client.get("/api/tutor/sources?limit=101").status_code == 422
+    assert client.get("/api/tutor/sources?limit=abc").status_code == 422
 
 
 def test_create_and_get_learning_item(client: TestClient):
@@ -250,6 +321,7 @@ def test_openapi_declares_tutor_request_and_response_schemas():
     spec = res.json()
     paths = spec["paths"]
     assert "/api/tutor/sources" in paths
+    assert "get" in paths["/api/tutor/sources"]
     assert "/api/tutor/sources/{source_id}" in paths
     assert "/api/tutor/items" in paths
     assert "/api/tutor/items/{item_id}" in paths
@@ -268,6 +340,7 @@ def test_openapi_declares_tutor_request_and_response_schemas():
         "ReviewResponse",
         "DueReviewResponse",
         "SourceDocument",
+        "SourceSummary",
     ):
         assert name in schemas, name
 

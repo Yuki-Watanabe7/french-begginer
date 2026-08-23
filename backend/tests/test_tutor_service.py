@@ -39,6 +39,34 @@ def test_get_source_missing_raises_not_found(service: TutorService):
         service.get_source("missing-source")
 
 
+def test_list_sources_empty(service: TutorService):
+    assert service.list_sources() == []
+
+
+def test_list_sources_newest_first_and_stable_for_same_created_at(
+    store: TutorSqliteStore, service: TutorService
+):
+    same_time = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+    store.source_documents.create(
+        SourceDocument(
+            id="src-old",
+            title="old",
+            content="old",
+            created_at=same_time - timedelta(seconds=1),
+        )
+    )
+    store.source_documents.create(
+        SourceDocument(id="src-b", title="B", content="b", created_at=same_time)
+    )
+    store.source_documents.create(
+        SourceDocument(id="src-a", title="A", content="a", created_at=same_time)
+    )
+
+    listed = service.list_sources()
+    assert [doc.id for doc in listed] == ["src-a", "src-b", "src-old"]
+    assert [doc.id for doc in service.list_sources(limit=2)] == ["src-a", "src-b"]
+
+
 def test_create_item_without_source_refs(service: TutorService):
     item = service.create_item(
         item_type="expression",

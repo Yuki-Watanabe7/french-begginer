@@ -44,13 +44,14 @@ class SqliteSourceDocumentRepository:
             row = session.get(SourceDocumentRow, document_id)
             return row.to_domain() if row is not None else None
 
-    def list(self) -> list[SourceDocument]:
+    def list(self, *, limit: int | None = None) -> list[SourceDocument]:
+        stmt = select(SourceDocumentRow).order_by(
+            SourceDocumentRow.created_at.desc(), SourceDocumentRow.id
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
         with self._sessions() as session:
-            rows = session.scalars(
-                select(SourceDocumentRow).order_by(
-                    SourceDocumentRow.created_at, SourceDocumentRow.id
-                )
-            ).all()
+            rows = session.scalars(stmt).all()
             return [row.to_domain() for row in rows]
 
 

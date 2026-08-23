@@ -5,7 +5,8 @@
 このドキュメントは Phase 0 の中核ドメインモデル（Issue #108）、
 永続化層（Issue #109）、学習状態更新（Issue #110）、
 初期 Review Scheduler（Issue #111）、最小 API（Issue #112）、
-vertical slice 統合テスト（Issue #113）の責務分離・不変条件を記録する。
+vertical slice 統合テスト（Issue #113）、
+および Phase 1 の Source 一覧 API（Issue #121）の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
 - 永続化: `backend/app/repositories/` / `backend/app/persistence/`
@@ -413,6 +414,7 @@ POST /api/tutor/items/{item_id}/reviews
 | Method | Path | 説明 |
 |--------|------|------|
 | POST | `/api/tutor/sources` | 手入力テキストの SourceDocument を作成（201） |
+| GET | `/api/tutor/sources` | 保存済み Source の一覧。`created_at` 降順、同一時刻は `id` 昇順 |
 | GET | `/api/tutor/sources/{source_id}` | 1件取得 |
 | POST | `/api/tutor/items` | 手入力の LearningItem を作成（201） |
 | GET | `/api/tutor/items/{item_id}` | item と現在の LearnerState / ReviewSchedule |
@@ -422,6 +424,22 @@ POST /api/tutor/items/{item_id}/reviews
 `GET /api/tutor/reviews/due` は任意時刻を HTTP query から受け取らない。
 due 判定の基準はサーバー時刻（`utcnow`）。テストでは `TutorService` の
 `clock` 注入、または過去の `occurred_at` で due を作る。
+
+### Source 一覧（Issue #121）
+
+`GET /api/tutor/sources` は履歴画面向けに、保存済み Source の要約だけを返す。
+全文が必要な場合は既存の `GET /api/tutor/sources/{source_id}` を使う。
+
+| 項目 | 仕様 |
+|------|------|
+| 並び | `created_at` 降順。同一時刻は `id` 昇順（deterministic） |
+| レスポンス | `SourceSummary`（`id` / `source_type` / `title` / `language` / `created_at` / `content_preview`） |
+| `content_preview` | 本文の先頭 120 文字。全文は含めない |
+| `limit` | 1〜100。未指定時は 50。不正値は 422 |
+| 0件 | 200 + `[]` |
+
+`limit` は高度な pagination ではなく、無制限取得を固定仕様にしないための上限である。
+router は SQL を扱わず、`TutorService.list_sources` 経由で Repository の `list` を使う。
 
 ### review の `occurred_at`
 
@@ -441,7 +459,7 @@ LearningItem の `source_refs` は空でよい（出典なしの synthetic item�
 | Source / Item / Event の作成成功 | 201 |
 | 存在しない Source / LearningItem | 404 |
 | 重複 event ID | 409 |
-| 不正な `result` / `exercise_type` / 空文字 / naive datetime | 422 |
+| 不正な `result` / `exercise_type` / 空文字 / naive datetime / 不正な `limit` | 422 |
 | 存在しない Source を参照する LearningItem 作成 | 422 |
 
 ## Vertical slice 統合テスト（Issue #113）

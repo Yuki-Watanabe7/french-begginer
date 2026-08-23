@@ -145,6 +145,10 @@ class TutorService:
             raise TutorNotFoundError("SourceDocument", source_id)
         return document
 
+    def list_sources(self, *, limit: int | None = None) -> list[SourceDocument]:
+        """保存済み Source を created_at 降順で返す。limit 未指定なら全件。"""
+        return self._sources.list(limit=limit)
+
     def create_item(
         self,
         *,
