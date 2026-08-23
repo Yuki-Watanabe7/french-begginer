@@ -4,7 +4,8 @@
 
 このドキュメントは Phase 0 の中核ドメインモデル（Issue #108）、
 永続化層（Issue #109）、学習状態更新（Issue #110）、
-初期 Review Scheduler（Issue #111）の責務分離・不変条件を記録する。
+初期 Review Scheduler（Issue #111）、最小 API（Issue #112）の
+責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
 - 永続化: `backend/app/repositories/` / `backend/app/persistence/`
@@ -15,6 +16,8 @@
   / `backend/app/services/review_service.py`
   / `backend/tests/test_review_scheduler.py`
   / `backend/tests/test_review_service.py`
+- 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
+  / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 
 ## 目指す学習ループ
 
@@ -312,3 +315,56 @@ baseline** にする。同じ (state, event, previous_schedule) からは
 - 間隔計算（domain）と due query（repository）を分離している
 - Phase 4 で SM-2 / FSRS 等と比較・移行できる
 - 過去 schedule を再計算して履歴を書き換える設計にはしない
+
+## 最小 API（Issue #112）
+
+Phase 0 の domain / persistence / learning state / review scheduler を、
+Frontend や LLM ingestion から利用できる最小 HTTP API として公開する。
+UI・認証・LLM抽出は含めない。synthetic な SourceDocument / LearningItem を
+登録し、学習イベント記録と due review 取得ができることに限定する。
+
+router（`app/api/tutor.py`）は request/response schema と HTTP status 変換だけを持つ。
+repository へは直接アクセスせず、`TutorService` が既存 service を組み合わせる。
+
+```text
+POST /api/tutor/items/{item_id}/reviews
+  -> LearningEvent append
+  -> LearnerState update
+  -> ReviewSchedule update
+```
+
+### エンドポイント
+
+| Method | Path | 説明 |
+|--------|------|------|
+| POST | `/api/tutor/sources` | 手入力テキストの SourceDocument を作成（201） |
+| GET | `/api/tutor/sources/{source_id}` | 1件取得 |
+| POST | `/api/tutor/items` | 手入力の LearningItem を作成（201） |
+| GET | `/api/tutor/items/{item_id}` | item と現在の LearnerState / ReviewSchedule |
+| POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録（201） |
+| GET | `/api/tutor/reviews/due` | 現在 due の active LearningItem |
+
+`GET /api/tutor/reviews/due` は任意時刻を HTTP query から受け取らない。
+due 判定の基準はサーバー時刻（`utcnow`）。テストでは `TutorService` の
+`clock` 注入、または過去の `occurred_at` で due を作る。
+
+### review の `occurred_at`
+
+- 指定した場合: その時刻を LearningEvent の発生時刻とする（timezone-aware 必須）
+- 未指定の場合: サーバーの現在時刻（UTC）を使う
+
+### 不正な Source 参照
+
+LearningItem の `source_refs` は空でよい（出典なしの synthetic item）。
+`source_document_id` を指定した場合、その SourceDocument が存在しなければ
+**422** で拒否する。存在しない出典へのぶら下がり参照は作らない。
+
+### HTTP status
+
+| 状況 | status |
+|------|--------|
+| Source / Item / Event の作成成功 | 201 |
+| 存在しない Source / LearningItem | 404 |
+| 重複 event ID | 409 |
+| 不正な `result` / `exercise_type` / 空文字 / naive datetime | 422 |
+| 存在しない Source を参照する LearningItem 作成 | 422 |

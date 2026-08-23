@@ -48,7 +48,8 @@ backend/app/
 └── services/      # ユースケース（domain を組み合わせる処理）
     ├── question_service.py  # グループフィルタ付きランダム問題選択
     ├── learning_state_service.py  # LearningEvent から LearnerState を更新
-    └── review_service.py  # 復習予定の保存と due 取得
+    ├── review_service.py  # 復習予定の保存と due 取得
+    └── tutor_service.py  # Tutor最小APIのユースケース
 ```
 
 新しい動詞を追加する場合は `CONJUGATIONS` と `VERB_GROUPS` の両方を `conjugation.py` に追記する。`VerbGroup` は `Literal["all", "er", "ir", "irregular"]` で、`?group=` クエリパラメータで絞り込める。
@@ -87,6 +88,10 @@ setup → quiz-settings → loading → answering ⇄ result
 | GET | `/health` | ヘルスチェック |
 | GET | `/api/questions/next?group=all` | ランダム問題取得。`group` は `all`/`er`/`ir`/`irregular` |
 | POST | `/api/answers/check` | `{verb, tense, pronoun, answer}` → `{correct, expected, given}` |
+| POST | `/api/tutor/sources` | 手入力 SourceDocument の作成 |
+| GET | `/api/tutor/items/{item_id}` | LearningItem と LearnerState / ReviewSchedule |
+| POST | `/api/tutor/items/{item_id}/reviews` | 復習イベント記録（state / schedule も更新） |
+| GET | `/api/tutor/reviews/due` | 現在 due の LearningItem |
 
 ### 現在の動詞データ（`conjugation.py`）
 
