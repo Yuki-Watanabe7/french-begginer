@@ -126,6 +126,9 @@ backend/app/
 > Tutor機能（Source取り込み〜長期復習）のドメインモデル設計は [tutor_architecture.md](./tutor_architecture.md) を参照。
 > Phase 0 の学習ループ（Source -> Item -> Event -> State -> Schedule -> due）は
 > `backend/tests/test_tutor_vertical_slice.py` で統合テストする。
+> Phase 1 の Text Source Ingestion（手動貼り付け → 永続化 → 一覧 → 詳細）は
+> `backend/tests/test_tutor_phase1_vertical_slice.py` と
+> `frontend/src/test/TutorPhase1Flow.test.tsx` で統合テストする。
 
 ## 動詞データ管理方針
 

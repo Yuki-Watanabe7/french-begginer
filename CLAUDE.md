@@ -70,10 +70,12 @@ setup → quiz-settings → loading → answering ⇄ result
 
 ### Frontend コンポーネント構成
 
-`App.tsx` が `useQuiz` を使いフェーズに応じてコンポーネントを切り替える:
+`App.tsx` がモードと `useQuiz` のフェーズに応じてコンポーネントを切り替える:
 
 | フェーズ | コンポーネント |
 |----------|---------------|
+| モード選択 | `ModeSelector` — 動詞 / 名詞 / 冠詞 / 自分の教材 |
+| `tutor` | `TutorFlow` — Source 一覧 / 追加 / 詳細 |
 | `setup` | `VerbGroupSelector` — 動詞グループ選択 |
 | `quiz-settings` | `QuizSettings` — 出題数選択（5/10/20問） |
 | `answering` / `result` | `QuizCard` — 問題表示・入力・正誤フィードバック |
@@ -89,6 +91,8 @@ setup → quiz-settings → loading → answering ⇄ result
 | GET | `/api/questions/next?group=all` | ランダム問題取得。`group` は `all`/`er`/`ir`/`irregular` |
 | POST | `/api/answers/check` | `{verb, tense, pronoun, answer}` → `{correct, expected, given}` |
 | POST | `/api/tutor/sources` | 手入力 SourceDocument の作成 |
+| GET | `/api/tutor/sources` | 保存済み Source の一覧（`SourceSummary`） |
+| GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得 |
 | GET | `/api/tutor/items/{item_id}` | LearningItem と LearnerState / ReviewSchedule |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベント記録（state / schedule も更新） |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem |
