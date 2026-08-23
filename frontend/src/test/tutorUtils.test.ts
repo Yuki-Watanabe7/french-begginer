@@ -2,10 +2,55 @@ import { describe, it, expect } from 'vitest'
 import { ApiError } from '../api/tutor'
 import {
   fieldErrorsFromTutorApiBody,
+  formatTutorDateTime,
+  tutorFetchErrorMessage,
   tutorNoteFromMetadata,
   tutorNoteMetadata,
   tutorSaveErrorMessage,
 } from '../utils/tutor'
+
+describe('formatTutorDateTime', () => {
+  it('UTC の時刻を指定タイムゾーンのローカル表示にする', () => {
+    const tokyo = formatTutorDateTime(
+      '2026-08-23T15:30:00+00:00',
+      'en-GB',
+      'Asia/Tokyo',
+    )
+    expect(tokyo).toMatch(/24 Aug 2026/)
+    expect(tokyo).toMatch(/00:30/)
+  })
+
+  it('timezone を固定すると同じ入力で同じ結果になる', () => {
+    const utc = formatTutorDateTime(
+      '2026-08-23T12:00:00+00:00',
+      'en-GB',
+      'UTC',
+    )
+    expect(utc).toMatch(/23 Aug 2026/)
+    expect(utc).toMatch(/12:00/)
+  })
+
+  it('不正な日時は元の文字列を返す', () => {
+    expect(formatTutorDateTime('not-a-date')).toBe('not-a-date')
+  })
+})
+
+describe('tutorFetchErrorMessage', () => {
+  it('一覧と詳細の通信失敗を日本語へ変換する', () => {
+    expect(tutorFetchErrorMessage(new Error('network'), 'list')).toBe(
+      '一覧の取得に失敗しました。通信環境を確認して再度お試しください',
+    )
+    expect(tutorFetchErrorMessage(new Error('network'), 'detail')).toBe(
+      '詳細の取得に失敗しました。通信環境を確認して再度お試しください',
+    )
+    expect(tutorFetchErrorMessage(new ApiError(500), 'list')).toBe(
+      'サーバーでエラーが発生しました。時間をおいて再度お試しください',
+    )
+    expect(tutorFetchErrorMessage(new ApiError(404, { detail: 'missing' }), 'detail')).toBe(
+      'Sourceが見つかりません',
+    )
+  })
+})
 
 describe('tutorNoteMetadata', () => {
   it('空や空白のみなら metadata を付けない', () => {

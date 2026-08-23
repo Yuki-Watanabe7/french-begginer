@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ModeSelector } from './components/ModeSelector'
-import { TutorSourceForm } from './components/TutorSourceForm'
+import { TutorFlow } from './components/TutorFlow'
 import { NounArticleCard } from './components/NounArticleCard'
 import { NounArticleSessionResult } from './components/NounArticleSessionResult'
 import { NounCategorySelector } from './components/NounCategorySelector'
@@ -98,7 +98,7 @@ export default function App() {
         )}
 
         {appMode === 'tutor' && (
-          <TutorSourceForm onBack={handleBackToModeSelect} />
+          <TutorFlow onBack={handleBackToModeSelect} />
         )}
 
         {/* 動詞活用練習 */}

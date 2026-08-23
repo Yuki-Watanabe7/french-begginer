@@ -33,6 +33,18 @@ async function fillRequiredFields(
   await userEvent.type(screen.getByLabelText(/本文/), content)
 }
 
+function renderForm(
+  overrides: {
+    onBack?: () => void
+    onSaved?: (source: SourceDocument) => void
+  } = {},
+) {
+  const onBack = overrides.onBack ?? vi.fn()
+  const onSaved = overrides.onSaved ?? vi.fn()
+  render(<TutorSourceForm onBack={onBack} onSaved={onSaved} />)
+  return { onBack, onSaved }
+}
+
 describe('TutorSourceForm', () => {
   beforeEach(() => {
     vi.resetAllMocks()
@@ -40,7 +52,7 @@ describe('TutorSourceForm', () => {
 
   describe('表示', () => {
     it('title / content / note の入力欄が表示される', () => {
-      render(<TutorSourceForm onBack={() => {}} />)
+      renderForm()
 
       expect(screen.getByLabelText(/タイトル/)).toBeInTheDocument()
       expect(screen.getByLabelText(/本文/)).toBeInTheDocument()
@@ -49,14 +61,14 @@ describe('TutorSourceForm', () => {
     })
 
     it('本文欄はスマホ幅でも貼り付けやすい高さを持つ', () => {
-      render(<TutorSourceForm onBack={() => {}} />)
+      renderForm()
       expect(screen.getByLabelText(/本文/)).toHaveStyle({ minHeight: '40vh' })
     })
   })
 
   describe('validation', () => {
     it('空入力では保存されず、必須エラーを表示する', async () => {
-      render(<TutorSourceForm onBack={() => {}} />)
+      renderForm()
 
       await userEvent.click(screen.getByRole('button', { name: '保存する' }))
 
@@ -66,7 +78,7 @@ describe('TutorSourceForm', () => {
     })
 
     it('whitespaceのみも空として扱い、APIを呼ばない', async () => {
-      render(<TutorSourceForm onBack={() => {}} />)
+      renderForm()
 
       await userEvent.type(screen.getByLabelText(/タイトル/), '   ')
       await userEvent.type(screen.getByLabelText(/本文/), '     ')
@@ -81,7 +93,7 @@ describe('TutorSourceForm', () => {
   describe('保存', () => {
     it('正常入力で createTutorSource が language=fr と note metadata で呼ばれる', async () => {
       mockCreate.mockResolvedValueOnce(SAVED)
-      render(<TutorSourceForm onBack={() => {}} />)
+      renderForm()
 
       await fillRequiredFields()
       await userEvent.type(screen.getByLabelText(/メモ/), '新聞の社説')
@@ -97,7 +109,7 @@ describe('TutorSourceForm', () => {
 
     it('note未入力時は空の metadata を送る', async () => {
       mockCreate.mockResolvedValueOnce({ ...SAVED, metadata: {} })
-      render(<TutorSourceForm onBack={() => {}} />)
+      renderForm()
 
       await fillRequiredFields()
       await userEvent.click(screen.getByRole('button', { name: '保存する' }))
@@ -117,7 +129,7 @@ describe('TutorSourceForm', () => {
           resolveCreate = resolve
         }),
       )
-      render(<TutorSourceForm onBack={() => {}} />)
+      const { onSaved } = renderForm()
 
       await fillRequiredFields()
       await userEvent.click(screen.getByRole('button', { name: '保存する' }))
@@ -127,14 +139,15 @@ describe('TutorSourceForm', () => {
       expect(mockCreate).toHaveBeenCalledTimes(1)
 
       resolveCreate(SAVED)
-      await screen.findByText('保存しました')
+      await screen.findByRole('button', { name: '保存する' })
+      expect(onSaved).toHaveBeenCalledWith(SAVED)
     })
 
     it('APIエラー時に入力内容が保持され、再試行できる', async () => {
       mockCreate
         .mockRejectedValueOnce(new ApiError(500, { detail: 'boom' }))
         .mockResolvedValueOnce(SAVED)
-      render(<TutorSourceForm onBack={() => {}} />)
+      const { onSaved } = renderForm()
 
       await fillRequiredFields()
       await userEvent.type(screen.getByLabelText(/メモ/), '新聞の社説')
@@ -146,7 +159,8 @@ describe('TutorSourceForm', () => {
       expect(screen.getByLabelText(/メモ/)).toHaveValue('新聞の社説')
 
       await userEvent.click(screen.getByRole('button', { name: '保存する' }))
-      await screen.findByText('保存しました')
+      await screen.findByRole('button', { name: '保存する' })
+      expect(onSaved).toHaveBeenCalledWith(SAVED)
       expect(mockCreate).toHaveBeenCalledTimes(2)
     })
 
@@ -158,7 +172,7 @@ describe('TutorSourceForm', () => {
           ],
         }),
       )
-      render(<TutorSourceForm onBack={() => {}} />)
+      renderForm()
 
       await fillRequiredFields()
       await userEvent.click(screen.getByRole('button', { name: '保存する' }))
@@ -168,28 +182,25 @@ describe('TutorSourceForm', () => {
       expect(screen.getByLabelText(/タイトル/)).toHaveValue('Le Monde')
     })
 
-    it('保存成功後に保存内容の確認画面へ進む', async () => {
+    it('保存成功後に onSaved が呼ばれる', async () => {
       mockCreate.mockResolvedValueOnce(SAVED)
-      render(<TutorSourceForm onBack={() => {}} />)
+      const { onSaved } = renderForm()
 
       await fillRequiredFields()
       await userEvent.type(screen.getByLabelText(/メモ/), '新聞の社説')
       await userEvent.click(screen.getByRole('button', { name: '保存する' }))
 
-      await screen.findByText('保存しました')
-      expect(screen.getByRole('heading', { name: 'Le Monde' })).toBeInTheDocument()
-      expect(screen.getByText("Il s'agit d'un article.")).toBeInTheDocument()
-      expect(screen.getByText('新聞の社説')).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: '保存する' })).not.toBeInTheDocument()
+      await screen.findByRole('button', { name: '保存する' })
+      expect(onSaved).toHaveBeenCalledWith(SAVED)
     })
   })
 
   describe('戻る', () => {
-    it('モード選択に戻るができる', async () => {
+    it('一覧に戻るができる', async () => {
       const onBack = vi.fn()
-      render(<TutorSourceForm onBack={onBack} />)
+      renderForm({ onBack })
 
-      await userEvent.click(screen.getByRole('button', { name: 'モード選択に戻る' }))
+      await userEvent.click(screen.getByRole('button', { name: '一覧に戻る' }))
       expect(onBack).toHaveBeenCalledTimes(1)
     })
   })

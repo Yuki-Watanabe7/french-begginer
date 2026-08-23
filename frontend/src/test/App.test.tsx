@@ -3,12 +3,23 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '../App'
 import * as client from '../api/client'
+import { fetchTutorSources } from '../api/tutor'
 import type { Question, AnswerResult } from '../types'
 
 vi.mock('../api/client')
+vi.mock('../api/tutor', async importOriginal => {
+  const actual = await importOriginal<typeof import('../api/tutor')>()
+  return {
+    ...actual,
+    fetchTutorSources: vi.fn(),
+    fetchTutorSource: vi.fn(),
+    createTutorSource: vi.fn(),
+  }
+})
 
 const mockFetch = vi.mocked(client.fetchSessionQuestions)
 const mockCheck = vi.mocked(client.checkAnswer)
+const mockListSources = vi.mocked(fetchTutorSources)
 
 const Q: Question = { verb: 'parler', tense: 'présent', pronoun: 'je' }
 const Q2: Question = { verb: 'aimer', tense: 'présent', pronoun: 'tu' }
@@ -34,11 +45,12 @@ describe('App — モード選択', () => {
     expect(screen.getByText('自分の教材')).toBeInTheDocument()
   })
 
-  it('自分の教材からテキスト保存画面へ進み、モード選択に戻れる', async () => {
+  it('自分の教材からSource一覧へ進み、モード選択に戻れる', async () => {
+    mockListSources.mockResolvedValueOnce([])
     render(<App />)
     await userEvent.click(screen.getByText('自分の教材'))
-    expect(screen.getByLabelText(/タイトル/)).toBeInTheDocument()
-    expect(screen.getByLabelText(/本文/)).toBeInTheDocument()
+    await screen.findByText('まだ保存したテキストがありません')
+    expect(screen.getByRole('button', { name: '新しいテキストを追加' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'モード選択に戻る' }))
     expect(screen.getByText('練習モードを選択')).toBeInTheDocument()
     expect(screen.getByText('動詞活用練習')).toBeInTheDocument()

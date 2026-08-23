@@ -30,7 +30,7 @@ export function ModeSelector({
         </button>
         <button style={styles.card} onClick={onSelectTutor}>
           <span style={styles.label}>自分の教材</span>
-          <span style={styles.desc}>読んだフランス語テキストを保存する</span>
+          <span style={styles.desc}>保存したフランス語テキストを見る・追加する</span>
         </button>
       </div>
     </div>

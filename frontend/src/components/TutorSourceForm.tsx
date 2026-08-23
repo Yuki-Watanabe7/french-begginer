@@ -1,23 +1,13 @@
 import { useTutorSourceForm } from '../hooks/useTutorSourceForm'
-import { tutorNoteFromMetadata } from '../utils/tutor'
 import type { SourceDocument } from '../types'
 
 interface Props {
   onBack: () => void
+  onSaved: (source: SourceDocument) => void
 }
 
-export function TutorSourceForm({ onBack }: Props) {
-  const form = useTutorSourceForm()
-
-  if (form.saved) {
-    return (
-      <SavedSourceView
-        source={form.saved}
-        onAddAnother={form.resetForAnother}
-        onBack={onBack}
-      />
-    )
-  }
+export function TutorSourceForm({ onBack, onSaved }: Props) {
+  const form = useTutorSourceForm(onSaved)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -111,38 +101,9 @@ export function TutorSourceForm({ onBack }: Props) {
         {form.isSubmitting ? '保存中...' : '保存する'}
       </button>
       <button type="button" style={styles.backBtn} onClick={onBack} disabled={form.isSubmitting}>
-        モード選択に戻る
+        一覧に戻る
       </button>
     </form>
-  )
-}
-
-function SavedSourceView({
-  source,
-  onAddAnother,
-  onBack,
-}: {
-  source: SourceDocument
-  onAddAnother: () => void
-  onBack: () => void
-}) {
-  const note = tutorNoteFromMetadata(source.metadata)
-
-  return (
-    <div style={styles.container}>
-      <div style={styles.successBanner} role="status">
-        保存しました
-      </div>
-      <h2 style={styles.savedTitle}>{source.title}</h2>
-      {note && <p style={styles.savedNote}>{note}</p>}
-      <div style={styles.savedContent}>{source.content}</div>
-      <button type="button" style={styles.primaryBtn} onClick={onAddAnother}>
-        続けてテキストを追加
-      </button>
-      <button type="button" style={styles.backBtn} onClick={onBack}>
-        モード選択に戻る
-      </button>
-    </div>
   )
 }
 
@@ -272,44 +233,5 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#666',
     cursor: 'pointer',
     width: '100%',
-  },
-  successBanner: {
-    background: '#d1fae5',
-    color: '#065f46',
-    fontSize: 16,
-    fontWeight: 700,
-    textAlign: 'center',
-    borderRadius: 12,
-    padding: '12px 16px',
-    marginBottom: 20,
-  },
-  savedTitle: {
-    fontSize: 20,
-    fontWeight: 700,
-    color: '#1a1a2e',
-    margin: '0 0 12px',
-    overflowWrap: 'anywhere',
-  },
-  savedNote: {
-    fontSize: 14,
-    color: '#555',
-    background: '#eef2ff',
-    borderRadius: 10,
-    padding: '10px 12px',
-    margin: '0 0 16px',
-    whiteSpace: 'pre-wrap',
-    overflowWrap: 'anywhere',
-  },
-  savedContent: {
-    fontSize: 16,
-    lineHeight: 1.7,
-    color: '#1a1a2e',
-    background: '#fff',
-    border: '2px solid #e0e7ff',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 20,
-    whiteSpace: 'pre-wrap',
-    overflowWrap: 'anywhere',
   },
 }
