@@ -10,7 +10,8 @@ Phase 1 の Source 一覧 API（Issue #121）、Frontend 型と API client（Iss
 手入力保存画面（Issue #123）、一覧・詳細画面（Issue #124）、
 Phase 1 vertical slice（Issue #125）、
 Phase 2 の LearningItemCandidate ドメインと永続化（Issue #131）、
-および LLM Extraction Service（Issue #132）
+LLM Extraction Service（Issue #132）、
+および抽出 Candidate の検証・正規化・重複統合（Issue #133）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -29,6 +30,8 @@ Phase 2 の LearningItemCandidate ドメインと永続化（Issue #131）、
   / `backend/app/services/openai_extractor.py`
   / `backend/tests/test_extraction_service.py`
   / `backend/tests/test_openai_extractor.py`
+- 正規化: `backend/app/domain/candidate_normalization.py`
+  / `backend/tests/test_candidate_normalization.py`
 - 統合: `backend/tests/test_tutor_vertical_slice.py`
   / `backend/tests/test_tutor_phase1_vertical_slice.py`
   / `frontend/src/test/TutorPhase1Flow.test.tsx`
@@ -260,8 +263,8 @@ Phase 0時点では `backend/app/domain/conjugation.py` /
 - LLM 生成結果は正規化・ validation 後に domain へ入れる。出力をそのまま正解データにしない
 - OpenAI SDK は `openai_extractor.py` に閉じる。domain / ExtractionService は
   `LearningItemExtractor` Protocol にだけ依存する
-- Issue #132 は抽出まで。Candidate の evidence 検証・正規化・重複統合は #133、
-  永続化と採否 API は #134、Frontend は #135
+- Issue #132 は抽出まで。Issue #133 で Candidate の evidence 検証・正規化・
+  重複統合を行う。永続化と採否 API は #134、Frontend は #135
 
 `SourceRef` は Phase 2 に備えて `evidence_span` と `confidence` を
 optional で持てる。Phase 0 ではどちらも `None` のままでよい。
@@ -626,7 +629,8 @@ validation 後に domain へ入れ、LLM 出力をそのまま正解データに
 
 Issue #131 で `LearningItemCandidate` の domain model と SQLite 永続化を追加した。
 Issue #132 で SourceDocument から Candidate を得る Extraction Service を追加した。
-Candidate の正規化・重複統合・採否 API・Frontend は後続 Issue。
+Issue #133 で evidence 検証・正規化・同一 Source 内の重複統合を追加した。
+Candidate の永続化と採否 API・Frontend は後続 Issue。
 
 ## Phase 2 Candidate 永続化（Issue #131）
 
@@ -665,7 +669,87 @@ SourceDocument
 | エラー分類 | `ExtractionConfigError` / `ExtractionTransientError` / `ExtractionInvalidResponseError` | 一時障害だけ最大3回 retry。validation 失敗は retry しない |
 
 テストは fake extractor と mocked OpenAI client で行い、`OPENAI_API_KEY` なしで通る。
-evidence が本文内かは #133、Candidate 保存と採否 API は #134。
+evidence 検証・正規化・重複統合は #133、Candidate 保存と採否 API は #134。
+
+## Phase 2 Candidate normalization（Issue #133）
+
+LLM から得た構造化候補を、そのまま永続化・提示せず、Source 本文との整合性
+検証、表記正規化、同一 Source 内の重複統合を行う。LLM を真実のデータベース
+にせず、**出力の後ろに deterministic な防波堤を置く**。
+
+```text
+SourceDocument + raw LearningItemCandidate[]
+  -> evidence span 検証（本文から根拠を再構成）
+  -> canonical_form / meaning_ja の正規化
+  -> invalid を理由付きで除外
+  -> structured key で同一 Source 内の重複を統合
+  -> LearningItemCandidate[] + CandidateExclusion[]
+```
+
+実装は `backend/app/domain/candidate_normalization.py`。
+`ExtractionService.extract` が写し終わった Candidate に対して呼ぶ。
+embedding / vector DB には依存しない。
+
+### whitespace / Unicode
+
+| 対象 | 方針 |
+|------|------|
+| evidence オフセット | Python の Unicode コードポイント（`len` / スライス）。バイトでも grapheme でもない |
+| span 検証対象 | 保存済み `SourceDocument.content`。検証前に本文を NFC しない |
+| 根拠断片 | LLM の text を信じず `read_source_evidence` で `content[start:end]` から再構成 |
+| 受理条件 | `0 <= start < end <= len(content)`。再構成結果が空 / whitespace のみは除外 |
+| canonical_form | NFC、前後空白除去、連続空白の圧縮、囲み引用符の除去。大文字小文字は維持 |
+| meaning_ja | NFC と空白正規化 |
+| 重複キー | `candidate-norm-v1:{item_type}:{正規化形.casefold()}` |
+
+### item type ごとの正規化
+
+| item_type | 規則 |
+|-----------|------|
+| 共通 | 空白・NFC・囲み引用符。フランス語としての正誤は LLM だけで最終確定しない |
+| vocabulary | 文末記号、またはトークン数が 3 を超える文脈付き断片は除外（`pomme de terre` は許容） |
+| expression | 再利用可能な表記へ空白・引用符を揃える。活用形から原形への変換はしない |
+| grammar | 共通規則のみ |
+| conjugation | 正規化後の canonical_form を `metadata.lemma` に載せる。tense は未抽出なら載せない |
+
+### 重複統合と既存 LearningItem
+
+- 同一 Source 内は `item_normalization_key` が一致するものを 1 件に統合する
+- 残すのは confidence が高い方。同点なら先に現れた方（index が小さい方）
+- 異なる item_type は同じ表記でも統合しない
+- 既存 LearningItem との比較には同じ `item_normalization_key` を使う
+- accept 時に source_ref を足す処理自体は #134
+
+### invalid の扱い
+
+スキーマ段階（未知 enum・必須欠落・confidence 範囲外・span 形状）は
+Extractor / Pydantic が応答全体を reject する。パイプラインは Candidate 単位で:
+
+| 理由 | 内容 |
+|------|------|
+| `evidence_span_out_of_range` | Source 本文の範囲外 |
+| `evidence_span_empty` | 再構成結果が空または whitespace のみ |
+| `empty_canonical_form` | 正規化後に空 |
+| `empty_meaning_ja` | 正規化後に空 |
+| `vocabulary_context_fragment` | 語彙なのに文脈付き断片 |
+| `duplicate` | 同一 Source 内の structured key 重複 |
+
+除外は `CandidateExclusion` に残し、黙って捨てない。
+`ExtractionResult.exclusions` からテスト・debug できる。
+
+| 観点 | 自動テスト |
+|------|------------|
+| 正しい span は残る | `test_valid_span_is_kept` |
+| Source 外 span は落ちる | `test_span_outside_source_is_excluded` |
+| whitespace のみの span は落ちる | `test_whitespace_only_span_is_excluded` |
+| 同一 candidate の複数件は 1 件に統合 | `test_duplicate_candidates_are_merged_to_one` |
+| 大文字小文字 / 前後空白で爆発しない | `test_case_and_whitespace_differences_do_not_duplicate` |
+| 異なる item_type は統合しない | `test_different_item_types_are_not_merged` |
+| 実行ごとに結果が変わらない | `test_normalization_is_deterministic` |
+| 除外理由を確認できる | `test_exclusion_reasons_are_inspectable` |
+| 既存 LearningItem と比較できる key | `test_normalization_key_matches_existing_learning_item` |
+| embedding 非依存 | `test_module_does_not_depend_on_embeddings` |
+| fake LLM 経由の抽出 | `test_extract_excludes_out_of_range_span_and_keeps_valid` / `test_extract_merges_duplicates_from_fake_llm_response` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 

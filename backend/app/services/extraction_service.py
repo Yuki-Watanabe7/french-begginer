@@ -1,7 +1,8 @@
-"""SourceDocument から学習候補を抽出するユースケース（Issue #132）。
+"""SourceDocument から学習候補を抽出するユースケース（Issue #132 / #133）。
 
-LLM は候補生成器として扱う。出力は LearningItemCandidate へ validation した
-うえで返し、LearningItem には保存しない。永続化・正規化・採否は後続 Issue。
+LLM は候補生成器として扱う。出力は LearningItemCandidate へ validation し、
+evidence 検証・正規化・重複統合したうえで返す。LearningItem には保存しない。
+永続化・採否は後続 Issue。
 
 OpenAI SDK は使わない。LearningItemExtractor にだけ依存する。
 """
@@ -10,6 +11,10 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
+from app.domain.candidate_normalization import (
+    CandidateExclusion,
+    normalize_candidates,
+)
 from app.domain.tutor import EvidenceSpan, LearningItemCandidate, SourceDocument
 from app.services.exceptions import ExtractionInvalidResponseError
 from app.services.extraction_prompt import MAX_CANDIDATES
@@ -26,6 +31,7 @@ class ExtractionResult:
     provider: str
     model: str
     extraction_version: str
+    exclusions: tuple[CandidateExclusion, ...] = ()
 
 
 class ExtractionService:
@@ -45,7 +51,7 @@ class ExtractionService:
                 kind="too_many_candidates",
             )
         try:
-            candidates = tuple(
+            mapped = tuple(
                 _to_learning_item_candidate(source, item, raw)
                 for item in raw.candidates
             )
@@ -54,12 +60,14 @@ class ExtractionService:
                 "抽出結果を LearningItemCandidate にできなかった",
                 kind="invalid_structured_response",
             ) from exc
+        normalized = normalize_candidates(source, mapped)
         return ExtractionResult(
             source_document_id=source.id,
-            candidates=candidates,
+            candidates=normalized.candidates,
             provider=raw.provider,
             model=raw.model,
             extraction_version=raw.extraction_version,
+            exclusions=normalized.exclusions,
         )
 
 
