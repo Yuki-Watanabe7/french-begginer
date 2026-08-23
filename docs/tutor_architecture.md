@@ -6,7 +6,9 @@
 永続化層（Issue #109）、学習状態更新（Issue #110）、
 初期 Review Scheduler（Issue #111）、最小 API（Issue #112）、
 vertical slice 統合テスト（Issue #113）、
-および Phase 1 の Source 一覧 API（Issue #121）の責務分離・不変条件を記録する。
+Phase 1 の Source 一覧 API（Issue #121）、Frontend 型と API client（Issue #122）、
+手入力保存画面（Issue #123）、一覧・詳細画面（Issue #124）、
+および Phase 1 vertical slice（Issue #125）の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
 - 永続化: `backend/app/repositories/` / `backend/app/persistence/`
@@ -20,6 +22,8 @@ vertical slice 統合テスト（Issue #113）、
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 統合: `backend/tests/test_tutor_vertical_slice.py`
+  / `backend/tests/test_tutor_phase1_vertical_slice.py`
+  / `frontend/src/test/TutorPhase1Flow.test.tsx`
 
 ## 目指す学習ループ
 
@@ -210,6 +214,7 @@ Phase 0時点では `backend/app/domain/conjugation.py` /
 ## LLM境界
 
 - Phase 0 は LLM 非依存。Source / LearningItem は手入力またはテスト fixture で与える
+- Phase 1 も LLM 非依存。ユーザーが貼り付けた本文を SourceDocument として保存・表示するだけ
 - Phase 2 で Source から LearningItem 候補を生成する
 - LLM 生成結果は正規化・ validation 後に domain へ入れる。出力をそのまま正解データにしない
 
@@ -512,5 +517,82 @@ LearningItem作成
 | 永続化境界 | Repository Protocol + SQLite | `tests/test_tutor_persistence.py` |
 | LLM 非依存 | Phase 0 の service / API に LLM 呼び出しなし | 実装上 import せず、本ドキュメントの LLM境界で明記 |
 
-Phase 1 以降へ進む前提は、上記が `bash scripts/quality-check.sh` で
+Phase 1 へ進む前提は、上記が `bash scripts/quality-check.sh` で
 継続して通ることである。
+
+## Phase 1 — Text Source Ingestion（Issue #121〜#125）
+
+Phase 1 のゴールは LLM による教材化ではなく、**実際のフランス語本文を
+アプリへ持ち込み、永続化し、あとから見つけて読み返せること**である。
+
+Frontend は `TutorFlow` が一覧 / 追加 / 詳細を切り替え、
+Backend は既存の Source API をそのまま入力基盤として使う。
+
+```text
+manual French text
+  -> SourceDocument
+  -> SQLite persistence
+  -> source list
+  -> source detail
+```
+
+推奨 fixture:
+
+```text
+Title: Article test
+Content: Je me suis rendu compte qu'il fallait changer de stratégie.
+Note: se rendre compte が気になった
+```
+
+Phase 1 ではこの文から LearningItem を抽出しない。
+
+### Phase 1 で成立したこと
+
+| 操作 | 実装 | 自動テスト |
+|------|------|------------|
+| フランス語本文の手動貼り付け | `TutorSourceForm` | `TutorPhase1Flow.test.tsx` / `TutorSourceForm.test.tsx` |
+| title / optional note とともに保存 | `POST /api/tutor/sources`（`metadata.note`） | `test_phase1_text_ingestion_vertical_slice` |
+| 保存済み Source 一覧 | `GET /api/tutor/sources` / `TutorSourceList` | 同上 / `TutorSourceList.test.tsx` |
+| Source 詳細で原文全文を読む | `GET /api/tutor/sources/{source_id}` / `TutorSourceDetail` | 同上 / `TutorSourceDetail.test.tsx` |
+| アプリ / DB 再 open 後も残る | SQLite file DB + 一覧の再 fetch | `test_phase1_text_ingestion_vertical_slice` / `TutorPhase1Flow.test.tsx` |
+| empty / loading / error / 404 | list / detail hooks | `TutorPhase1Flow.test.tsx` / 各コンポーネントテスト |
+| 一覧順が安定 | `created_at` 降順、同一時刻は `id` 昇順 | `test_phase1_newer_source_appears_first` / `test_phase1_list_order_is_stable_for_same_created_at` |
+| 404 / validation | 空 title/content、未知の source_type、不正 limit | `test_phase1_missing_source_returns_404` / `test_phase1_validation_errors` |
+
+### Phase 1 ではまだ行わないこと
+
+- Source から LearningItem を生成しない
+- LLM を呼ばない
+- URL / PDF / YouTube 等を自動取得しない
+- Source 内容を自動要約しない
+- Source の編集・削除を提供しない
+
+`SourceType` は `manual_text` のみ。`CreateSourceRequest` は `source_type` を
+受け取らず、作成時は常に手入力テキストになる。
+
+### Phase 2 への引き継ぎ
+
+Phase 2 は保存済み SourceDocument を入力として、LearningItem 候補抽出を行う。
+Phase 1 の UI / API はその入力基盤として維持する。抽出結果は正規化・
+validation 後に domain へ入れ、LLM 出力をそのまま正解データにしない。
+
+## Phase 1 Exit Criteria（Issue #107）との対応
+
+Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
+SourceDocument として保存・参照できる最小 UI/API である。
+
+| Exit Criteria | 満たした実装 | 自動テスト |
+|---------------|--------------|------------|
+| ユーザーがフランス語本文を手動貼り付けできる | `TutorSourceForm` の textarea | `TutorPhase1Flow.test.tsx` |
+| title / optional note とともに SourceDocument として保存できる | `POST /api/tutor/sources` + `metadata.note` | `test_phase1_text_ingestion_vertical_slice` |
+| 保存済み Source 一覧を見られる | `GET /api/tutor/sources` / `TutorSourceList` | 同上 / `TutorSourceList.test.tsx` |
+| Source 詳細で原文全文を読める | `GET /api/tutor/sources/{source_id}` / `TutorSourceDetail` | 同上 / `TutorSourceDetail.test.tsx` |
+| アプリ/DB 再 open 後も保存内容が残る | SQLite file DB + Frontend 再マウント | 同上 / `TutorPhase1Flow.test.tsx` |
+| empty/loading/error/404 の主要状態が扱われている | list / detail status | `TutorPhase1Flow.test.tsx` |
+| 既存の動詞・名詞・冠詞・TTS学習フローに回帰がない | quiz/TTS API は Tutor ingestion と独立 | `test_phase1_existing_quiz_and_tts_contracts_are_unchanged` / `App.test.tsx` |
+| Phase 1 では LLM 非依存である | Tutor API / service / domain に LLM import なし | `test_phase1_tutor_modules_are_llm_independent` |
+| URL/PDF/YouTube 等の入力を含めていない | `SourceType=manual_text` のみ | `test_phase1_has_no_url_pdf_youtube_ingestion_endpoints` |
+| スマホ相当幅で主要操作に問題がない | 本文 `minHeight: 40vh`、折り返し、全幅ボタン | `TutorPhase1Flow.test.tsx` / 各コンポーネントの style 検証 |
+
+Phase 2 以降へ進む前提は、Phase 0 と Phase 1 が
+`bash scripts/quality-check.sh` で継続して通ることである。
