@@ -11,17 +11,21 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.review_scheduler import DUE_ITEM_STATUS
 from app.domain.tutor import (
+    CandidateStatus,
     LearnerState,
     LearningEvent,
     LearningItem,
+    LearningItemCandidate,
     ReviewSchedule,
     SourceDocument,
+    apply_candidate_status,
 )
 from app.persistence.datetime_codec import dump_utc, require_aware
 from app.persistence.db import create_initialized_engine
 from app.persistence.models import (
     LearnerStateRow,
     LearningEventRow,
+    LearningItemCandidateRow,
     LearningItemRow,
     ReviewScheduleRow,
     SourceDocumentRow,
@@ -78,6 +82,49 @@ class SqliteLearningItemRepository:
                 )
             ).all()
             return [row.to_domain() for row in rows]
+
+
+class SqliteLearningItemCandidateRepository:
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    def create(self, candidate: LearningItemCandidate) -> LearningItemCandidate:
+        with self._sessions() as session:
+            _require_source_document(session, candidate.source_document_id)
+            session.add(LearningItemCandidateRow.from_domain(candidate))
+            _commit_or_duplicate(session, "LearningItemCandidate", candidate.id)
+        return candidate
+
+    def get(self, candidate_id: str) -> LearningItemCandidate | None:
+        with self._sessions() as session:
+            row = session.get(LearningItemCandidateRow, candidate_id)
+            return row.to_domain() if row is not None else None
+
+    def list_by_source(self, source_id: str) -> list[LearningItemCandidate]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(LearningItemCandidateRow)
+                .where(LearningItemCandidateRow.source_document_id == source_id)
+                .order_by(
+                    LearningItemCandidateRow.created_at,
+                    LearningItemCandidateRow.id,
+                )
+            ).all()
+            return [row.to_domain() for row in rows]
+
+    def update_status(
+        self, candidate_id: str, status: CandidateStatus
+    ) -> LearningItemCandidate:
+        with self._sessions() as session:
+            row = session.get(LearningItemCandidateRow, candidate_id)
+            if row is None:
+                raise ReferentialIntegrityError(
+                    f"LearningItemCandidate が存在しない: id={candidate_id}"
+                )
+            updated = apply_candidate_status(row.to_domain(), status)
+            session.merge(LearningItemCandidateRow.from_domain(updated))
+            session.commit()
+        return updated
 
 
 class SqliteLearningEventRepository:
@@ -180,6 +227,7 @@ class SqliteReviewScheduleRepository:
 class TutorRepositories:
     source_documents: SqliteSourceDocumentRepository
     learning_items: SqliteLearningItemRepository
+    learning_item_candidates: SqliteLearningItemCandidateRepository
     learning_events: SqliteLearningEventRepository
     learner_states: SqliteLearnerStateRepository
     learning_progress: SqliteLearningProgressRepository
@@ -196,6 +244,9 @@ class TutorSqliteStore:
         )
         self.source_documents = SqliteSourceDocumentRepository(self._sessions)
         self.learning_items = SqliteLearningItemRepository(self._sessions)
+        self.learning_item_candidates = SqliteLearningItemCandidateRepository(
+            self._sessions
+        )
         self.learning_events = SqliteLearningEventRepository(self._sessions)
         self.learner_states = SqliteLearnerStateRepository(self._sessions)
         self.learning_progress = SqliteLearningProgressRepository(self._sessions)
@@ -205,6 +256,7 @@ class TutorSqliteStore:
         return TutorRepositories(
             source_documents=self.source_documents,
             learning_items=self.learning_items,
+            learning_item_candidates=self.learning_item_candidates,
             learning_events=self.learning_events,
             learner_states=self.learner_states,
             learning_progress=self.learning_progress,
@@ -223,6 +275,11 @@ class TutorSqliteStore:
 def _require_learning_item(session: Session, item_id: str) -> None:
     if session.get(LearningItemRow, item_id) is None:
         raise ReferentialIntegrityError(f"LearningItem が存在しない: id={item_id}")
+
+
+def _require_source_document(session: Session, source_id: str) -> None:
+    if session.get(SourceDocumentRow, source_id) is None:
+        raise ReferentialIntegrityError(f"SourceDocument が存在しない: id={source_id}")
 
 
 def _commit_or_duplicate(session: Session, entity_type: str, entity_id: str) -> None:

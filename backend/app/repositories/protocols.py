@@ -13,9 +13,11 @@ from datetime import datetime
 from typing import Protocol
 
 from app.domain.tutor import (
+    CandidateStatus,
     LearnerState,
     LearningEvent,
     LearningItem,
+    LearningItemCandidate,
     ReviewSchedule,
     SourceDocument,
 )
@@ -33,6 +35,23 @@ class LearningItemRepository(Protocol):
     def create(self, item: LearningItem) -> LearningItem: ...
     def get(self, item_id: str) -> LearningItem | None: ...
     def list(self) -> list[LearningItem]: ...
+
+
+class LearningItemCandidateRepository(Protocol):
+    def create(self, candidate: LearningItemCandidate) -> LearningItemCandidate: ...
+    def get(self, candidate_id: str) -> LearningItemCandidate | None: ...
+    def list_by_source(self, source_id: str) -> list[LearningItemCandidate]:
+        """同一 Source の Candidate。created_at 昇順、同一時刻は id 昇順。"""
+        ...
+
+    def update_status(
+        self, candidate_id: str, status: CandidateStatus
+    ) -> LearningItemCandidate:
+        """status を candidate / accepted / rejected として更新する。
+
+        存在しない Candidate や、accepted / rejected からの不正な遷移は拒否する。
+        """
+        ...
 
 
 class LearningEventRepository(Protocol):

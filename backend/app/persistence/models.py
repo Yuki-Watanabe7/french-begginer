@@ -15,6 +15,7 @@ from app.domain.tutor import (
     LearnerState,
     LearningEvent,
     LearningItem,
+    LearningItemCandidate,
     ReviewSchedule,
     SourceDocument,
 )
@@ -116,6 +117,76 @@ class LearningItemRow(Base):
                 "source_refs": self.source_refs,
                 "created_at": load_utc(self.created_at),
                 "status": self.status,
+                "metadata": self.extra_metadata,
+            }
+        )
+
+
+class LearningItemCandidateRow(Base):
+    __tablename__ = "learning_item_candidates"
+    __table_args__ = (
+        Index(
+            "ix_learning_item_candidates_source_created",
+            "source_document_id",
+            "created_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    source_document_id: Mapped[str] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    item_type: Mapped[str] = mapped_column(String, nullable=False)
+    canonical_form: Mapped[str] = mapped_column(String, nullable=False)
+    meaning_ja: Mapped[str] = mapped_column(String, nullable=False)
+    explanation_ja: Mapped[str | None] = mapped_column(Text, nullable=True)
+    level: Mapped[str | None] = mapped_column(String, nullable=True)
+    evidence_span: Mapped[dict[str, Any]] = mapped_column(
+        "evidence_span_json", JSON, nullable=False
+    )
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    extraction_version: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata_json", JSON, nullable=False
+    )
+
+    @classmethod
+    def from_domain(cls, candidate: LearningItemCandidate) -> LearningItemCandidateRow:
+        return cls(
+            id=candidate.id,
+            source_document_id=candidate.source_document_id,
+            item_type=candidate.item_type,
+            canonical_form=candidate.canonical_form,
+            meaning_ja=candidate.meaning_ja,
+            explanation_ja=candidate.explanation_ja,
+            level=candidate.level,
+            evidence_span=candidate.evidence_span.model_dump(mode="json"),
+            confidence=candidate.confidence,
+            status=candidate.status,
+            extraction_version=candidate.extraction_version,
+            created_at=dump_utc(candidate.created_at),
+            extra_metadata=candidate.metadata,
+        )
+
+    def to_domain(self) -> LearningItemCandidate:
+        return LearningItemCandidate.model_validate(
+            {
+                "id": self.id,
+                "source_document_id": self.source_document_id,
+                "item_type": self.item_type,
+                "canonical_form": self.canonical_form,
+                "meaning_ja": self.meaning_ja,
+                "explanation_ja": self.explanation_ja,
+                "level": self.level,
+                "evidence_span": self.evidence_span,
+                "confidence": self.confidence,
+                "status": self.status,
+                "extraction_version": self.extraction_version,
+                "created_at": load_utc(self.created_at),
                 "metadata": self.extra_metadata,
             }
         )

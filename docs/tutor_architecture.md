@@ -8,7 +8,9 @@
 vertical slice 統合テスト（Issue #113）、
 Phase 1 の Source 一覧 API（Issue #121）、Frontend 型と API client（Issue #122）、
 手入力保存画面（Issue #123）、一覧・詳細画面（Issue #124）、
-および Phase 1 vertical slice（Issue #125）の責務分離・不変条件を記録する。
+Phase 1 vertical slice（Issue #125）、
+および Phase 2 の LearningItemCandidate ドメインと永続化（Issue #131）
+の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
 - 永続化: `backend/app/repositories/` / `backend/app/persistence/`
@@ -64,6 +66,9 @@ Phase 0 で成立させる学習データの流れ。
 
 ```text
 SourceDocument
+  -> LLM extraction
+  -> LearningItemCandidate
+  -> validation / normalization / user review
   -> LearningItem
   -> LearningEvent
   -> LearnerState
@@ -87,6 +92,7 @@ Phase 0 の fixture は LLM で抽出しない。例:
 | モデル | 責務 | 性質 |
 |--------|------|------|
 | `SourceDocument` | ユーザーが触れた素材そのもの（原文） | 追加のみ。原文は書き換えない |
+| `LearningItemCandidate` | LLM が提案した学習候補 | 未確定。`candidate` / `accepted` / `rejected` |
 | `LearningItem` | 素材から抽出・正規化した「学習対象」 | 更新される（status等） |
 | `LearningEvent` | 学習者の行動の記録 | append-only（`frozen=True`） |
 | `LearnerState` | LearningEventを集約した現在の習熟状態 | 上書き更新される |
@@ -110,6 +116,32 @@ Phase 0 の fixture は LLM で抽出しない。例:
 
 このため `LearningItem.source_refs: list[SourceRef]` という参照リストを持ち、
 Sourceの本文をLearningItem側にコピーしない。
+
+### 1.1 LearningItem と LearningItemCandidate を同一モデルにしない
+
+**Candidate は「LLMが提案した学習候補」、LearningItem は「覚える対象として確定した項目」。**
+
+Phase 2 の中心原則:
+
+```text
+SourceDocument
+  -> LLM extraction
+  -> LearningItemCandidate
+  -> validation / normalization / user review
+  -> LearningItem
+```
+
+- Candidate は 1つの Source に紐づく（`source_document_id` は必須）
+- LearningItem は複数 Source から再発見されうる（`source_refs`）
+- Candidate の status は `candidate` / `accepted` / `rejected`
+- LearningItem の status は `active` / `suspended` / `mastered`
+- LLM raw response 全文は DB に必須保存しない。debug 用に
+  `metadata` へ provider / model / request id 等を最小限載せられる
+- 原文断片は `evidence_span.start` / `end` から Source 本文をスライスして再構成する
+  （`read_source_evidence`）。後続 service が範囲外を検出できる
+
+`accepted` / `rejected` は終端状態であり、そこからの再遷移は許可しない
+（`apply_candidate_status`）。
 
 ### 2. LearningEvent と LearnerState を分ける
 
@@ -183,6 +215,9 @@ UI層の責務とし、domain層はUTCで一貫させる。
 | `EvidenceSpan` | `start >= 0` かつ `end > start` |
 | `SourceRef` | `confidence` は 0.0〜1.0 |
 | `LearningItem` | `canonical_form` / `meaning_ja` は空文字不可 |
+| `LearningItemCandidate` | `canonical_form` / `meaning_ja` / `extraction_version` は空文字不可 |
+| `LearningItemCandidate` | `confidence` は 0.0〜1.0。未知の `item_type` / `status` は reject |
+| `LearningItemCandidate` | `candidate` からのみ `accepted` / `rejected` へ遷移できる |
 | `LearningEvent` | `response_time_ms >= 0`、生成後は変更不可 |
 | `MasteryStats` | `attempt_count == correct_count + incorrect_count` |
 | `MasteryStats` | `consecutive_correct <= correct_count` |
@@ -215,8 +250,9 @@ Phase 0時点では `backend/app/domain/conjugation.py` /
 
 - Phase 0 は LLM 非依存。Source / LearningItem は手入力またはテスト fixture で与える
 - Phase 1 も LLM 非依存。ユーザーが貼り付けた本文を SourceDocument として保存・表示するだけ
-- Phase 2 で Source から LearningItem 候補を生成する
+- Phase 2 で Source から LearningItem 候補（`LearningItemCandidate`）を生成する
 - LLM 生成結果は正規化・ validation 後に domain へ入れる。出力をそのまま正解データにしない
+- Issue #131 時点では Candidate の型と永続化のみ。LLM API 呼び出し・prompt・採否 API は後続
 
 `SourceRef` は Phase 2 に備えて `evidence_span` と `confidence` を
 optional で持てる。Phase 0 ではどちらも `None` のままでよい。
@@ -251,6 +287,7 @@ service / domain は SQLite や ORM を直接 import しない。
 |------------|------|------|
 | `SourceDocumentRepository` | create / get / list | 削除なし |
 | `LearningItemRepository` | create / get / list | 削除なし |
+| `LearningItemCandidateRepository` | create / get / list_by_source / update_status | 削除なし。存在しない Source は拒否 |
 | `LearningEventRepository` | append / list_by_item | append-only。`occurred_at`, `id` 順 |
 | `LearnerStateRepository` | get / upsert | LearningItem につき1件（PK） |
 | `LearningProgressRepository` | append_event_and_upsert_state | event と state を同一トランザクション |
@@ -264,6 +301,8 @@ SQLite 実装の入口は `TutorSqliteStore`。
 
 - `LearningEvent` / `LearnerState` / `ReviewSchedule` は存在する
   `LearningItem` を参照する（FK + repository 側の存在チェック）
+- `LearningItemCandidate` は存在する `SourceDocument` を参照する
+  （FK + repository 側の存在チェック）
 - `LearnerState` と `ReviewSchedule` は `learning_item_id` を主キーにし、1件に制限する
 - `ON DELETE RESTRICT` により、履歴がある LearningItem を SQL から消しても失敗する
 - repository に `delete` を置かない（履歴消失を安易に許可しない）
@@ -293,12 +332,12 @@ review を入れると 1 から再カウントされる。三者を1トランザ
 
 `schema_migrations` テーブルが適用済み version を保持する。
 
-1. version 0（未初期化）: `create_all` で現行スキーマを作り version 1 を記録する
+1. version 0（未初期化）: `create_all` で現行スキーマを作り version 2 を記録する
 2. version < 現行: `UPGRADE_STEPS` の upgrade 関数を順に適用する
 3. version > 現行: `SchemaVersionError`（新しいDBを古いコードで開いた）
 
-Phase 0 の現行 version は `1`。`UPGRADE_STEPS` は空である。
-次の破壊的変更時に version 2 の upgrade 関数を追加する。
+現行 version は `2`。version 2 の upgrade は `learning_item_candidates`
+テーブルを追加する（Issue #131）。新規DBは `create_all` で version 2 を直接作る。
 
 ローカルで生成される `*.db` は git 管理対象外（`.gitignore`）。
 
@@ -575,6 +614,21 @@ Phase 1 ではこの文から LearningItem を抽出しない。
 Phase 2 は保存済み SourceDocument を入力として、LearningItem 候補抽出を行う。
 Phase 1 の UI / API はその入力基盤として維持する。抽出結果は正規化・
 validation 後に domain へ入れ、LLM 出力をそのまま正解データにしない。
+
+Issue #131 で `LearningItemCandidate` の domain model と SQLite 永続化を追加した。
+LLM 呼び出し・prompt・Candidate 採否 API・Frontend は後続 Issue。
+
+## Phase 2 Candidate 永続化（Issue #131）
+
+| 操作 | 実装 | 自動テスト |
+|------|------|------------|
+| Candidate 作成 | `LearningItemCandidate` + `LearningItemCandidateRepository.create` | `test_learning_item_candidate_create_and_get_are_persisted` |
+| 不正 enum / confidence / 空文字 | domain validation | `test_candidate_rejects_*` |
+| 存在しない Source 参照 | repository の存在チェック | `test_candidate_create_requires_existing_source` |
+| Source 単位一覧 | `list_by_source` | `test_learning_item_candidate_list_by_source` |
+| status 更新 | `apply_candidate_status` + `update_status` | `test_candidate_status_update_is_persisted` |
+| DB 再 open | file SQLite | `test_candidate_survives_reopen_without_affecting_existing_schema` |
+| schema 1 → 2 | `UPGRADE_STEPS` | `test_schema_upgrades_from_v1_and_preserves_existing_rows` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 

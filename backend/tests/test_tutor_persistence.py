@@ -4,13 +4,16 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.domain.tutor import (
+    EvidenceSpan,
     LearnerState,
     LearningEvent,
     LearningItem,
+    LearningItemCandidate,
     MasteryStats,
     ReviewSchedule,
     SourceDocument,
@@ -18,6 +21,14 @@ from app.domain.tutor import (
     utcnow,
 )
 from app.persistence.datetime_codec import dump_utc
+from app.persistence.db import create_db_engine
+from app.persistence.models import (
+    Base,
+    LearningItemCandidateRow,
+    LearningItemRow,
+    SchemaMigrationRow,
+    SourceDocumentRow,
+)
 from app.persistence.schema import (
     CURRENT_SCHEMA_VERSION,
     SchemaVersionError,
@@ -56,6 +67,33 @@ def _schedule(item_id: str, due_at: datetime, **overrides) -> ReviewSchedule:
     }
     values.update(overrides)
     return ReviewSchedule(**values)
+
+
+def _source(**overrides) -> SourceDocument:
+    values = {
+        "title": "Article",
+        "content": "Oui, il s'agit de cela.",
+    }
+    values.update(overrides)
+    return SourceDocument(**values)
+
+
+def _candidate(source_id: str, **overrides) -> LearningItemCandidate:
+    content = overrides.pop("source_content", "Oui, il s'agit de cela.")
+    form = str(overrides.get("canonical_form", "il s'agit de"))
+    start = content.index(form) if form in content else 0
+    values = {
+        "source_document_id": source_id,
+        "item_type": "expression",
+        "canonical_form": form,
+        "meaning_ja": "〜が問題である",
+        "evidence_span": EvidenceSpan(start=start, end=start + len(form)),
+        "extraction_version": "extract-v1",
+        "confidence": 0.91,
+        "metadata": {"provider": "test", "model": "fixture"},
+    }
+    values.update(overrides)
+    return LearningItemCandidate(**values)
 
 
 @pytest.fixture
@@ -130,6 +168,158 @@ def test_learning_item_list_orders_by_created_at(store: TutorSqliteStore):
     store.learning_items.create(newer)
     store.learning_items.create(older)
     assert [item.id for item in store.learning_items.list()] == [older.id, newer.id]
+
+
+def test_learning_item_candidate_create_and_get_are_persisted(
+    store: TutorSqliteStore,
+):
+    source = _source()
+    store.source_documents.create(source)
+    candidate = _candidate(
+        source.id,
+        explanation_ja="よく出る表現",
+        level="A2",
+    )
+    store.learning_item_candidates.create(candidate)
+
+    loaded = store.learning_item_candidates.get(candidate.id)
+    assert loaded == candidate
+    assert loaded is not None
+    assert loaded.status == "candidate"
+    assert loaded.extraction_version == "extract-v1"
+    assert loaded.evidence_span.text is None
+    assert source.content[loaded.evidence_span.start : loaded.evidence_span.end] == (
+        "il s'agit de"
+    )
+
+
+def test_learning_item_candidate_list_by_source(store: TutorSqliteStore):
+    source_a = _source(title="A", content="premier il s'agit de")
+    source_b = _source(title="B", content="autre texte")
+    store.source_documents.create(source_a)
+    store.source_documents.create(source_b)
+
+    older = _candidate(
+        source_a.id,
+        source_content=source_a.content,
+        canonical_form="premier",
+        meaning_ja="最初の",
+        evidence_span=EvidenceSpan(start=0, end=7),
+        created_at=utcnow(),
+    )
+    newer = _candidate(
+        source_a.id,
+        source_content=source_a.content,
+        canonical_form="il s'agit de",
+        meaning_ja="〜が問題である",
+        created_at=utcnow() + timedelta(seconds=1),
+    )
+    other = _candidate(
+        source_b.id,
+        source_content=source_b.content,
+        canonical_form="autre",
+        meaning_ja="他の",
+        evidence_span=EvidenceSpan(start=0, end=5),
+    )
+    store.learning_item_candidates.create(newer)
+    store.learning_item_candidates.create(other)
+    store.learning_item_candidates.create(older)
+
+    listed = store.learning_item_candidates.list_by_source(source_a.id)
+    assert [candidate.id for candidate in listed] == [older.id, newer.id]
+
+
+def test_duplicate_learning_item_candidate_id_is_rejected(store: TutorSqliteStore):
+    source = _source()
+    store.source_documents.create(source)
+    candidate = _candidate(source.id)
+    store.learning_item_candidates.create(candidate)
+    with pytest.raises(DuplicateEntityError):
+        store.learning_item_candidates.create(candidate)
+
+
+def test_candidate_create_requires_existing_source(store: TutorSqliteStore):
+    with pytest.raises(ReferentialIntegrityError, match="SourceDocument"):
+        store.learning_item_candidates.create(_candidate("missing-source"))
+
+
+def test_candidate_status_update_is_persisted(store: TutorSqliteStore):
+    source = _source()
+    store.source_documents.create(source)
+    candidate = _candidate(source.id)
+    store.learning_item_candidates.create(candidate)
+
+    accepted = store.learning_item_candidates.update_status(candidate.id, "accepted")
+    assert accepted.status == "accepted"
+    assert store.learning_item_candidates.get(candidate.id) == accepted
+
+    with pytest.raises(ValueError, match="変更できない"):
+        store.learning_item_candidates.update_status(candidate.id, "rejected")
+    assert store.learning_item_candidates.get(candidate.id).status == "accepted"
+
+
+def test_candidate_status_update_requires_existing_candidate(
+    store: TutorSqliteStore,
+):
+    with pytest.raises(ReferentialIntegrityError, match="LearningItemCandidate"):
+        store.learning_item_candidates.update_status("missing", "accepted")
+
+
+def test_candidate_survives_reopen_without_affecting_existing_schema(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "tutor.db"
+    url = f"sqlite:///{db_path}"
+    store = TutorSqliteStore(url)
+    source = _source()
+    item = _item()
+    store.source_documents.create(source)
+    store.learning_items.create(item)
+    candidate = _candidate(source.id)
+    store.learning_item_candidates.create(candidate)
+    store.engine.dispose()
+
+    reopened = TutorSqliteStore(url)
+    assert reopened.source_documents.get(source.id) == source
+    assert reopened.learning_items.get(item.id) == item
+    assert reopened.learning_item_candidates.get(candidate.id) == candidate
+    assert inspect(reopened.engine).has_table("learning_items")
+    assert inspect(reopened.engine).has_table("source_documents")
+    reopened.engine.dispose()
+
+
+def test_schema_upgrades_from_v1_and_preserves_existing_rows(tmp_path: Path):
+    db_path = tmp_path / "legacy.db"
+    url = f"sqlite:///{db_path}"
+    engine = create_db_engine(url)
+    v1_tables = [
+        table
+        for table in Base.metadata.sorted_tables
+        if table.name != LearningItemCandidateRow.__tablename__
+    ]
+    Base.metadata.create_all(engine, tables=v1_tables)
+
+    source = _source()
+    item = _item()
+    with Session(engine) as session:
+        session.add(SchemaMigrationRow(version=1, applied_at=dump_utc(utcnow())))
+        session.add(SourceDocumentRow.from_domain(source))
+        session.add(LearningItemRow.from_domain(item))
+        session.commit()
+    assert get_schema_version(engine) == 1
+    assert not inspect(engine).has_table(LearningItemCandidateRow.__tablename__)
+    engine.dispose()
+
+    store = TutorSqliteStore(url)
+    assert get_schema_version(store.engine) == 2
+    assert inspect(store.engine).has_table(LearningItemCandidateRow.__tablename__)
+    assert store.source_documents.get(source.id) == source
+    assert store.learning_items.get(item.id) == item
+
+    candidate = _candidate(source.id)
+    store.learning_item_candidates.create(candidate)
+    assert store.learning_item_candidates.get(candidate.id) == candidate
+    store.engine.dispose()
 
 
 def test_duplicate_learning_item_id_is_rejected(store: TutorSqliteStore):
@@ -354,11 +544,14 @@ def test_newer_schema_version_is_rejected(store: TutorSqliteStore):
 
 def test_learning_item_repository_has_no_delete():
     assert not hasattr(TutorSqliteStore.in_memory().learning_items, "delete")
+    assert not hasattr(TutorSqliteStore.in_memory().learning_item_candidates, "delete")
 
 
 def test_get_missing_entities_returns_none(store: TutorSqliteStore):
     assert store.source_documents.get("missing") is None
     assert store.learning_items.get("missing") is None
+    assert store.learning_item_candidates.get("missing") is None
     assert store.learner_states.get("missing") is None
     assert store.review_schedules.get("missing") is None
     assert store.learning_events.list_by_item("missing") == []
+    assert store.learning_item_candidates.list_by_source("missing") == []
