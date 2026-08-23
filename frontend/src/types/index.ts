@@ -79,3 +79,36 @@ export interface NounFilter {
   level?: NounLevel
   category?: NounCategory
 }
+
+/** Phase 1 は手入力テキストのみ。将来 URL/PDF 等が追加される。 */
+export type SourceType = 'manual_text'
+
+export interface SourceDocument {
+  id: string
+  source_type: SourceType | string
+  title: string
+  content: string
+  language: string
+  created_at: string
+  metadata: Record<string, unknown>
+}
+
+export interface SourceSummary {
+  id: string
+  source_type: SourceType | string
+  title: string
+  language: string
+  created_at: string
+  content_preview: string
+}
+
+export interface CreateTutorSourceInput {
+  title: string
+  content: string
+  language?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface FetchTutorSourcesOptions {
+  limit?: number
+}
