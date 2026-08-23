@@ -41,12 +41,14 @@ Frontend: `http://localhost:5173` / Backend: `http://localhost:8000` / API docs:
 backend/app/
 ├── api/           # HTTP の関心事のみ（パス・ステータスコード・Pydantic モデルの受け渡し）
 ├── domain/        # ビジネスルール。フレームワーク非依存
-│   └── conjugation.py  # 活用データ辞書・Pydantic モデル・判定ロジック
+│   ├── conjugation.py  # 活用データ辞書・Pydantic モデル・判定ロジック
+│   └── review_scheduler.py  # 初期復習間隔の算出
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/      # ユースケース（domain を組み合わせる処理）
     ├── question_service.py  # グループフィルタ付きランダム問題選択
-    └── learning_state_service.py  # LearningEvent から LearnerState を更新
+    ├── learning_state_service.py  # LearningEvent から LearnerState を更新
+    └── review_service.py  # 復習予定の保存と due 取得
 ```
 
 新しい動詞を追加する場合は `CONJUGATIONS` と `VERB_GROUPS` の両方を `conjugation.py` に追記する。`VerbGroup` は `Literal["all", "er", "ir", "irregular"]` で、`?group=` クエリパラメータで絞り込める。
