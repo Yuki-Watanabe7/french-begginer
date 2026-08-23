@@ -18,13 +18,16 @@ from app.domain.tutor import (
     LearnerState,
     LearningEvent,
     LearningItem,
+    LearningItemCandidate,
     MasteryStats,
     ReviewSchedule,
     SourceDocument,
     SourceRef,
+    apply_candidate_status,
     apply_review_event,
     compute_mastery_score,
     new_id,
+    read_source_evidence,
     utcnow,
 )
 
@@ -186,6 +189,150 @@ def test_evidence_span_rejects_non_positive_length():
 def test_evidence_span_rejects_negative_start():
     with pytest.raises(ValidationError):
         EvidenceSpan(start=-1, end=3)
+
+
+# ---------------------------------------------------------------------------
+# LearningItemCandidate
+# ---------------------------------------------------------------------------
+
+
+def _candidate(**overrides) -> LearningItemCandidate:
+    values = {
+        "source_document_id": "src-1",
+        "item_type": "expression",
+        "canonical_form": "il s'agit de",
+        "meaning_ja": "〜が問題である",
+        "evidence_span": EvidenceSpan(start=0, end=12),
+        "extraction_version": "extract-v1",
+    }
+    values.update(overrides)
+    return LearningItemCandidate(**values)
+
+
+def test_learning_item_candidate_minimal_fields_and_defaults():
+    candidate = _candidate()
+    assert candidate.status == "candidate"
+    assert candidate.explanation_ja is None
+    assert candidate.level is None
+    assert candidate.confidence is None
+    assert candidate.evidence_span.text is None
+    assert candidate.metadata == {}
+    assert candidate.id
+    assert candidate.created_at.tzinfo is not None
+
+
+def test_candidate_is_not_a_learning_item():
+    """Candidate と LearningItem は別モデルであり、責務を混ぜない。"""
+    candidate = _candidate()
+    item = LearningItem(
+        item_type="expression",
+        canonical_form="il s'agit de",
+        meaning_ja="〜が問題である",
+    )
+    assert not isinstance(candidate, LearningItem)
+    assert not isinstance(item, LearningItemCandidate)
+    assert "source_document_id" not in LearningItem.model_fields
+    assert "extraction_version" not in LearningItem.model_fields
+    assert "source_refs" not in LearningItemCandidate.model_fields
+    assert candidate.status not in ("active", "suspended", "mastered")
+
+
+def test_candidate_requires_core_fields():
+    with pytest.raises(ValidationError):
+        LearningItemCandidate(
+            canonical_form="livre",
+            meaning_ja="本",
+            evidence_span=EvidenceSpan(start=0, end=5),
+            extraction_version="v1",
+        )
+    with pytest.raises(ValidationError):
+        _candidate(canonical_form="")
+    with pytest.raises(ValidationError):
+        _candidate(meaning_ja="")
+    with pytest.raises(ValidationError):
+        _candidate(extraction_version="")
+    with pytest.raises(ValidationError):
+        _candidate(source_document_id="")
+
+
+def test_candidate_rejects_unknown_item_type():
+    with pytest.raises(ValidationError):
+        _candidate(item_type="idiom")
+
+
+def test_candidate_rejects_unknown_status():
+    with pytest.raises(ValidationError):
+        _candidate(status="pending")
+    with pytest.raises(ValidationError):
+        _candidate(status="active")
+
+
+@pytest.mark.parametrize("confidence", [-0.01, 1.01])
+def test_candidate_rejects_confidence_out_of_range(confidence: float):
+    with pytest.raises(ValidationError):
+        _candidate(confidence=confidence)
+
+
+@pytest.mark.parametrize("confidence", [0.0, 0.5, 1.0])
+def test_candidate_accepts_confidence_within_range(confidence: float):
+    assert _candidate(confidence=confidence).confidence == confidence
+
+
+def test_candidate_rejects_naive_created_at():
+    with pytest.raises(ValidationError):
+        _candidate(created_at=datetime(2026, 1, 1, 12, 0))
+
+
+def test_candidate_normalizes_created_at_to_utc():
+    jst = timezone(timedelta(hours=9))
+    candidate = _candidate(created_at=datetime(2026, 1, 1, 9, 0, tzinfo=jst))
+    assert candidate.created_at == datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+
+
+def test_read_source_evidence_reconstructs_text_without_storing_fragment():
+    content = "Oui, il s'agit de cela."
+    start = content.index("il s'agit de")
+    end = start + len("il s'agit de")
+    span = EvidenceSpan(start=start, end=end)
+    assert span.text is None
+    assert read_source_evidence(content, span) == "il s'agit de"
+
+
+def test_read_source_evidence_rejects_span_outside_source():
+    with pytest.raises(ValueError, match="範囲外"):
+        read_source_evidence("abc", EvidenceSpan(start=0, end=10))
+
+
+def test_apply_candidate_status_accepts_and_rejects_from_candidate():
+    original = _candidate()
+    accepted = apply_candidate_status(original, "accepted")
+    rejected = apply_candidate_status(original, "rejected")
+    assert original.status == "candidate"
+    assert accepted.status == "accepted"
+    assert rejected.status == "rejected"
+    assert accepted.id == original.id
+
+
+def test_apply_candidate_status_same_status_is_idempotent():
+    candidate = _candidate()
+    assert apply_candidate_status(candidate, "candidate") is candidate
+    accepted = apply_candidate_status(candidate, "accepted")
+    assert apply_candidate_status(accepted, "accepted") is accepted
+
+
+@pytest.mark.parametrize(
+    ("current", "nxt"),
+    [
+        ("accepted", "rejected"),
+        ("accepted", "candidate"),
+        ("rejected", "accepted"),
+        ("rejected", "candidate"),
+    ],
+)
+def test_apply_candidate_status_forbids_terminal_transitions(current: str, nxt: str):
+    candidate = _candidate(status=current)
+    with pytest.raises(ValueError, match="変更できない"):
+        apply_candidate_status(candidate, nxt)
 
 
 # ---------------------------------------------------------------------------

@@ -14,9 +14,9 @@ from sqlalchemy.engine import Connection, Engine
 
 from app.domain.tutor import utcnow
 from app.persistence.datetime_codec import dump_utc
-from app.persistence.models import Base, SchemaMigrationRow
+from app.persistence.models import Base, LearningItemCandidateRow, SchemaMigrationRow
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 UpgradeFn = Callable[[Connection], None]
 
@@ -76,6 +76,13 @@ def _apply_upgrades(conn: Connection, from_version: int) -> None:
         _record_version(conn, version)
 
 
-# (target_version, upgrade) 。初期スキーマは create_all で作るためここは空。
-# 次の破壊的変更時に 2 以降を追加する。
-UPGRADE_STEPS: list[tuple[int, UpgradeFn]] = []
+def _upgrade_to_2(conn: Connection) -> None:
+    """Phase 2: LearningItemCandidate テーブルを追加する。"""
+    LearningItemCandidateRow.__table__.create(conn)
+
+
+# (target_version, upgrade) 。初期スキーマは create_all で作るため、
+# 新規DBは version 2 として作成される。既存の version 1 DB は upgrade する。
+UPGRADE_STEPS: list[tuple[int, UpgradeFn]] = [
+    (2, _upgrade_to_2),
+]

@@ -13,4 +13,4 @@ class DuplicateEntityError(RepositoryError):
 
 
 class ReferentialIntegrityError(RepositoryError):
-    """存在しない LearningItem を参照した場合など。"""
+    """存在しない LearningItem / SourceDocument を参照した場合など。"""

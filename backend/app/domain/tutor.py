@@ -1,5 +1,5 @@
 """
-Tutor機能の中核ドメインモデル（Phase 0）。
+Tutor機能の中核ドメインモデル（Phase 0 / Phase 2 Candidate）。
 
 責務: ユーザーが触れたフランス語ソースを教材化し、学習履歴・習熟状態・
 復習予定を追跡するための型・不変条件・LearnerState更新を定義する。
@@ -9,6 +9,7 @@ DB / FastAPI / OpenAI API には依存しない（domain層の原則）。
 
 モデルの責務分離:
   - SourceDocument: ユーザーが触れた素材そのもの（原文）
+  - LearningItemCandidate: LLMが提案した学習候補。確定前の中間表現
   - LearningItem:   素材から抽出・正規化した「学習対象」
   - LearningEvent:  学習者の行動の記録。append-only（frozen）
   - LearnerState:   LearningEventを集約した「現在の習熟状態」
@@ -21,6 +22,7 @@ DB / FastAPI / OpenAI API には依存しない（domain層の原則）。
 
 LearnerState の更新は `apply_review_event` が担う（Issue #110）。
 復習予定の算出は `review_scheduler.schedule_next_review` が担う（Issue #111）。
+Candidate の状態遷移は `apply_candidate_status` が担う（Issue #131）。
 SRS / LLM / API / UI は後続Issue。
 """
 
@@ -67,6 +69,12 @@ LearningItemType = Literal["vocabulary", "expression", "grammar", "conjugation"]
 
 LearningItemStatus = Literal["active", "suspended", "mastered"]
 """active=学習対象 / suspended=一時停止（ユーザーが除外） / mastered=定着済み"""
+
+CandidateStatus = Literal["candidate", "accepted", "rejected"]
+"""candidate=未判定 / accepted=学習項目として採用 / rejected=却下。
+
+accepted / rejected は終端状態。無制限な再遷移は許可しない。
+"""
 
 CefrLevel = Literal["A1", "A2", "B1", "B2", "C1", "C2"]
 
@@ -117,10 +125,11 @@ class SourceDocument(BaseModel):
 
 
 class EvidenceSpan(BaseModel):
-    """LearningItemの根拠となったSource中の位置。
+    """LearningItem / Candidate の根拠となった Source 中の位置。
 
-    Phase 0では利用しないが、Phase 2のLLM抽出で「原文のどこから採ったか」を
-    保持できるよう拡張余地として定義しておく。
+    原文断片 `text` は冗長保持しなくてよい。`start` / `end` があれば
+    Source 本文から `read_source_evidence` で再構成でき、後続 service が
+    範囲内かどうかを検証できる。
     """
 
     start: int = Field(ge=0)
@@ -166,6 +175,78 @@ class LearningItem(BaseModel):
     created_at: UtcDatetime = Field(default_factory=utcnow)
     status: LearningItemStatus = "active"
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# LearningItemCandidate — LLM抽出の未確定候補
+# ---------------------------------------------------------------------------
+
+
+class LearningItemCandidate(BaseModel):
+    """LLM が提案した学習候補。正しい学習項目として確定したデータではない。
+
+    LearningItem と同一モデルにしない。Candidate は validation / 正規化 /
+    ユーザー確認の前の中間表現であり、採用後に LearningItem へ昇格する。
+
+    evidence_span は Source 本文上のオフセットだけを持ち、原文断片の冗長
+    保持は必須にしない。本文からの再構成は `read_source_evidence` を使う。
+    """
+
+    id: str = Field(default_factory=new_id)
+    source_document_id: str = Field(min_length=1)
+    item_type: LearningItemType
+    canonical_form: str = Field(min_length=1)
+    meaning_ja: str = Field(min_length=1)
+    explanation_ja: str | None = None
+    level: CefrLevel | None = None
+    evidence_span: EvidenceSpan
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    status: CandidateStatus = "candidate"
+    extraction_version: str = Field(min_length=1)
+    created_at: UtcDatetime = Field(default_factory=utcnow)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+_ALLOWED_CANDIDATE_STATUS_TRANSITIONS: dict[
+    CandidateStatus, frozenset[CandidateStatus]
+] = {
+    "candidate": frozenset({"accepted", "rejected"}),
+    "accepted": frozenset(),
+    "rejected": frozenset(),
+}
+
+
+def apply_candidate_status(
+    candidate: LearningItemCandidate, new_status: CandidateStatus
+) -> LearningItemCandidate:
+    """Candidate の status を遷移した新しいインスタンスを返す。
+
+    現在の candidate は変更しない。同一 status への更新は冪等。
+    accepted / rejected からの遷移は許可しない。
+    """
+    if candidate.status == new_status:
+        return candidate
+    allowed = _ALLOWED_CANDIDATE_STATUS_TRANSITIONS[candidate.status]
+    if new_status not in allowed:
+        raise ValueError(
+            f"LearningItemCandidate の status を {candidate.status} から "
+            f"{new_status} へは変更できない"
+        )
+    return candidate.model_copy(update={"status": new_status})
+
+
+def read_source_evidence(content: str, span: EvidenceSpan) -> str:
+    """Source 本文から evidence_span の範囲を切り出す。
+
+    範囲が本文に収まらない場合は ValueError。後続 service が
+    Candidate の根拠位置を検証・再構成するために使う。
+    """
+    if span.end > len(content):
+        raise ValueError(
+            f"evidence span が Source 本文の範囲外: "
+            f"end={span.end}, content_length={len(content)}"
+        )
+    return content[span.start : span.end]
 
 
 # ---------------------------------------------------------------------------
