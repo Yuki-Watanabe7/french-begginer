@@ -42,6 +42,8 @@ backend/app/
 ├── api/           # HTTP の関心事のみ（パス・ステータスコード・Pydantic モデルの受け渡し）
 ├── domain/        # ビジネスルール。フレームワーク非依存
 │   └── conjugation.py  # 活用データ辞書・Pydantic モデル・判定ロジック
+├── persistence/   # Tutorデータの SQLite / schema version
+├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/      # ユースケース（domain を組み合わせる処理）
     └── question_service.py  # グループフィルタ付きランダム問題選択
 ```
