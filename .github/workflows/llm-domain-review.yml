@@ -33,7 +33,7 @@ jobs:
 
       - name: Install backend dependencies
         working-directory: backend
-        run: uv sync --extra dev
+        run: uv sync --group dev
 
       - name: Run existing pytest (Layer 1)
         working-directory: backend
