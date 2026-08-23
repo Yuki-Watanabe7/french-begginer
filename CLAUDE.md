@@ -115,6 +115,15 @@ setup → quiz-settings → loading → answering ⇄ result
 - PR 前に `ruff check .` / `pytest` / `npm run lint` / `npm run build` がすべて通ること
 - API を追加・変更した場合は `docs/architecture.md` の API 表を更新する
 
+## PR の Test plan
+
+PR 本文の Test plan は「これから人が確認するリスト」ではなく、**この作業で確認した事実の記録**である。
+
+- エージェントが自動テストや `quality-check.sh` で確認して通した項目は `[x]` にする
+- 人手確認が不要な項目を、前回 PR の体裁に合わせて未チェックのまま残さない
+- `[ ]` にしてよいのは、スマホ実機の使用感など、本当に人が見る必要がある項目だけ
+- 確認に使ったテスト名を括弧書きする（例: `test_create_and_get_source`）
+
 ## 作業完了条件
 
 Claude は作業完了報告の前に、必ず`bash scripts/quality-check.sh`を実行すること。
@@ -125,3 +134,5 @@ Claude は作業完了報告の前に、必ず`bash scripts/quality-check.sh`を
 2. エラーメッセージ
 3. 原因推定
 4. ユーザー側で必要な対応
+
+PR を作成・更新する場合は、上記 Test plan ルールに従い、確認済み項目を `[x]` にしてから提出すること。
