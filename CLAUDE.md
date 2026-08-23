@@ -49,7 +49,8 @@ backend/app/
     ├── question_service.py  # グループフィルタ付きランダム問題選択
     ├── learning_state_service.py  # LearningEvent から LearnerState を更新
     ├── review_service.py  # 復習予定の保存と due 取得
-    └── tutor_service.py  # Tutor最小APIのユースケース
+    ├── tutor_service.py  # Tutor最小APIのユースケース
+    └── extraction_service.py  # Source から LearningItemCandidate を抽出
 ```
 
 新しい動詞を追加する場合は `CONJUGATIONS` と `VERB_GROUPS` の両方を `conjugation.py` に追記する。`VerbGroup` は `Literal["all", "er", "ir", "irregular"]` で、`?group=` クエリパラメータで絞り込める。

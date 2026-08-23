@@ -9,7 +9,8 @@ vertical slice 統合テスト（Issue #113）、
 Phase 1 の Source 一覧 API（Issue #121）、Frontend 型と API client（Issue #122）、
 手入力保存画面（Issue #123）、一覧・詳細画面（Issue #124）、
 Phase 1 vertical slice（Issue #125）、
-および Phase 2 の LearningItemCandidate ドメインと永続化（Issue #131）
+Phase 2 の LearningItemCandidate ドメインと永続化（Issue #131）、
+および LLM Extraction Service（Issue #132）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -23,6 +24,11 @@ Phase 1 vertical slice（Issue #125）、
   / `backend/tests/test_review_service.py`
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
+- 抽出: `backend/app/services/extraction_service.py`
+  / `backend/app/services/extractors.py`
+  / `backend/app/services/openai_extractor.py`
+  / `backend/tests/test_extraction_service.py`
+  / `backend/tests/test_openai_extractor.py`
 - 統合: `backend/tests/test_tutor_vertical_slice.py`
   / `backend/tests/test_tutor_phase1_vertical_slice.py`
   / `frontend/src/test/TutorPhase1Flow.test.tsx`
@@ -252,7 +258,10 @@ Phase 0時点では `backend/app/domain/conjugation.py` /
 - Phase 1 も LLM 非依存。ユーザーが貼り付けた本文を SourceDocument として保存・表示するだけ
 - Phase 2 で Source から LearningItem 候補（`LearningItemCandidate`）を生成する
 - LLM 生成結果は正規化・ validation 後に domain へ入れる。出力をそのまま正解データにしない
-- Issue #131 時点では Candidate の型と永続化のみ。LLM API 呼び出し・prompt・採否 API は後続
+- OpenAI SDK は `openai_extractor.py` に閉じる。domain / ExtractionService は
+  `LearningItemExtractor` Protocol にだけ依存する
+- Issue #132 は抽出まで。Candidate の evidence 検証・正規化・重複統合は #133、
+  永続化と採否 API は #134、Frontend は #135
 
 `SourceRef` は Phase 2 に備えて `evidence_span` と `confidence` を
 optional で持てる。Phase 0 ではどちらも `None` のままでよい。
@@ -616,7 +625,8 @@ Phase 1 の UI / API はその入力基盤として維持する。抽出結果�
 validation 後に domain へ入れ、LLM 出力をそのまま正解データにしない。
 
 Issue #131 で `LearningItemCandidate` の domain model と SQLite 永続化を追加した。
-LLM 呼び出し・prompt・Candidate 採否 API・Frontend は後続 Issue。
+Issue #132 で SourceDocument から Candidate を得る Extraction Service を追加した。
+Candidate の正規化・重複統合・採否 API・Frontend は後続 Issue。
 
 ## Phase 2 Candidate 永続化（Issue #131）
 
@@ -629,6 +639,33 @@ LLM 呼び出し・prompt・Candidate 採否 API・Frontend は後続 Issue。
 | status 更新 | `apply_candidate_status` + `update_status` | `test_candidate_status_update_is_persisted` |
 | DB 再 open | file SQLite | `test_candidate_survives_reopen_without_affecting_existing_schema` |
 | schema 1 → 2 | `UPGRADE_STEPS` | `test_schema_upgrades_from_v1_and_preserves_existing_rows` |
+
+## Phase 2 LLM Extraction（Issue #132）
+
+保存済み `SourceDocument` を入力とし、語彙・表現・文法・活用の学習候補を
+structured output で得る。LLM は候補生成器であり、出力を `LearningItem` に
+直接保存しない。
+
+```text
+SourceDocument
+  -> LearningItemExtractor (Protocol)
+       OpenAILearningItemExtractor | fake
+  -> ExtractionLlmOutput (Pydantic schema)
+  -> ExtractionService
+  -> LearningItemCandidate (status=candidate)
+```
+
+| 関心 | 実装 | 備考 |
+|------|------|------|
+| prompt / version | `extraction_prompt.py` の `EXTRACTION_VERSION` | Candidate.extraction_version と metadata.prompt_version に載せる |
+| structured schema | `extraction_schema.py` | 未知 enum・必須欠落・confidence 範囲・span 形状・20件上限を reject |
+| provider 境界 | `LearningItemExtractor` | OpenAI SDK を service/domain へ拡散させない |
+| OpenAI 実装 | `OpenAILearningItemExtractor` | `chat.completions.parse`。API key は呼び出し時に読む |
+| ユースケース | `ExtractionService.extract` | Candidate へ写す。LearningItem は作らない |
+| エラー分類 | `ExtractionConfigError` / `ExtractionTransientError` / `ExtractionInvalidResponseError` | 一時障害だけ最大3回 retry。validation 失敗は retry しない |
+
+テストは fake extractor と mocked OpenAI client で行い、`OPENAI_API_KEY` なしで通る。
+evidence が本文内かは #133、Candidate 保存と採否 API は #134。
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 

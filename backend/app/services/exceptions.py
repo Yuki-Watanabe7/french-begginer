@@ -27,3 +27,35 @@ class InvalidSourceRefError(TutorServiceError):
         super().__init__(
             f"存在しない SourceDocument を参照している: id={source_document_id}"
         )
+
+
+class ExtractionError(TutorServiceError):
+    """Source からの学習候補抽出に失敗した。
+
+    retryable=True は timeout / network / rate limit などの一時障害。
+    設定不備や structured output の validation 失敗は retryable=False。
+    """
+
+    retryable: bool = False
+
+    def __init__(self, message: str, *, kind: str) -> None:
+        self.kind = kind
+        super().__init__(message)
+
+
+class ExtractionConfigError(ExtractionError):
+    """API key 未設定・無効など、設定の問題。retry しない。"""
+
+    retryable = False
+
+
+class ExtractionTransientError(ExtractionError):
+    """timeout / network / rate limit。回数を限定した retry の対象。"""
+
+    retryable = True
+
+
+class ExtractionInvalidResponseError(ExtractionError):
+    """structured output が不正、または空。retry しない。"""
+
+    retryable = False
