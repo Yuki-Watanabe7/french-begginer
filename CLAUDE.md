@@ -45,7 +45,8 @@ backend/app/
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/      # ユースケース（domain を組み合わせる処理）
-    └── question_service.py  # グループフィルタ付きランダム問題選択
+    ├── question_service.py  # グループフィルタ付きランダム問題選択
+    └── learning_state_service.py  # LearningEvent から LearnerState を更新
 ```
 
 新しい動詞を追加する場合は `CONJUGATIONS` と `VERB_GROUPS` の両方を `conjugation.py` に追記する。`VerbGroup` は `Literal["all", "er", "ir", "irregular"]` で、`?group=` クエリパラメータで絞り込める。

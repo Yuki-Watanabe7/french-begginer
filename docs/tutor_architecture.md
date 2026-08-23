@@ -2,12 +2,14 @@
 
 関心ベースの個人フランス語家庭教師機能（Roadmap: Issue #107）の設計ドキュメント。
 
-このドキュメントは Phase 0 の中核ドメインモデル（Issue #108）と
-永続化層（Issue #109）の責務分離・不変条件を記録する。
+このドキュメントは Phase 0 の中核ドメインモデル（Issue #108）、
+永続化層（Issue #109）、学習状態更新（Issue #110）の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
 - 永続化: `backend/app/repositories/` / `backend/app/persistence/`
   / `backend/tests/test_tutor_persistence.py`
+- 状態更新: `backend/app/services/learning_state_service.py`
+  / `backend/tests/test_learning_state_service.py`
 
 ## 目指す学習ループ
 
@@ -180,6 +182,7 @@ service / domain は SQLite や ORM を直接 import しない。
 | `LearningItemRepository` | create / get / list | 削除なし |
 | `LearningEventRepository` | append / list_by_item | append-only。`occurred_at`, `id` 順 |
 | `LearnerStateRepository` | get / upsert | LearningItem につき1件（PK） |
+| `LearningProgressRepository` | append_event_and_upsert_state | event と state を同一トランザクション |
 | `ReviewScheduleRepository` | get / upsert / list_due | LearningItem につき1件（PK） |
 
 SQLite 実装の入口は `TutorSqliteStore`。
@@ -209,3 +212,43 @@ Phase 0 の現行 version は `1`。`UPGRADE_STEPS` は空である。
 次の破壊的変更時に version 2 の upgrade 関数を追加する。
 
 ローカルで生成される `*.db` は git 管理対象外（`.gitignore`）。
+
+## 学習状態更新（Issue #110）
+
+`LearningStateService.record_event` が LearningEvent の記録と
+LearnerState の更新を行う。更新ルール自体は domain の純関数
+`apply_review_event` に置き、service は存在確認と永続化を担う。
+
+```text
+LearningItem の存在確認
+  -> 現在の LearnerState を取得（無ければ未学習）
+  -> apply_review_event で次状態を算出
+  -> LearningEvent の append と LearnerState の upsert を同一トランザクションで保存
+```
+
+同じ `LearningEvent.id` の再登録は `DuplicateEntityError` で拒否する。
+トランザクションのため、拒否時に state が二重適用されることはない。
+
+### 初期更新ルール
+
+| フィールド | 更新 |
+|------------|------|
+| `attempt_count` | +1 |
+| `correct_count` | correct なら +1 |
+| `incorrect_count` | incorrect なら +1 |
+| `consecutive_correct` | correct なら +1、incorrect なら 0 |
+| `last_reviewed_at` | `event.occurred_at` |
+| `mastery_score` | `correct_count / attempt_count`（未学習は 0.0） |
+
+`mastery_score` は正答率そのもの。値域は [0.0, 1.0] で、正答で悪化せず、
+誤答で改善しない。同じイベント列からは常に同じ結果になる。
+
+Phase 0 では `by_direction`（recognition / production）は更新しない。
+`exercise_type` は LearningEvent に必ず残し、後続Issueで能力を分離する。
+
+### 不整合への備え
+
+LearnerState は LearningEvent のキャッシュである。event と state の
+書き込みは同一トランザクションだが、万一 state だけ欠けた場合は
+`LearningStateService.recompute_learner_state` が履歴を `occurred_at, id`
+順に畳み込んで state を再構築できる。

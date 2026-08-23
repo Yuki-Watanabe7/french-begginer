@@ -95,7 +95,8 @@ backend/app/
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
     ├── question_service.py
-    └── noun_service.py
+    ├── noun_service.py
+    └── learning_state_service.py  # LearningEvent → LearnerState 更新
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。
