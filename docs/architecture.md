@@ -139,6 +139,9 @@ backend/app/
 > `frontend/src/test/TutorPhase1Flow.test.tsx` で統合テストする。
 > Phase 2 の LLM抽出品質（固定 fixture と deterministic checks）は
 > [tutor_extraction_quality.md](./tutor_extraction_quality.md) を参照。
+> Phase 2 の Source → Candidate → LearningItem vertical slice は
+> `backend/tests/test_tutor_phase2_vertical_slice.py` と
+> `frontend/src/test/TutorPhase2Flow.test.tsx` で統合テストする。
 
 ## 動詞データ管理方針
 
