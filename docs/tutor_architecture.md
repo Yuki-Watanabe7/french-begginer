@@ -264,7 +264,7 @@ Phase 0時点では `backend/app/domain/conjugation.py` /
 - OpenAI SDK は `openai_extractor.py` に閉じる。domain / ExtractionService は
   `LearningItemExtractor` Protocol にだけ依存する
 - Issue #132 は抽出まで。Issue #133 で Candidate の evidence 検証・正規化・
-  重複統合を行う。永続化と採否 API は #134、Frontend は #135
+  重複統合を行う。永続化と採否 API は #134（`CandidateService`）、Frontend は #135
 
 `SourceRef` は Phase 2 に備えて `evidence_span` と `confidence` を
 optional で持てる。Phase 0 ではどちらも `None` のままでよい。
@@ -299,7 +299,8 @@ service / domain は SQLite や ORM を直接 import しない。
 |------------|------|------|
 | `SourceDocumentRepository` | create / get / list | 削除なし |
 | `LearningItemRepository` | create / get / list | 削除なし |
-| `LearningItemCandidateRepository` | create / get / list_by_source / update_status | 削除なし。存在しない Source は拒否 |
+| `LearningItemCandidateRepository` | create / create_many / get / list_by_source / update_status | 削除なし。存在しない Source は拒否。create_many は同一 TX |
+| `CandidatePromotionRepository` | persist_accept | Candidate accepted 化と LearningItem create/update を同一 TX |
 | `LearningEventRepository` | append / list_by_item | append-only。`occurred_at`, `id` 順 |
 | `LearnerStateRepository` | get / upsert | LearningItem につき1件（PK） |
 | `LearningProgressRepository` | append_event_and_upsert_state | event と state を同一トランザクション |
@@ -630,7 +631,7 @@ validation 後に domain へ入れ、LLM 出力をそのまま正解データに
 Issue #131 で `LearningItemCandidate` の domain model と SQLite 永続化を追加した。
 Issue #132 で SourceDocument から Candidate を得る Extraction Service を追加した。
 Issue #133 で evidence 検証・正規化・同一 Source 内の重複統合を追加した。
-Candidate の永続化と採否 API・Frontend は後続 Issue。
+Issue #134 で抽出結果の保存と accept / reject API を追加した。Frontend は #135。
 
 ## Phase 2 Candidate 永続化（Issue #131）
 
@@ -718,7 +719,7 @@ embedding / vector DB には依存しない。
 - 残すのは confidence が高い方。同点なら先に現れた方（index が小さい方）
 - 異なる item_type は同じ表記でも統合しない
 - 既存 LearningItem との比較には同じ `item_normalization_key` を使う
-- accept 時に source_ref を足す処理自体は #134
+- accept 時に source_ref を足す処理は `CandidateService.accept`（Issue #134）
 
 ### invalid の扱い
 
@@ -750,6 +751,72 @@ Extractor / Pydantic が応答全体を reject する。パイプラインは Ca
 | 既存 LearningItem と比較できる key | `test_normalization_key_matches_existing_learning_item` |
 | embedding 非依存 | `test_module_does_not_depend_on_embeddings` |
 | fake LLM 経由の抽出 | `test_extract_excludes_out_of_range_span_and_keeps_valid` / `test_extract_merges_duplicates_from_fake_llm_response` |
+
+## Phase 2 Candidate 抽出・採否 API（Issue #134）
+
+保存済み Source に対して抽出を実行し、Candidate の一覧・採用・却下を行う。
+LLM 出力は必ず Candidate を経由し、accept したときだけ LearningItem になる。
+
+```text
+POST /api/tutor/sources/{source_id}/candidates/extract
+GET  /api/tutor/sources/{source_id}/candidates
+POST /api/tutor/candidates/{candidate_id}/accept
+POST /api/tutor/candidates/{candidate_id}/reject
+```
+
+```text
+Source 取得
+  -> ExtractionService（validation / normalization / dedup）
+  -> 既存 Candidate と同じ normalization key は保存しない
+  -> 新規 Candidate のみ同一 TX で保存
+```
+
+再抽出では accepted / rejected を `candidate` に戻さない。rejected の履歴は残し、
+同じ key が即座に未判定へ戻ることはない。provider 障害時は既存行を変更しない。
+
+accept:
+
+- `candidate` → LearningItem を新規作成、または `item_normalization_key` が一致する
+  既存 Item へ SourceRef を追加。同じ `source_document_id` の二重追加はしない
+- 再 accept は冪等
+- `rejected` からの accept は 409
+- evidence が Source 本文と整合しない Candidate は 422
+- LearningItem 書き込みと Candidate accepted 化は同一トランザクション
+
+reject:
+
+- status を `rejected` にする。LearningItem は作らない
+- 再 reject は冪等
+- `accepted` からの reject は 409
+
+HTTP エラー:
+
+| 状況 | status |
+|------|--------|
+| Source / Candidate 不存在 | 404 |
+| 不正な status 遷移 | 409 |
+| invalid Candidate の accept | 422 |
+| API key 未設定 / LLM 一時障害 | 503 |
+| LLM 応答不正 | 502 |
+
+router は HTTP 変換のみ。LLM / SQL / domain rule は `CandidateService` に置く。
+API レスポンスに provider の生応答や Candidate.metadata は載せない。
+`evidence_text` は Backend が Source 本文から再構成する。
+
+| 観点 | 自動テスト |
+|------|------------|
+| extract で Candidate が保存される | `test_extract_saves_candidates` / `test_extract_saves_candidates_and_hides_provider_payload` |
+| Source 単位一覧 | `test_list_for_source_includes_status_and_evidence_text` |
+| accept で LearningItem が作られる | `test_accept_creates_learning_item_with_source_ref_and_evidence` |
+| 既存 Item 一致時に重複作成されない | `test_accept_merges_into_existing_learning_item` |
+| reject で LearningItem が作られない | `test_reject_does_not_create_learning_item` |
+| 再 extract で重複爆発しない | `test_reextract_does_not_duplicate_pending_candidates` |
+| rejected を復活させない | `test_reextract_does_not_revive_rejected` |
+| provider error で既存が壊れない | `test_provider_error_leaves_existing_candidates` |
+| transaction failure で中途半端にならない | `test_item_write_failure_leaves_candidate_pending` |
+| 状態遷移 | `test_reaccept_is_idempotent` / `test_accept_rejected_is_forbidden` |
+
+Frontend は #135。
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 

@@ -2,7 +2,7 @@
 
 LLM は候補生成器として扱う。出力は LearningItemCandidate へ validation し、
 evidence 検証・正規化・重複統合したうえで返す。LearningItem には保存しない。
-永続化・採否は後続 Issue。
+永続化・採否は CandidateService（Issue #134）が担う。
 
 OpenAI SDK は使わない。LearningItemExtractor にだけ依存する。
 """

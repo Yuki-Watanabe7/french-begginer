@@ -29,6 +29,35 @@ class InvalidSourceRefError(TutorServiceError):
         )
 
 
+class InvalidCandidateTransitionError(TutorServiceError):
+    """Candidate の終端 status からの不正な遷移。"""
+
+    def __init__(
+        self,
+        candidate_id: str,
+        current_status: str,
+        requested_status: str,
+    ) -> None:
+        self.candidate_id = candidate_id
+        self.current_status = current_status
+        self.requested_status = requested_status
+        super().__init__(
+            f"LearningItemCandidate の status を {current_status} から "
+            f"{requested_status} へは変更できない: id={candidate_id}"
+        )
+
+
+class TutorInvalidCandidateError(TutorServiceError):
+    """evidence 不正など、採用できない Candidate。"""
+
+    def __init__(self, candidate_id: str, reason: str) -> None:
+        self.candidate_id = candidate_id
+        self.reason = reason
+        super().__init__(
+            f"LearningItemCandidate を採用できない: id={candidate_id}: {reason}"
+        )
+
+
 class ExtractionError(TutorServiceError):
     """Source からの学習候補抽出に失敗した。
 

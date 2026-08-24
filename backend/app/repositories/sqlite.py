@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -89,11 +90,20 @@ class SqliteLearningItemCandidateRepository:
         self._sessions = sessions
 
     def create(self, candidate: LearningItemCandidate) -> LearningItemCandidate:
-        with self._sessions() as session:
-            _require_source_document(session, candidate.source_document_id)
-            session.add(LearningItemCandidateRow.from_domain(candidate))
-            _commit_or_duplicate(session, "LearningItemCandidate", candidate.id)
+        self.create_many([candidate])
         return candidate
+
+    def create_many(
+        self, candidates: Sequence[LearningItemCandidate]
+    ) -> list[LearningItemCandidate]:
+        if not candidates:
+            return []
+        with self._sessions() as session:
+            for candidate in candidates:
+                _require_source_document(session, candidate.source_document_id)
+                session.add(LearningItemCandidateRow.from_domain(candidate))
+            _commit_or_duplicate(session, "LearningItemCandidate", candidates[0].id)
+        return list(candidates)
 
     def get(self, candidate_id: str) -> LearningItemCandidate | None:
         with self._sessions() as session:
@@ -125,6 +135,40 @@ class SqliteLearningItemCandidateRepository:
             session.merge(LearningItemCandidateRow.from_domain(updated))
             session.commit()
         return updated
+
+
+class SqliteCandidatePromotionRepository:
+    """Candidate accepted 化と LearningItem 書き込みを同一トランザクションにする。"""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    def persist_accept(
+        self,
+        candidate: LearningItemCandidate,
+        item: LearningItem,
+        *,
+        create_item: bool,
+    ) -> tuple[LearningItemCandidate, LearningItem]:
+        with self._sessions() as session:
+            row = session.get(LearningItemCandidateRow, candidate.id)
+            if row is None:
+                raise ReferentialIntegrityError(
+                    f"LearningItemCandidate が存在しない: id={candidate.id}"
+                )
+            updated = apply_candidate_status(row.to_domain(), candidate.status)
+            session.merge(LearningItemCandidateRow.from_domain(updated))
+            if create_item:
+                session.add(LearningItemRow.from_domain(item))
+                _commit_or_duplicate(session, "LearningItem", item.id)
+            else:
+                if session.get(LearningItemRow, item.id) is None:
+                    raise ReferentialIntegrityError(
+                        f"LearningItem が存在しない: id={item.id}"
+                    )
+                session.merge(LearningItemRow.from_domain(item))
+                session.commit()
+        return updated, item
 
 
 class SqliteLearningEventRepository:
@@ -228,6 +272,7 @@ class TutorRepositories:
     source_documents: SqliteSourceDocumentRepository
     learning_items: SqliteLearningItemRepository
     learning_item_candidates: SqliteLearningItemCandidateRepository
+    candidate_promotions: SqliteCandidatePromotionRepository
     learning_events: SqliteLearningEventRepository
     learner_states: SqliteLearnerStateRepository
     learning_progress: SqliteLearningProgressRepository
@@ -247,6 +292,7 @@ class TutorSqliteStore:
         self.learning_item_candidates = SqliteLearningItemCandidateRepository(
             self._sessions
         )
+        self.candidate_promotions = SqliteCandidatePromotionRepository(self._sessions)
         self.learning_events = SqliteLearningEventRepository(self._sessions)
         self.learner_states = SqliteLearnerStateRepository(self._sessions)
         self.learning_progress = SqliteLearningProgressRepository(self._sessions)
@@ -257,6 +303,7 @@ class TutorSqliteStore:
             source_documents=self.source_documents,
             learning_items=self.learning_items,
             learning_item_candidates=self.learning_item_candidates,
+            candidate_promotions=self.candidate_promotions,
             learning_events=self.learning_events,
             learner_states=self.learner_states,
             learning_progress=self.learning_progress,

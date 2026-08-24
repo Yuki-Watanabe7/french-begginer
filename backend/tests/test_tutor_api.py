@@ -327,6 +327,10 @@ def test_openapi_declares_tutor_request_and_response_schemas():
     assert "/api/tutor/items/{item_id}" in paths
     assert "/api/tutor/items/{item_id}/reviews" in paths
     assert "/api/tutor/reviews/due" in paths
+    assert "/api/tutor/sources/{source_id}/candidates/extract" in paths
+    assert "/api/tutor/sources/{source_id}/candidates" in paths
+    assert "/api/tutor/candidates/{candidate_id}/accept" in paths
+    assert "/api/tutor/candidates/{candidate_id}/reject" in paths
 
     due_params = paths["/api/tutor/reviews/due"]["get"].get("parameters") or []
     assert not any(param.get("name") == "now" for param in due_params)
@@ -341,6 +345,9 @@ def test_openapi_declares_tutor_request_and_response_schemas():
         "DueReviewResponse",
         "SourceDocument",
         "SourceSummary",
+        "CandidateResponse",
+        "ExtractCandidatesResponse",
+        "AcceptCandidateResponse",
     ):
         assert name in schemas, name
 
@@ -374,3 +381,8 @@ def test_tutor_router_has_no_sql_or_domain_rules():
     assert "select(" not in source
     assert "apply_review_event" not in source
     assert "schedule_next_review" not in source
+    assert "apply_candidate_status" not in source
+    assert "item_normalization_key" not in source
+    assert "normalize_candidates" not in source
+    assert "openai" not in source
+    assert "OpenAILearningItemExtractor" not in source

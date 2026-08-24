@@ -1,7 +1,8 @@
-"""Tutor 最小 API（Issue #112）と Source 一覧（Issue #121）。
+"""Tutor 最小 API（Issue #112）と Source 一覧（Issue #121）、
+Candidate 抽出・採否（Issue #134）。
 
-business rule は TutorService に任せ、このモジュールは request/response
-schema と HTTP status 変換だけを持つ。
+business rule は TutorService / CandidateService に任せ、このモジュールは
+request/response schema と HTTP status 変換だけを持つ。
 """
 
 from typing import Annotated, Any
@@ -9,10 +10,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.deps import get_tutor_service
+from app.api.deps import get_candidate_service, get_tutor_service
 from app.domain.tutor import (
     AnswerOutcome,
+    CandidateStatus,
     CefrLevel,
+    EvidenceSpan,
     ExerciseType,
     LearnerState,
     LearningEvent,
@@ -25,9 +28,15 @@ from app.domain.tutor import (
     SourceType,
     UtcDatetime,
 )
+from app.services.candidate_service import CandidateService, CandidateView
 from app.services.exceptions import (
+    ExtractionConfigError,
+    ExtractionInvalidResponseError,
+    ExtractionTransientError,
+    InvalidCandidateTransitionError,
     InvalidSourceRefError,
     TutorConflictError,
+    TutorInvalidCandidateError,
     TutorNotFoundError,
     TutorServiceError,
 )
@@ -36,6 +45,7 @@ from app.services.tutor_service import TutorService
 router = APIRouter(prefix="/api/tutor", tags=["tutor"])
 
 TutorServiceDep = Annotated[TutorService, Depends(get_tutor_service)]
+CandidateServiceDep = Annotated[CandidateService, Depends(get_candidate_service)]
 
 SOURCE_LIST_LIMIT_DEFAULT = 50
 SOURCE_LIST_LIMIT_MAX = 100
@@ -106,6 +116,37 @@ class SourceSummary(BaseModel):
     content_preview: str
 
 
+class CandidateResponse(BaseModel):
+    """Frontend 向け Candidate。provider の生応答や metadata は載せない。"""
+
+    id: str
+    source_document_id: str
+    item_type: LearningItemType
+    canonical_form: str
+    meaning_ja: str
+    explanation_ja: str | None = None
+    level: CefrLevel | None = None
+    evidence_span: EvidenceSpan
+    evidence_text: str
+    confidence: float | None = None
+    status: CandidateStatus
+    extraction_version: str
+    created_at: UtcDatetime
+
+
+class ExtractCandidatesResponse(BaseModel):
+    source_document_id: str
+    extraction_version: str
+    created: list[CandidateResponse]
+    skipped: list[CandidateResponse]
+
+
+class AcceptCandidateResponse(BaseModel):
+    candidate: CandidateResponse
+    item: LearningItem
+    merged: bool
+
+
 def _to_source_summary(document: SourceDocument) -> SourceSummary:
     return SourceSummary(
         id=document.id,
@@ -117,13 +158,46 @@ def _to_source_summary(document: SourceDocument) -> SourceSummary:
     )
 
 
+def _to_candidate_response(view: CandidateView) -> CandidateResponse:
+    candidate = view.candidate
+    return CandidateResponse(
+        id=candidate.id,
+        source_document_id=candidate.source_document_id,
+        item_type=candidate.item_type,
+        canonical_form=candidate.canonical_form,
+        meaning_ja=candidate.meaning_ja,
+        explanation_ja=candidate.explanation_ja,
+        level=candidate.level,
+        evidence_span=candidate.evidence_span,
+        evidence_text=view.evidence_text,
+        confidence=candidate.confidence,
+        status=candidate.status,
+        extraction_version=candidate.extraction_version,
+        created_at=candidate.created_at,
+    )
+
+
 def _to_http(exc: TutorServiceError) -> HTTPException:
     if isinstance(exc, TutorNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, TutorConflictError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, InvalidCandidateTransitionError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, InvalidSourceRefError):
         return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, TutorInvalidCandidateError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, ExtractionConfigError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        )
+    if isinstance(exc, ExtractionTransientError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        )
+    if isinstance(exc, ExtractionInvalidResponseError):
+        return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
@@ -165,6 +239,71 @@ def get_source(source_id: str, service: TutorServiceDep) -> SourceDocument:
         return service.get_source(source_id)
     except TutorServiceError as exc:
         raise _to_http(exc) from exc
+
+
+@router.post(
+    "/sources/{source_id}/candidates/extract",
+    response_model=ExtractCandidatesResponse,
+)
+def extract_candidates(
+    source_id: str, service: CandidateServiceDep
+) -> ExtractCandidatesResponse:
+    try:
+        result = service.extract_for_source(source_id)
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    return ExtractCandidatesResponse(
+        source_document_id=result.source_document_id,
+        extraction_version=result.extraction_version,
+        created=[_to_candidate_response(view) for view in result.created],
+        skipped=[_to_candidate_response(view) for view in result.skipped],
+    )
+
+
+@router.get(
+    "/sources/{source_id}/candidates",
+    response_model=list[CandidateResponse],
+)
+def list_candidates(
+    source_id: str, service: CandidateServiceDep
+) -> list[CandidateResponse]:
+    try:
+        views = service.list_for_source(source_id)
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    return [_to_candidate_response(view) for view in views]
+
+
+@router.post(
+    "/candidates/{candidate_id}/accept",
+    response_model=AcceptCandidateResponse,
+)
+def accept_candidate(
+    candidate_id: str, service: CandidateServiceDep
+) -> AcceptCandidateResponse:
+    try:
+        result = service.accept(candidate_id)
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    return AcceptCandidateResponse(
+        candidate=_to_candidate_response(result.candidate),
+        item=result.item,
+        merged=result.merged,
+    )
+
+
+@router.post(
+    "/candidates/{candidate_id}/reject",
+    response_model=CandidateResponse,
+)
+def reject_candidate(
+    candidate_id: str, service: CandidateServiceDep
+) -> CandidateResponse:
+    try:
+        view = service.reject(candidate_id)
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    return _to_candidate_response(view)
 
 
 @router.post(
