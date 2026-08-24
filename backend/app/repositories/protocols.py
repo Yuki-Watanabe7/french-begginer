@@ -9,6 +9,7 @@ LearningItem の delete は意図的に持たない。履歴（LearningEvent）�
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -39,6 +40,12 @@ class LearningItemRepository(Protocol):
 
 class LearningItemCandidateRepository(Protocol):
     def create(self, candidate: LearningItemCandidate) -> LearningItemCandidate: ...
+    def create_many(
+        self, candidates: Sequence[LearningItemCandidate]
+    ) -> list[LearningItemCandidate]:
+        """複数 Candidate を同一トランザクションで保存する。空なら何もしない。"""
+        ...
+
     def get(self, candidate_id: str) -> LearningItemCandidate | None: ...
     def list_by_source(self, source_id: str) -> list[LearningItemCandidate]:
         """同一 Source の Candidate。created_at 昇順、同一時刻は id 昇順。"""
@@ -50,6 +57,22 @@ class LearningItemCandidateRepository(Protocol):
         """status を candidate / accepted / rejected として更新する。
 
         存在しない Candidate や、accepted / rejected からの不正な遷移は拒否する。
+        """
+        ...
+
+
+class CandidatePromotionRepository(Protocol):
+    def persist_accept(
+        self,
+        candidate: LearningItemCandidate,
+        item: LearningItem,
+        *,
+        create_item: bool,
+    ) -> tuple[LearningItemCandidate, LearningItem]:
+        """Candidate の accepted 化と LearningItem の create/update を同一 TX で行う。
+
+        create_item=True なら LearningItem を新規作成し、False なら既存を更新する。
+        どちらかが失敗したら Candidate も元の status のまま残る。
         """
         ...
 

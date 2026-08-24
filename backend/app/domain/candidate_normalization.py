@@ -29,7 +29,7 @@ normalization key（同一 Source 内の重複統合、および既存 LearningI
   - 大文字小文字・前後空白の差ではキーが変わらない。
   - 異なる item_type は同じ表記でも統合しない。
   - 意味・lemma はキーに含めない（同一表現の別訳で爆発させない）。
-  - accept 処理（Issue #134）自体はこのモジュールでは行わない。
+  - accept 処理は `CandidateService.accept`（Issue #134）。このモジュールでは行わない。
 """
 
 from __future__ import annotations

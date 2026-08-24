@@ -265,6 +265,89 @@ def test_candidate_status_update_requires_existing_candidate(
         store.learning_item_candidates.update_status("missing", "accepted")
 
 
+def test_create_many_candidates_is_atomic(store: TutorSqliteStore):
+    source = _source()
+    store.source_documents.create(source)
+    existing = _candidate(source.id)
+    store.learning_item_candidates.create(existing)
+    new = _candidate(
+        source.id,
+        canonical_form="premier",
+        meaning_ja="最初の",
+        evidence_span=EvidenceSpan(start=0, end=7),
+        source_content=source.content,
+    )
+    duplicate = _candidate(source.id, id=existing.id)
+
+    with pytest.raises(DuplicateEntityError):
+        store.learning_item_candidates.create_many([new, duplicate])
+    listed = store.learning_item_candidates.list_by_source(source.id)
+    assert [candidate.id for candidate in listed] == [existing.id]
+
+
+def test_create_many_empty_is_noop(store: TutorSqliteStore):
+    assert store.learning_item_candidates.create_many([]) == []
+
+
+def test_persist_accept_rolls_back_candidate_when_item_write_fails(
+    store: TutorSqliteStore, monkeypatch: pytest.MonkeyPatch
+):
+    source = _source()
+    store.source_documents.create(source)
+    candidate = _candidate(source.id)
+    store.learning_item_candidates.create(candidate)
+    item = _item(
+        source_refs=[
+            SourceRef(
+                source_document_id=source.id,
+                evidence_span=candidate.evidence_span,
+                confidence=candidate.confidence,
+            )
+        ]
+    )
+    accepted = candidate.model_copy(update={"status": "accepted"})
+    original_add = Session.add
+
+    def fail_item_add(self: Session, instance: object, _warn: bool = True) -> None:
+        if isinstance(instance, LearningItemRow):
+            raise RuntimeError("item write failed")
+        original_add(self, instance, _warn=_warn)
+
+    monkeypatch.setattr(Session, "add", fail_item_add)
+
+    with pytest.raises(RuntimeError, match="item write failed"):
+        store.candidate_promotions.persist_accept(accepted, item, create_item=True)
+
+    assert store.learning_items.list() == []
+    loaded = store.learning_item_candidates.get(candidate.id)
+    assert loaded is not None
+    assert loaded.status == "candidate"
+
+
+def test_persist_accept_creates_item_and_accepts_candidate(store: TutorSqliteStore):
+    source = _source()
+    store.source_documents.create(source)
+    candidate = _candidate(source.id)
+    store.learning_item_candidates.create(candidate)
+    item = _item(
+        source_refs=[
+            SourceRef(
+                source_document_id=source.id,
+                evidence_span=candidate.evidence_span,
+                confidence=candidate.confidence,
+            )
+        ]
+    )
+    accepted = candidate.model_copy(update={"status": "accepted"})
+
+    saved_candidate, saved_item = store.candidate_promotions.persist_accept(
+        accepted, item, create_item=True
+    )
+    assert saved_candidate.status == "accepted"
+    assert store.learning_item_candidates.get(candidate.id) == saved_candidate
+    assert store.learning_items.get(item.id) == saved_item
+
+
 def test_candidate_survives_reopen_without_affecting_existing_schema(
     tmp_path: Path,
 ):

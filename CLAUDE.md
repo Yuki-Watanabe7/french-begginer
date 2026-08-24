@@ -51,7 +51,8 @@ backend/app/
     ├── learning_state_service.py  # LearningEvent から LearnerState を更新
     ├── review_service.py  # 復習予定の保存と due 取得
     ├── tutor_service.py  # Tutor最小APIのユースケース
-    └── extraction_service.py  # Source から LearningItemCandidate を抽出
+    ├── extraction_service.py  # Source から LearningItemCandidate を抽出
+    └── candidate_service.py  # 抽出結果の保存と accept/reject
 ```
 
 新しい動詞を追加する場合は `CONJUGATIONS` と `VERB_GROUPS` の両方を `conjugation.py` に追記する。`VerbGroup` は `Literal["all", "er", "ir", "irregular"]` で、`?group=` クエリパラメータで絞り込める。
@@ -95,6 +96,10 @@ setup → quiz-settings → loading → answering ⇄ result
 | POST | `/api/tutor/sources` | 手入力 SourceDocument の作成 |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`SourceSummary`） |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得 |
+| POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から Candidate を抽出して保存。再実行しても重複爆発しない |
+| GET | `/api/tutor/sources/{source_id}/candidates` | Source 単位の Candidate 一覧（status / evidence_text） |
+| POST | `/api/tutor/candidates/{candidate_id}/accept` | Candidate を採用し LearningItem を作成または既存へ統合 |
+| POST | `/api/tutor/candidates/{candidate_id}/reject` | Candidate を却下する。LearningItem は作らない |
 | GET | `/api/tutor/items/{item_id}` | LearningItem と LearnerState / ReviewSchedule |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベント記録（state / schedule も更新） |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem |

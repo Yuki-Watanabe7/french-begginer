@@ -37,6 +37,10 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/sources` | 手入力の SourceDocument を作成する |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`created_at` 降順）。全文ではなく SourceSummary を返す |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得する |
+| POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から学習候補を抽出し保存する。存在しない Source は 404。API key 未設定・一時障害は 503、LLM 応答不正は 502 |
+| GET | `/api/tutor/sources/{source_id}/candidates` | Source 単位の Candidate 一覧。`status` と本文から再構成した `evidence_text` を含む。provider 生応答は返さない |
+| POST | `/api/tutor/candidates/{candidate_id}/accept` | Candidate を採用し LearningItem を作成、または既存 Item へ SourceRef を追加する。再 accept は冪等。rejected からの accept は 409 |
+| POST | `/api/tutor/candidates/{candidate_id}/reject` | Candidate を却下する。LearningItem は作らない。再 reject は冪等。accepted からの reject は 409 |
 | POST | `/api/tutor/items` | 手入力の LearningItem を作成する |
 | GET | `/api/tutor/items/{item_id}` | LearningItem と現在の LearnerState / ReviewSchedule を返す |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録し、LearnerState と ReviewSchedule を更新する |
@@ -102,7 +106,7 @@ backend/app/
 │   ├── questions.py
 │   ├── answers.py
 │   ├── nouns.py
-│   └── tutor.py              # Tutor最小API（Issue #112）
+│   └── tutor.py              # Tutor最小API（Issue #112）と Candidate 採否（Issue #134）
 ├── domain/       # ビジネスルール（活用データ、モデル定義、判定ロジック）
 │   ├── conjugation.py
 │   ├── noun.py
@@ -117,7 +121,8 @@ backend/app/
     ├── learning_state_service.py  # LearningEvent → LearnerState 更新
     ├── review_service.py          # 復習予定の保存と due 取得
     ├── tutor_service.py           # Tutor最小APIのユースケース
-    └── extraction_service.py      # Source から Candidate を抽出し正規化する
+    ├── extraction_service.py      # Source から Candidate を抽出し正規化する
+    └── candidate_service.py       # 抽出結果の保存と accept/reject（Issue #134）
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。
