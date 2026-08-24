@@ -1,3 +1,4 @@
+import { TutorCandidateList } from './TutorCandidateList'
 import { useTutorSourceDetail } from '../hooks/useTutorSourceDetail'
 import { formatTutorDateTime, tutorNoteFromMetadata } from '../utils/tutor'
 import type { SourceDocument } from '../types'
@@ -78,6 +79,7 @@ export function TutorSourceDetail({
       <div lang="fr" style={styles.content}>
         {source.content}
       </div>
+      <TutorCandidateList sourceId={source.id} />
       {justSaved && onAddAnother && (
         <button type="button" style={styles.primaryBtn} onClick={onAddAnother}>
           続けてテキストを追加
@@ -173,6 +175,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#fff',
     cursor: 'pointer',
     width: '100%',
+    marginTop: 12,
   },
   backBtn: {
     marginTop: 12,

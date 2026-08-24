@@ -1,6 +1,9 @@
 import type {
+  AcceptCandidateResponse,
   CreateTutorSourceInput,
+  ExtractCandidatesResponse,
   FetchTutorSourcesOptions,
+  LearningItemCandidate,
   SourceDocument,
   SourceSummary,
 } from '../types'
@@ -71,5 +74,48 @@ export async function fetchTutorSources(
 export async function fetchTutorSource(sourceId: string): Promise<SourceDocument> {
   return parseJson(
     await fetch(`${BASE}/api/tutor/sources/${encodeURIComponent(sourceId)}`),
+  )
+}
+
+export async function extractCandidates(
+  sourceId: string,
+): Promise<ExtractCandidatesResponse> {
+  return parseJson(
+    await fetch(
+      `${BASE}/api/tutor/sources/${encodeURIComponent(sourceId)}/candidates/extract`,
+      { method: 'POST' },
+    ),
+  )
+}
+
+export async function fetchCandidates(
+  sourceId: string,
+): Promise<LearningItemCandidate[]> {
+  return parseJson(
+    await fetch(
+      `${BASE}/api/tutor/sources/${encodeURIComponent(sourceId)}/candidates`,
+    ),
+  )
+}
+
+export async function acceptCandidate(
+  candidateId: string,
+): Promise<AcceptCandidateResponse> {
+  return parseJson(
+    await fetch(
+      `${BASE}/api/tutor/candidates/${encodeURIComponent(candidateId)}/accept`,
+      { method: 'POST' },
+    ),
+  )
+}
+
+export async function rejectCandidate(
+  candidateId: string,
+): Promise<LearningItemCandidate> {
+  return parseJson(
+    await fetch(
+      `${BASE}/api/tutor/candidates/${encodeURIComponent(candidateId)}/reject`,
+      { method: 'POST' },
+    ),
   )
 }

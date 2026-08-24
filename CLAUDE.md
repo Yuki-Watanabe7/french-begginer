@@ -78,7 +78,7 @@ setup → quiz-settings → loading → answering ⇄ result
 | フェーズ | コンポーネント |
 |----------|---------------|
 | モード選択 | `ModeSelector` — 動詞 / 名詞 / 冠詞 / 自分の教材 |
-| `tutor` | `TutorFlow` — Source 一覧 / 追加 / 詳細 |
+| `tutor` | `TutorFlow` — Source 一覧 / 追加 / 詳細（Candidate 抽出・採否） |
 | `setup` | `VerbGroupSelector` — 動詞グループ選択 |
 | `quiz-settings` | `QuizSettings` — 出題数選択（5/10/20問） |
 | `answering` / `result` | `QuizCard` — 問題表示・入力・正誤フィードバック |

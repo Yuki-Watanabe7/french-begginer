@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   ApiError,
+  acceptCandidate,
   createTutorSource,
+  extractCandidates,
+  fetchCandidates,
   fetchTutorSource,
   fetchTutorSources,
   isNotFoundError,
+  rejectCandidate,
 } from '../api/tutor'
 import { checkAnswer, fetchNextQuestion } from '../api/client'
 import type { SourceDocument, SourceSummary } from '../types'
@@ -173,5 +177,100 @@ describe('既存 API client', () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse({ detail: 'bad' }, 500))
 
     await expect(checkAnswer('parler', 'présent', 'je', 'parle')).rejects.toThrow('API error: 500')
+  })
+})
+
+const CANDIDATE = {
+  id: 'cand-1',
+  source_document_id: 'src-1',
+  item_type: 'expression',
+  canonical_form: 'se rendre compte',
+  meaning_ja: '〜に気づく',
+  explanation_ja: null,
+  level: 'A2',
+  evidence_span: { start: 0, end: 5 },
+  evidence_text: 'rendu',
+  confidence: 0.8,
+  status: 'candidate',
+  extraction_version: 'extract-v1',
+  created_at: '2026-08-24T12:00:00+00:00',
+}
+
+describe('extractCandidates', () => {
+  it('POST /api/tutor/sources/:id/candidates/extract を呼ぶ', async () => {
+    const body = {
+      source_document_id: 'src/あ',
+      extraction_version: 'extract-v1',
+      created: [CANDIDATE],
+      skipped: [],
+    }
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(body))
+
+    const sourceId = 'src/あ'
+    const result = await extractCandidates(sourceId)
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      `/api/tutor/sources/${encodeURIComponent(sourceId)}/candidates/extract`,
+      { method: 'POST' },
+    )
+    expect(result).toEqual(body)
+  })
+})
+
+describe('fetchCandidates', () => {
+  it('source id を URL encode して一覧を取得する', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse([CANDIDATE]))
+
+    const sourceId = 'src/あ?x=1'
+    const rows = await fetchCandidates(sourceId)
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      `/api/tutor/sources/${encodeURIComponent(sourceId)}/candidates`,
+    )
+    expect(rows).toEqual([CANDIDATE])
+  })
+})
+
+describe('acceptCandidate / rejectCandidate', () => {
+  it('accept は candidate と item を返し、id を encode する', async () => {
+    const body = {
+      candidate: { ...CANDIDATE, status: 'accepted' },
+      item: { id: 'item-1' },
+      merged: false,
+    }
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(body))
+
+    const candidateId = 'cand/あ'
+    const result = await acceptCandidate(candidateId)
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      `/api/tutor/candidates/${encodeURIComponent(candidateId)}/accept`,
+      { method: 'POST' },
+    )
+    expect(result).toEqual(body)
+  })
+
+  it('reject は更新後の candidate を返す', async () => {
+    const body = { ...CANDIDATE, status: 'rejected' }
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(body))
+
+    const result = await rejectCandidate('cand-1')
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      '/api/tutor/candidates/cand-1/reject',
+      { method: 'POST' },
+    )
+    expect(result.status).toBe('rejected')
+  })
+
+  it('503 は成功値として返さない', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse({ detail: 'OPENAI_API_KEY が設定されていない' }, 503),
+    )
+
+    await expect(extractCandidates('src-1')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 503,
+    })
   })
 })
