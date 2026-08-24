@@ -12,6 +12,7 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000  # 開発サー�
 uv run ruff check .          # lint
 uv run pytest                # 全テスト
 uv run pytest tests/test_api.py::test_health  # 単一テスト
+uv run python ../scripts/evaluate_tutor_extraction.py  # Tutor抽出の実LLM品質評価（任意。OPENAI_API_KEY が必要）
 ```
 
 ### Frontend (`cd frontend`)
@@ -44,6 +45,7 @@ backend/app/
 │   ├── conjugation.py  # 活用データ辞書・Pydantic モデル・判定ロジック
 │   ├── review_scheduler.py  # 初期復習間隔の算出
 │   └── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
+├── evaluation/    # LLM抽出の固定fixtureと品質チェック（Issue #136）
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/      # ユースケース（domain を組み合わせる処理）
