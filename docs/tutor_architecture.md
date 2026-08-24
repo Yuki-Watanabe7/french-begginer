@@ -13,7 +13,8 @@ Phase 2 の LearningItemCandidate ドメインと永続化（Issue #131）、
 LLM Extraction Service（Issue #132）、
 抽出 Candidate の検証・正規化・重複統合（Issue #133）、
 抽出・採否 API（Issue #134）、
-および Source 詳細の Candidate レビュー UI（Issue #135）
+Source 詳細の Candidate レビュー UI（Issue #135）、
+および LLM抽出品質の固定 fixture・評価ハーネス（Issue #136）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -39,6 +40,9 @@ LLM Extraction Service（Issue #132）、
 - Frontend Candidate UI: `frontend/src/hooks/useTutorSourceCandidates.ts`
   / `frontend/src/components/TutorCandidateList.tsx`
   / `frontend/src/test/TutorSourceDetail.test.tsx`
+- 抽出品質: `backend/app/evaluation/` / `scripts/evaluate_tutor_extraction.py`
+  / `backend/tests/test_extraction_quality.py`
+  / `docs/tutor_extraction_quality.md`
 
 ## 目指す学習ループ
 
@@ -268,7 +272,8 @@ Phase 0時点では `backend/app/domain/conjugation.py` /
 - OpenAI SDK は `openai_extractor.py` に閉じる。domain / ExtractionService は
   `LearningItemExtractor` Protocol にだけ依存する
 - Issue #132 は抽出まで。Issue #133 で Candidate の evidence 検証・正規化・
-  重複統合を行う。永続化と採否 API は #134（`CandidateService`）、Frontend は #135
+  重複統合を行う。永続化と採否 API は #134（`CandidateService`）、Frontend は #135。
+  抽出品質の固定 fixture と評価ハーネスは #136
 
 `SourceRef` は Phase 2 に備えて `evidence_span` と `confidence` を
 optional で持てる。Phase 0 ではどちらも `None` のままでよい。
@@ -636,6 +641,7 @@ Issue #131 で `LearningItemCandidate` の domain model と SQLite 永続化を�
 Issue #132 で SourceDocument から Candidate を得る Extraction Service を追加した。
 Issue #133 で evidence 検証・正規化・同一 Source 内の重複統合を追加した。
 Issue #134 で抽出結果の保存と accept / reject API を追加した。Frontend は #135。
+Issue #136 で固定 fixture と deterministic な抽出品質ハーネスを追加した。
 
 ## Phase 2 Candidate 永続化（Issue #131）
 
@@ -821,6 +827,7 @@ API レスポンスに provider の生応答や Candidate.metadata は載せな�
 | 状態遷移 | `test_reaccept_is_idempotent` / `test_accept_rejected_is_forbidden` |
 
 Frontend は #135 で Source 詳細から抽出・確認・採否できるようにした。
+抽出品質の固定評価は #136（`docs/tutor_extraction_quality.md`）。
 
 ## Phase 2 Candidate レビュー UI（Issue #135）
 
@@ -854,6 +861,32 @@ Source 詳細
 | empty / 既存 status / 再抽出 | 同上 |
 | client 契約 | `tutorApi.test.ts` |
 | Phase 1 回帰 | `TutorPhase1Flow.test.tsx` / `TutorFlow.test.tsx` / `App.test.tsx` |
+
+## Phase 2 抽出品質ハーネス（Issue #136）
+
+LLM抽出の品質を目視だけに依存させない。固定 Source fixture と
+deterministic なチェックを主、実 LLM 実行を補助とする。
+LLM-as-judge は品質ゲートにしない。詳細は `docs/tutor_extraction_quality.md`。
+
+```text
+固定 fixture A/B/C/D
+  -> ExtractionService（fake または実 LLM）
+  -> evidence / 契約 / duplicate / hallucination / must-have recall
+  -> provider / model / extraction_version をレポートに残す
+```
+
+通常の pytest は API key なしで通る。実 LLM は
+`scripts/evaluate_tutor_extraction.py` または `RUN_LIVE_LLM=1 pytest -m live_llm`。
+
+| 観点 | 自動テスト |
+|------|------------|
+| fixture A〜D と期待値が定義されている | `test_fixed_source_fixtures_cover_required_patterns` |
+| must-have / must-not が文書化されている | `test_must_have_and_unacceptable_expectations_are_documented` |
+| evidence / 必須フィールド / 件数上限 | `test_evidence_*` / `test_candidate_count_limit_is_checked` |
+| hallucination / 過剰抽出 / duplicate | `test_obvious_hallucination_*` / `test_fixture_b_detects_over_extraction` / `test_duplicate_keys_*` |
+| provider / model / prompt version | `test_report_keeps_provider_model_and_prompt_version` |
+| API key なしの CI | `test_valid_fixture_a_extraction_passes_contract_and_must_haves` |
+| OpenAI 非依存 | `test_quality_modules_do_not_import_openai` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 

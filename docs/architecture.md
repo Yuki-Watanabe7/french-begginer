@@ -113,6 +113,7 @@ backend/app/
 │   ├── tutor.py              # Tutor機能の中核モデル（docs/tutor_architecture.md）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合（Issue #133）
 │   └── review_scheduler.py   # 初期復習間隔の算出（Issue #111）
+├── evaluation/   # LLM抽出の固定fixtureと品質チェック（Issue #136）。HTTPからは使わない
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
@@ -136,6 +137,8 @@ backend/app/
 > Phase 1 の Text Source Ingestion（手動貼り付け → 永続化 → 一覧 → 詳細）は
 > `backend/tests/test_tutor_phase1_vertical_slice.py` と
 > `frontend/src/test/TutorPhase1Flow.test.tsx` で統合テストする。
+> Phase 2 の LLM抽出品質（固定 fixture と deterministic checks）は
+> [tutor_extraction_quality.md](./tutor_extraction_quality.md) を参照。
 
 ## 動詞データ管理方針
 
