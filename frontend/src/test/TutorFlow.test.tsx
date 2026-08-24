@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { TutorFlow } from '../components/TutorFlow'
 import {
   createTutorSource,
+  fetchCandidates,
   fetchTutorSource,
   fetchTutorSources,
 } from '../api/tutor'
@@ -16,12 +17,14 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorSources: vi.fn(),
     fetchTutorSource: vi.fn(),
     createTutorSource: vi.fn(),
+    fetchCandidates: vi.fn(),
   }
 })
 
 const mockList = vi.mocked(fetchTutorSources)
 const mockGet = vi.mocked(fetchTutorSource)
 const mockCreate = vi.mocked(createTutorSource)
+const mockFetchCandidates = vi.mocked(fetchCandidates)
 
 const SUMMARY: SourceSummary = {
   id: 'src-1',
@@ -41,6 +44,7 @@ const SOURCE: SourceDocument = {
 describe('TutorFlow', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    mockFetchCandidates.mockResolvedValue([])
   })
 
   it('一覧から新規追加画面へ進み、一覧へ戻れる', async () => {

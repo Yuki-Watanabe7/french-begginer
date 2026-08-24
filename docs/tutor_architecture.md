@@ -11,7 +11,9 @@ Phase 1 の Source 一覧 API（Issue #121）、Frontend 型と API client（Iss
 Phase 1 vertical slice（Issue #125）、
 Phase 2 の LearningItemCandidate ドメインと永続化（Issue #131）、
 LLM Extraction Service（Issue #132）、
-および抽出 Candidate の検証・正規化・重複統合（Issue #133）
+抽出 Candidate の検証・正規化・重複統合（Issue #133）、
+抽出・採否 API（Issue #134）、
+および Source 詳細の Candidate レビュー UI（Issue #135）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -32,9 +34,11 @@ LLM Extraction Service（Issue #132）、
   / `backend/tests/test_openai_extractor.py`
 - 正規化: `backend/app/domain/candidate_normalization.py`
   / `backend/tests/test_candidate_normalization.py`
-- 統合: `backend/tests/test_tutor_vertical_slice.py`
-  / `backend/tests/test_tutor_phase1_vertical_slice.py`
-  / `frontend/src/test/TutorPhase1Flow.test.tsx`
+- 抽出・採否: `backend/app/services/candidate_service.py`
+  / `backend/tests/test_candidate_service.py` / `backend/tests/test_candidate_api.py`
+- Frontend Candidate UI: `frontend/src/hooks/useTutorSourceCandidates.ts`
+  / `frontend/src/components/TutorCandidateList.tsx`
+  / `frontend/src/test/TutorSourceDetail.test.tsx`
 
 ## 目指す学習ループ
 
@@ -816,7 +820,40 @@ API レスポンスに provider の生応答や Candidate.metadata は載せな�
 | transaction failure で中途半端にならない | `test_item_write_failure_leaves_candidate_pending` |
 | 状態遷移 | `test_reaccept_is_idempotent` / `test_accept_rejected_is_forbidden` |
 
-Frontend は #135。
+Frontend は #135 で Source 詳細から抽出・確認・採否できるようにした。
+
+## Phase 2 Candidate レビュー UI（Issue #135）
+
+保存済み Source の詳細画面から、LLM 抽出の Candidate を確認して採用・却下する。
+LLM の生応答や metadata は通常 UI に出さない。evidence は Backend が再構成した
+`evidence_text` を引用表示する。
+
+```text
+Source 詳細
+  -> 「学習候補を抽出」
+  -> loading（多重実行しない）
+  -> Candidate 一覧
+  -> 内容と原文根拠を確認
+  -> 採用 / 却下
+  -> status 更新（失敗時は元の status のまま）
+```
+
+| 関心 | 実装 |
+|------|------|
+| 型 / client | `LearningItemCandidate` / `extractCandidates` / `fetchCandidates` / `acceptCandidate` / `rejectCandidate` |
+| 状態 | `useTutorSourceCandidates`。accept/reject は API 成功後にだけ status を更新する |
+| 表示 | `TutorCandidateList` + `TutorCandidateCard`。item type / status / evidence を表示 |
+| 再抽出 | 既存の accepted / rejected は一覧に残る。Backend が skipped として返す |
+| エラー | 503 API key、503 一時障害、502 不正応答をユーザー向け文言へ変換 |
+
+| 観点 | 自動テスト |
+|------|------------|
+| 抽出ボタン / loading / 多重実行防止 | `TutorSourceDetail.test.tsx` |
+| 4 種 item type と evidence | 同上 |
+| accept / reject 成功と API 失敗 | 同上 |
+| empty / 既存 status / 再抽出 | 同上 |
+| client 契約 | `tutorApi.test.ts` |
+| Phase 1 回帰 | `TutorPhase1Flow.test.tsx` / `TutorFlow.test.tsx` / `App.test.tsx` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 

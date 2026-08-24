@@ -5,6 +5,7 @@ import App from '../App'
 import {
   ApiError,
   createTutorSource,
+  fetchCandidates,
   fetchTutorSource,
   fetchTutorSources,
 } from '../api/tutor'
@@ -17,12 +18,14 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorSources: vi.fn(),
     fetchTutorSource: vi.fn(),
     createTutorSource: vi.fn(),
+    fetchCandidates: vi.fn(),
   }
 })
 
 const mockList = vi.mocked(fetchTutorSources)
 const mockGet = vi.mocked(fetchTutorSource)
 const mockCreate = vi.mocked(createTutorSource)
+const mockFetchCandidates = vi.mocked(fetchCandidates)
 
 const SOURCE_TITLE = 'Article test'
 const SOURCE_CONTENT = "Je me suis rendu compte qu'il fallait changer de stratégie."
@@ -76,6 +79,7 @@ function bindMemoryApi(store: MemoryStore) {
     }
     return document
   })
+  mockFetchCandidates.mockResolvedValue([])
 }
 
 async function enterTutor() {
@@ -118,7 +122,7 @@ describe('Tutor Phase 1 vertical slice', () => {
       overflowWrap: 'anywhere',
       whiteSpace: 'pre-wrap',
     })
-    expect(screen.queryByText(/抽出/)).not.toBeInTheDocument()
+    await screen.findByRole('button', { name: '学習候補を抽出' })
     expect(screen.queryByText(/LearningItem/)).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: '一覧に戻る' }))

@@ -1,4 +1,5 @@
 import { ApiError, isNotFoundError } from '../api/tutor'
+import type { CandidateStatus, LearningItemType } from '../types'
 
 const NOTE_KEY = 'note'
 
@@ -90,4 +91,80 @@ export function tutorSaveErrorMessage(error: unknown): string {
     }
   }
   return '保存に失敗しました。通信環境を確認して再度お試しください'
+}
+
+export const LEARNING_ITEM_TYPE_LABELS: Record<LearningItemType, string> = {
+  vocabulary: '語彙',
+  expression: '表現',
+  grammar: '文法',
+  conjugation: '活用',
+}
+
+export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
+  candidate: '未確認',
+  accepted: '採用済み',
+  rejected: '却下',
+}
+
+function apiDetail(error: unknown): string {
+  if (!(error instanceof ApiError) || error.body == null || typeof error.body !== 'object') {
+    return ''
+  }
+  const detail = (error.body as { detail?: unknown }).detail
+  return typeof detail === 'string' ? detail : ''
+}
+
+export function tutorExtractErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const detail = apiDetail(error)
+    if (error.status === 404) {
+      return 'Sourceが見つかりません'
+    }
+    if (error.status === 503) {
+      if (/OPENAI_API_KEY|API[_ ]?KEY|設定されて/i.test(detail)) {
+        return '学習候補の抽出に必要な設定がありません。管理者に連絡してください'
+      }
+      if (/rate/i.test(detail)) {
+        return '混み合っているため、しばらくしてから再度お試しください'
+      }
+      return '一時的に抽出できません。時間をおいて再度お試しください'
+    }
+    if (error.status === 502) {
+      return '学習候補をうまく読み取れませんでした。もう一度抽出してください'
+    }
+    if (error.status >= 500) {
+      return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+    }
+  }
+  return '学習候補の抽出に失敗しました。通信環境を確認して再度お試しください'
+}
+
+export function tutorCandidateFetchErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 404) {
+    return 'Sourceが見つかりません'
+  }
+  if (error instanceof ApiError && error.status >= 500) {
+    return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+  }
+  return '学習候補の取得に失敗しました。通信環境を確認して再度お試しください'
+}
+
+export function tutorCandidateActionErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 404) {
+      return '候補が見つかりません'
+    }
+    if (error.status === 409) {
+      return 'この候補はすでに処理されています'
+    }
+    if (error.status >= 500) {
+      return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+    }
+  }
+  return '操作に失敗しました。通信環境を確認して再度お試しください'
+}
+
+export function formatCandidateConfidence(confidence: number | null): string | null {
+  if (confidence == null) return null
+  return `確信度 ${Math.round(confidence * 100)}%`
 }
