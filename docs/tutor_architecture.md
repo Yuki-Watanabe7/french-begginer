@@ -14,7 +14,8 @@ LLM Extraction Service（Issue #132）、
 抽出 Candidate の検証・正規化・重複統合（Issue #133）、
 抽出・採否 API（Issue #134）、
 Source 詳細の Candidate レビュー UI（Issue #135）、
-および LLM抽出品質の固定 fixture・評価ハーネス（Issue #136）
+LLM抽出品質の固定 fixture・評価ハーネス（Issue #136）、
+および Phase 2 vertical slice と Exit Criteria（Issue #137）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -43,6 +44,8 @@ Source 詳細の Candidate レビュー UI（Issue #135）、
 - 抽出品質: `backend/app/evaluation/` / `scripts/evaluate_tutor_extraction.py`
   / `backend/tests/test_extraction_quality.py`
   / `docs/tutor_extraction_quality.md`
+- Phase 2 vertical slice: `backend/tests/test_tutor_phase2_vertical_slice.py`
+  / `frontend/src/test/TutorPhase2Flow.test.tsx`
 
 ## 目指す学習ループ
 
@@ -273,7 +276,8 @@ Phase 0時点では `backend/app/domain/conjugation.py` /
   `LearningItemExtractor` Protocol にだけ依存する
 - Issue #132 は抽出まで。Issue #133 で Candidate の evidence 検証・正規化・
   重複統合を行う。永続化と採否 API は #134（`CandidateService`）、Frontend は #135。
-  抽出品質の固定 fixture と評価ハーネスは #136
+  抽出品質の固定 fixture と評価ハーネスは #136。Phase 2 の vertical slice と
+  Exit Criteria の固定は #137
 
 `SourceRef` は Phase 2 に備えて `evidence_span` と `confidence` を
 optional で持てる。Phase 0 ではどちらも `None` のままでよい。
@@ -642,6 +646,8 @@ Issue #132 で SourceDocument から Candidate を得る Extraction Service を�
 Issue #133 で evidence 検証・正規化・同一 Source 内の重複統合を追加した。
 Issue #134 で抽出結果の保存と accept / reject API を追加した。Frontend は #135。
 Issue #136 で固定 fixture と deterministic な抽出品質ハーネスを追加した。
+Issue #137 で Source → Candidate → LearningItem を一本の vertical slice として
+閉じ、Phase 2 Exit Criteria と Phase 3 への引継ぎをこのドキュメントに固定した。
 
 ## Phase 2 Candidate 永続化（Issue #131）
 
@@ -888,6 +894,134 @@ LLM-as-judge は品質ゲートにしない。詳細は `docs/tutor_extraction_q
 | API key なしの CI | `test_valid_fixture_a_extraction_passes_contract_and_must_haves` |
 | OpenAI 非依存 | `test_quality_modules_do_not_import_openai` |
 
+## Phase 2 vertical slice（Issue #137）
+
+Phase 2 で追加した Candidate extraction を個別部品ではなく、
+ユーザー操作として一本につながった vertical slice として検証する。
+
+```text
+保存済み SourceDocument
+  -> Source 詳細
+  -> 学習候補抽出（fake LearningItemExtractor）
+  -> LLM structured response
+  -> evidence validation / normalization / dedup
+  -> LearningItemCandidate 保存
+  -> Candidate 一覧と evidence 表示
+  -> 1件 accept / 1件 reject
+  -> accepted だけ LearningItem になる
+  -> rejected は履歴として残る
+  -> SourceRef / evidence provenance
+  -> 再抽出しても重複爆発しない
+  -> DB 再 open 後も status / LearningItem が残る
+```
+
+推奨 fixture:
+
+```text
+Je me suis rendu compte qu'il fallait changer de stratégie.
+```
+
+vertical slice の fake extractor は次を返す。
+
+- `se rendre compte de` / expression
+- `il fallait` / grammar
+- `stratégie` / vocabulary
+- `changer` / conjugation
+
+加えて、同一 expression の表記ゆれと本文範囲外 span を混ぜ、
+deterministic layer が重複統合・除外することを確認する。
+実 LLM の品質確認は #136 の評価経路で行い、この統合テスト自体は
+fake provider で deterministic にする。
+
+| 観点 | 自動テスト |
+|------|------------|
+| Source → 抽出 → 採否 → LearningItem → 再抽出 → DB 再 open | `test_phase2_source_to_candidate_to_learning_item_vertical_slice` |
+| 4種 item type と evidence | 同上 / `TutorPhase2Flow.test.tsx` |
+| 既存 LearningItem への統合 | `test_phase2_accept_merges_existing_learning_item` |
+| provider 障害で既存を壊さない | `test_phase2_provider_failure_leaves_existing_candidates` |
+| Exercise 生成 API をまだ持たない | `test_phase2_does_not_expose_exercise_generation_endpoints` |
+| 既存 quiz / TTS / Source ingestion の回帰 | `test_phase2_existing_quiz_and_tts_contracts_are_unchanged` |
+| Frontend 抽出・採否・再表示 | `TutorPhase2Flow.test.tsx` |
+| Frontend loading / error / empty | 同上 |
+| スマホ相当幅の抽出・採否ボタン | 同上 |
+
+## Phase 2 の品質境界
+
+Phase 2 完了時点で、次の境界が明確である。
+
+### LLM が決めること
+
+- 学習候補の提案
+- 日本語の意味 / 説明案
+- CEFR 推定
+- evidence span 案
+- confidence 案
+
+### deterministic layer が保証すること
+
+- schema validity（未知 enum・必須欠落・confidence 範囲・件数上限）
+- evidence が Source 本文の範囲内で、空白のみではないこと
+- canonical_form / meaning_ja の正規化
+- 同一 Source 内の duplicate 抑止
+- Candidate の状態遷移（`candidate` からのみ終端へ）
+- accept したものだけ LearningItem 化
+- 既存 LearningItem との normalization key 一致時は source_ref 追加で統合
+- persistence 整合性（同一 TX、再 open、provider 障害時に既存を壊さない）
+
+### 人間が決めること
+
+- Candidate を学習対象として採用するか
+
+LLM 出力をそのまま LearningItem にしない。Frontend は provider 生応答や
+Candidate.metadata を通常 UI に出さない。
+
+## Phase 2 Exit Criteria（Issue #107）との対応
+
+Issue #107 の Phase 2 は、保存済み Source から LLM が学習候補を提案し、
+ユーザーが根拠を確認して採用したものだけが LearningItem になること。
+
+| Exit Criteria | 満たした実装 | 自動テスト |
+|---------------|--------------|------------|
+| 保存済み Source から学習候補を抽出できる | `POST /api/tutor/sources/{id}/candidates/extract` | `test_phase2_source_to_candidate_to_learning_item_vertical_slice` |
+| 抽出結果は structured `LearningItemCandidate` として保持される | `CandidateService` + SQLite | 同上 / `test_extract_saves_candidates` |
+| vocabulary / expression / grammar / conjugation を扱える | domain `LearningItemType` + 抽出 schema | 同上 / `test_extract_maps_four_item_types_to_candidates` / `TutorPhase2Flow.test.tsx` |
+| 各 Candidate に原文 evidence を保持・表示できる | `evidence_span` + 再構成 `evidence_text` | 同上 / `TutorCandidateCard` |
+| malformed / hallucinated span 等を deterministic に排除できる | `candidate_normalization` | 同上（範囲外 span） / `test_span_outside_source_is_excluded` |
+| 同一 Source の重複 Candidate が抑止される | `item_normalization_key` | 同上（表記ゆれ） / `test_duplicate_candidates_are_merged_to_one` |
+| ユーザーが Candidate を accept / reject できる | 採否 API + Source 詳細 UI | 同上 / `TutorPhase2Flow.test.tsx` |
+| accept した Candidate だけ LearningItem になる | `CandidateService.accept` | 同上 |
+| rejected Candidate は履歴として残り LearningItem にならない | status=`rejected`、Item 非作成 | 同上 / `test_reject_does_not_create_learning_item` |
+| 既存 LearningItem と一致する場合に重複作成を抑止できる | normalization key で merge | `test_phase2_accept_merges_existing_learning_item` |
+| LearningItem に SourceRef / evidence provenance が残る | `source_refs` | `test_phase2_source_to_candidate_to_learning_item_vertical_slice` |
+| 再抽出で Candidate / LearningItem が無制限増殖しない | skipped + 状態維持 | 同上 / `test_reextract_does_not_duplicate_pending_candidates` |
+| DB 再 open 後も状態が保持される | file SQLite | `test_phase2_source_to_candidate_to_learning_item_vertical_slice` |
+| 通常 CI は LLM API key なしで通る | fake extractor / mocked OpenAI | 同上（`OPENAI_API_KEY` 削除） / `test_domain_and_service_work_without_openai_api_key` |
+| 実 LLM 抽出品質を任意評価できる fixture / 評価経路がある | `evaluation/` + `evaluate_tutor_extraction.py` | `tests/test_extraction_quality.py` / `docs/tutor_extraction_quality.md` |
+| 既存 Source ingestion / quiz / TTS に回帰がない | 既存 API は Tutor 抽出と独立 | `test_phase2_existing_quiz_and_tts_contracts_are_unchanged` / `App.test.tsx` |
+| スマホ相当幅で Candidate review が実用的である | 全幅抽出ボタン、採否 `minHeight: 44`、折り返し | `TutorPhase2Flow.test.tsx` |
+| `bash scripts/quality-check.sh` が通る | ruff / pytest / lint / frontend test / build | 作業完了時に実行 |
+| Phase 2 境界と Phase 3 への引継ぎを記載する | 本セクション | 本ドキュメント |
+
+## Phase 3 への引き継ぎ
+
+Phase 3 では accepted `LearningItem` を実際の Exercise へ接続する。
+Phase 2 では LearningItem を作れるところまでで止め、以下はまだ行わない。
+
+- 意味認識問題
+- FR→JP / JP→FR
+- cloze
+- expression 再構成
+- grammar 問題
+- 既存動詞活用への接続
+- LearningEvent の自動記録
+- 自動学習開始
+- long-term review UI
+- Tutor recommendation
+- URL / PDF / YouTube ingestion
+
+Phase 3 へ進む前提は、Phase 0〜2 が `bash scripts/quality-check.sh` で
+継続して通ることである。
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -908,3 +1042,5 @@ SourceDocument として保存・参照できる最小 UI/API である。
 
 Phase 2 以降へ進む前提は、Phase 0 と Phase 1 が
 `bash scripts/quality-check.sh` で継続して通ることである。
+Phase 2 自体の完了条件と Phase 3 への引継ぎは、上記
+「Phase 2 Exit Criteria」と「Phase 3 への引き継ぎ」を正とする。
