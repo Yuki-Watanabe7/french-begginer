@@ -45,6 +45,10 @@ ResponseKind = Literal["choice", "text", "reconstruction"]
 ExerciseSkipReason = Literal[
     "unsupported_combination",
     "missing_source_evidence",
+    "source_not_found",
+    "evidence_span_out_of_range",
+    "evidence_span_empty",
+    "context_unavailable",
     "unknown_conjugation_lemma",
     "requires_semantic_grading",
     "existing_quiz_only",

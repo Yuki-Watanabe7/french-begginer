@@ -1,16 +1,18 @@
-"""vocabulary / expression 向け deterministic Exercise 生成（Issue #146）。
+"""LearningItem 向け deterministic Exercise 生成（Issue #146 / #147）。
 
-accepted かつ active な LearningItem の確定済み情報から、LLM 再呼び出しなしで
-基本 Exercise を組み立てる。出題のたびに問題と正解を LLM に作らせない。
+accepted かつ active な LearningItem の確定済み情報と Source provenance から、
+LLM 再呼び出しなしで Exercise を組み立てる。出題のたびに問題と正解を
+LLM に作らせない。
 
 このモジュールが依存してよいのは Python 標準ライブラリ、Pydantic、
 `domain.tutor`、`domain.exercise` のみ。DB / FastAPI / OpenAI には依存しない。
 
-同じ (item, exercise_type, seed, exercise_version) からは同じ Exercise になる。
-正解は `ExerciseAnswerKey` に閉じ、`to_public_exercise` には載せない。
+同じ (item, exercise_type, seed, exercise_version, sources) からは
+同じ Exercise になる。正解は `ExerciseAnswerKey` に閉じ、
+`to_public_exercise` には載せない。
 
 ```text
-LearningItem (+ active pool, seed)
+LearningItem (+ active pool, seed, sources)
   -> eligibility / skip reason
   -> ExerciseSpec + ExerciseAnswerKey
 ```
@@ -19,18 +21,22 @@ Phase 3 初期対象:
   - meaning_recognition（FR → 日本語意味の choice）
   - ja_to_fr（日本語意味 → canonical_form の production）
   - expression_reconstruction（expression の語順再構成）
+  - source cloze（evidence_span から原文 slice を blank 化）
 
-cloze / verb_conjugation adapter / HTTP API / Frontend / 回答送信は対象外。
+verb_conjugation adapter / HTTP API / Frontend / 回答送信は対象外。
 fr_to_ja の日本語自由記述は meaning_ja との文字列一致で採点しない。
+cloze の正解は LLM の raw evidence text ではなく Source 本文の slice。
 """
 
 from __future__ import annotations
 
 import hashlib
 import random
+import re
 import unicodedata
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -46,7 +52,15 @@ from app.domain.exercise import (
     to_public_exercise,
     tokenize_canonical_form,
 )
-from app.domain.tutor import ExerciseType, LearningItem, LearningItemType
+from app.domain.tutor import (
+    EvidenceSpan,
+    ExerciseType,
+    LearningItem,
+    LearningItemType,
+    SourceDocument,
+    SourceRef,
+    read_source_evidence,
+)
 
 MEANING_RECOGNITION_CHOICE_COUNT = 4
 """meaning_recognition の目標選択肢数。足りなければ MIN_CHOICE_OPTIONS まで減らす。"""
@@ -55,16 +69,17 @@ DEFAULT_GENERATION_SEED = "tutor-exercise"
 """未指定時の生成シード。テストでは必ず明示する。"""
 
 SUPPORTED_ITEM_EXERCISE_TYPES: dict[LearningItemType, tuple[ExerciseType, ...]] = {
-    "vocabulary": ("meaning_recognition", "ja_to_fr"),
+    "vocabulary": ("meaning_recognition", "ja_to_fr", "cloze"),
     "expression": (
         "meaning_recognition",
         "ja_to_fr",
         "expression_reconstruction",
+        "cloze",
     ),
-    "grammar": (),
-    "conjugation": (),
+    "grammar": ("cloze",),
+    "conjugation": ("cloze",),
 }
-"""item_type ごとに #146 で生成する形式。cloze は含めない。"""
+"""item_type ごとにこの生成器が組み立てる形式。"""
 
 GENERATED_EXERCISE_TYPES: frozenset[ExerciseType] = frozenset(
     exercise_type
@@ -73,11 +88,28 @@ GENERATED_EXERCISE_TYPES: frozenset[ExerciseType] = frozenset(
 )
 """このモジュールが実際に組み立てる ExerciseType。"""
 
+CLOZE_CONTEXT_MAX_CHARS = 160
+"""cloze prompt に載せる前後文脈の上限。長文 Source 全文は返さない。"""
+
+CLOZE_BLANK = "____"
+"""evidence 部分を置き換える空欄。"""
+
 _MEANING_RECOGNITION_PROMPT = (
     "次のフランス語の意味を選んでください。\n\n{canonical_form}"
 )
 _JA_TO_FR_PROMPT = "次の意味をフランス語で書いてください。\n\n{meaning_ja}"
 _RECONSTRUCTION_PROMPT = "次の語を正しい順に並べて、表現を完成させてください。"
+_CLOZE_PROMPT = "次の空欄に入るフランス語を、原文のまま書いてください。\n\n{cloze_text}"
+_SENTENCE_BREAK_RE = re.compile(r"(?:[.!?…]+\s+|\n+)")
+_SENTENCE_END_RE = re.compile(r"[.!?…]+|\n")
+
+
+class _ClozeMaterial(NamedTuple):
+    source: SourceDocument
+    span: EvidenceSpan
+    expected: str
+    window: tuple[int, int]
+    blanked: str
 
 
 class GeneratedExercise(BaseModel):
@@ -124,6 +156,8 @@ def generate_exercise(
     *,
     pool: Sequence[LearningItem] = (),
     seed: str | int = DEFAULT_GENERATION_SEED,
+    sources: Mapping[str, SourceDocument] | Sequence[SourceDocument] = (),
+    cloze_context_max_chars: int = CLOZE_CONTEXT_MAX_CHARS,
 ) -> ExerciseGenerationResult:
     """1つの ExerciseType を deterministic に生成する。
 
@@ -140,8 +174,7 @@ def generate_exercise(
         return _skipped(
             exercise_type,
             "generation_not_implemented",
-            f"{item.item_type} の {exercise_type} は "
-            "vocabulary / expression 初期生成の対象外",
+            f"{item.item_type} の {exercise_type} は この生成器の初期対象外",
         )
 
     metadata = {
@@ -156,6 +189,13 @@ def generate_exercise(
         return _generate_ja_to_fr(item, metadata)
     if exercise_type == "expression_reconstruction":
         return _generate_expression_reconstruction(item, rng, metadata)
+    if exercise_type == "cloze":
+        return _generate_cloze(
+            item,
+            _source_map(sources),
+            metadata,
+            cloze_context_max_chars=cloze_context_max_chars,
+        )
     return _skipped(
         exercise_type,
         "generation_not_implemented",
@@ -168,15 +208,53 @@ def generate_supported_exercises(
     *,
     pool: Sequence[LearningItem] = (),
     seed: str | int = DEFAULT_GENERATION_SEED,
+    sources: Mapping[str, SourceDocument] | Sequence[SourceDocument] = (),
+    cloze_context_max_chars: int = CLOZE_CONTEXT_MAX_CHARS,
 ) -> tuple[ExerciseGenerationResult, ...]:
-    """#146 対象の ExerciseType を item に対して順に生成する。"""
+    """この生成器が扱う ExerciseType を item に対して順に生成する。"""
     types = SUPPORTED_ITEM_EXERCISE_TYPES[item.item_type]
     if not types:
         return ()
     return tuple(
-        generate_exercise(item, exercise_type, pool=pool, seed=seed)
+        generate_exercise(
+            item,
+            exercise_type,
+            pool=pool,
+            seed=seed,
+            sources=sources,
+            cloze_context_max_chars=cloze_context_max_chars,
+        )
         for exercise_type in types
     )
+
+
+def select_cloze_source_ref(
+    item: LearningItem,
+    sources: Mapping[str, SourceDocument] | Sequence[SourceDocument],
+) -> SourceRef | None:
+    """cloze に使う SourceRef を deterministic に1件選ぶ。
+
+    方針（oldest-source）:
+      - evidence_span がある SourceRef だけを候補にする
+      - SourceDocument が渡されているものだけを候補にする
+      - SourceDocument.created_at 昇順、同刻なら source_document_id 昇順
+      - さらに同順位なら evidence_span.start / end 昇順
+      - 暗黙の random は使わない
+    """
+    source_map = _source_map(sources)
+    ranked = _rank_cloze_source_refs(item, source_map)
+    return ranked[0] if ranked else None
+
+
+def blank_source_span(
+    content: str,
+    start: int,
+    end: int,
+    *,
+    blank: str = CLOZE_BLANK,
+) -> str:
+    """本文の [start:end) を blank に置き換える。文字列 replace は使わない。"""
+    return content[:start] + blank + content[end:]
 
 
 def meaning_key(text: str) -> str:
@@ -275,6 +353,247 @@ def _generate_expression_reconstruction(
         spec,
         ExerciseAnswerKey(expected_answers=(" ".join(tokens),)),
     )
+
+
+def _generate_cloze(
+    item: LearningItem,
+    sources: Mapping[str, SourceDocument],
+    metadata: dict[str, Any],
+    *,
+    cloze_context_max_chars: int,
+) -> ExerciseGenerationResult:
+    material = _resolve_cloze_material(item, sources, cloze_context_max_chars)
+    if not isinstance(material, _ClozeMaterial):
+        reason, detail = material
+        return _skipped("cloze", reason, detail)
+    spec = make_exercise_spec(
+        item,
+        "cloze",
+        prompt=_CLOZE_PROMPT.format(cloze_text=material.blanked),
+        source_context=material.blanked,
+        metadata={
+            **metadata,
+            "source_document_id": material.source.id,
+            "evidence_start": material.span.start,
+            "evidence_end": material.span.end,
+            "context_window_start": material.window[0],
+            "context_window_end": material.window[1],
+        },
+    )
+    return _generated(spec, ExerciseAnswerKey(expected_answers=(material.expected,)))
+
+
+def _resolve_cloze_material(
+    item: LearningItem,
+    sources: Mapping[str, SourceDocument],
+    max_chars: int,
+) -> _ClozeMaterial | tuple[ExerciseSkipReason, str]:
+    """valid な cloze 材料を選ぶ。invalid を無言で誤問題にしない。"""
+    evidence_refs = [ref for ref in item.source_refs if ref.evidence_span is not None]
+    if not evidence_refs:
+        return (
+            "missing_source_evidence",
+            "source cloze には evidence_span 付きの source_ref が必要",
+        )
+
+    valid: list[_ClozeMaterial] = []
+    first_error: tuple[ExerciseSkipReason, str] | None = None
+    for ref in _ordered_cloze_refs(evidence_refs, sources):
+        checked = _validate_cloze_ref(ref, sources, max_chars)
+        if isinstance(checked, _ClozeMaterial):
+            valid.append(checked)
+        elif first_error is None:
+            first_error = checked
+
+    if valid:
+        valid.sort(
+            key=lambda row: (
+                row.source.created_at,
+                row.source.id,
+                row.span.start,
+                row.span.end,
+            )
+        )
+        return valid[0]
+    return first_error or (
+        "source_not_found",
+        "source cloze に必要な SourceDocument が見つからない",
+    )
+
+
+_MISSING_SOURCE_CREATED_AT = datetime.max.replace(tzinfo=UTC)
+
+
+def _ordered_cloze_refs(
+    refs: Sequence[SourceRef],
+    sources: Mapping[str, SourceDocument],
+) -> list[SourceRef]:
+    """失敗理由を安定して返すための走査順。存在する Source を先に、古い順。"""
+
+    def sort_key(ref: SourceRef) -> tuple[int, datetime, str, int, int]:
+        source = sources.get(ref.source_document_id)
+        span = ref.evidence_span
+        start = span.start if span is not None else 0
+        end = span.end if span is not None else 0
+        if source is None:
+            return (1, _MISSING_SOURCE_CREATED_AT, ref.source_document_id, start, end)
+        return (0, source.created_at, source.id, start, end)
+
+    return sorted(refs, key=sort_key)
+
+
+def _rank_cloze_source_refs(
+    item: LearningItem,
+    sources: Mapping[str, SourceDocument],
+) -> list[SourceRef]:
+    refs = [ref for ref in item.source_refs if ref.evidence_span is not None]
+    present = [ref for ref in refs if ref.source_document_id in sources]
+    return _ordered_cloze_refs(present, sources)
+
+
+def _validate_cloze_ref(
+    ref: SourceRef,
+    sources: Mapping[str, SourceDocument],
+    max_chars: int,
+) -> _ClozeMaterial | tuple[ExerciseSkipReason, str]:
+    span = ref.evidence_span
+    if span is None:
+        return (
+            "missing_source_evidence",
+            "source cloze には evidence_span 付きの source_ref が必要",
+        )
+    source = sources.get(ref.source_document_id)
+    if source is None:
+        return (
+            "source_not_found",
+            f"SourceDocument が存在しない: {ref.source_document_id}",
+        )
+    try:
+        expected = read_source_evidence(source.content, span)
+    except ValueError as exc:
+        return ("evidence_span_out_of_range", str(exc))
+    if expected.strip() == "":
+        return (
+            "evidence_span_empty",
+            "再構成した根拠断片が空、または whitespace のみ",
+        )
+    window = _cloze_window_bounds(source.content, span.start, span.end, max_chars)
+    if window is None:
+        return (
+            "context_unavailable",
+            "blank 対象の前後に十分な context を切り出せない",
+        )
+    win_start, win_end = window
+    window_text = source.content[win_start:win_end]
+    rel_start = span.start - win_start
+    rel_end = span.end - win_start
+    outside = window_text[:rel_start] + window_text[rel_end:]
+    if outside.strip() == "":
+        return (
+            "context_unavailable",
+            "blank 対象の前後に十分な context を切り出せない",
+        )
+    return _ClozeMaterial(
+        source=source,
+        span=span,
+        expected=expected,
+        window=(win_start, win_end),
+        blanked=blank_source_span(window_text, rel_start, rel_end),
+    )
+
+
+def _cloze_window_bounds(
+    content: str,
+    start: int,
+    end: int,
+    max_chars: int,
+) -> tuple[int, int] | None:
+    """evidence を含む前後 context の [win_start, win_end) を返す。"""
+    if max_chars <= 0:
+        return None
+    span_len = end - start
+    if span_len <= 0 or span_len >= max_chars:
+        return None
+    n = len(content)
+    if n <= max_chars:
+        return (0, n)
+
+    sent_start, sent_end = _sentence_bounds(content, start, end)
+    if sent_end - sent_start <= max_chars and sent_start <= start and sent_end >= end:
+        return (sent_start, sent_end)
+
+    budget = max_chars - span_len
+    left_avail = start
+    right_avail = n - end
+    left_take = min(left_avail, budget // 2)
+    right_take = min(right_avail, budget - left_take)
+    leftover = budget - left_take - right_take
+    if leftover and left_take < left_avail:
+        extra = min(leftover, left_avail - left_take)
+        left_take += extra
+        leftover -= extra
+    if leftover and right_take < right_avail:
+        right_take += min(leftover, right_avail - right_take)
+    win_start = start - left_take
+    win_end = end + right_take
+    snapped_start = _snap_left(content, win_start, start)
+    snapped_end = _snap_right(content, win_end, end)
+    snapped_outside = content[snapped_start:start] + content[end:snapped_end]
+    if snapped_outside.strip():
+        win_start, win_end = snapped_start, snapped_end
+    if win_end - win_start > max_chars:
+        overflow = (win_end - win_start) - max_chars
+        win_end = max(end, win_end - overflow)
+    return (win_start, win_end)
+
+
+def _sentence_bounds(content: str, start: int, end: int) -> tuple[int, int]:
+    sent_start = 0
+    for match in _SENTENCE_BREAK_RE.finditer(content[:start]):
+        sent_start = match.end()
+    match = _SENTENCE_END_RE.search(content[end:])
+    if match is None:
+        sent_end = len(content)
+    elif match.group() == "\n" or match.group().startswith("\n"):
+        sent_end = end + match.start()
+    else:
+        sent_end = end + match.end()
+    return sent_start, sent_end
+
+
+def _snap_left(content: str, win_start: int, span_start: int) -> int:
+    """トークン途中で切らないよう、必要なら開始を次の空白境界へ進める。"""
+    if win_start <= 0 or win_start >= span_start:
+        return win_start
+    if content[win_start].isspace() or content[win_start - 1].isspace():
+        return win_start
+    cursor = win_start
+    while cursor < span_start and not content[cursor].isspace():
+        cursor += 1
+    while cursor < span_start and content[cursor].isspace():
+        cursor += 1
+    return cursor
+
+
+def _snap_right(content: str, win_end: int, span_end: int) -> int:
+    """トークン途中で切らないよう、必要なら終端を前の空白境界へ戻す。"""
+    n = len(content)
+    if win_end >= n or win_end <= span_end:
+        return win_end
+    if content[win_end - 1].isspace() or (win_end < n and content[win_end].isspace()):
+        return win_end
+    cursor = win_end
+    while cursor > span_end and not content[cursor - 1].isspace():
+        cursor -= 1
+    return cursor
+
+
+def _source_map(
+    sources: Mapping[str, SourceDocument] | Sequence[SourceDocument],
+) -> dict[str, SourceDocument]:
+    if isinstance(sources, Mapping):
+        return dict(sources)
+    return {source.id: source for source in sources}
 
 
 def _shuffle_tokens(tokens: tuple[str, ...], rng: random.Random) -> tuple[str, ...]:

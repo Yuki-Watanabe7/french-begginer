@@ -360,7 +360,9 @@ def test_unsupported_and_single_token_reconstruction_return_skip_reason():
         grammar, "meaning_recognition", pool=_vocab_pool(), seed="fixed"
     )
     assert grammar_meaning.skip_reason == "generation_not_implemented"
-    assert generate_supported_exercises(grammar) == ()
+    grammar_supported = generate_supported_exercises(grammar)
+    assert [row.exercise_type for row in grammar_supported] == ["cloze"]
+    assert grammar_supported[0].skip_reason == "missing_source_evidence"
 
 
 def test_supported_exercises_cover_recognition_and_production():
@@ -369,8 +371,10 @@ def test_supported_exercises_cover_recognition_and_production():
     assert [row.exercise_type for row in vocab_results] == [
         "meaning_recognition",
         "ja_to_fr",
+        "cloze",
     ]
-    assert all(row.eligible for row in vocab_results)
+    assert [row.eligible for row in vocab_results] == [True, True, False]
+    assert vocab_results[2].skip_reason == "missing_source_evidence"
     directions = {
         row.exercise.spec.skill_direction
         for row in vocab_results
@@ -389,8 +393,10 @@ def test_supported_exercises_cover_recognition_and_production():
         "meaning_recognition",
         "ja_to_fr",
         "expression_reconstruction",
+        "cloze",
     ]
-    assert all(row.eligible for row in expr_results)
+    assert [row.eligible for row in expr_results[:3]] == [True, True, True]
+    assert expr_results[3].skip_reason == "missing_source_evidence"
 
 
 def test_generated_types_are_exactly_the_supported_vocab_expression_set():
