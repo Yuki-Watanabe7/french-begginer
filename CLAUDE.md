@@ -44,7 +44,8 @@ backend/app/
 ├── domain/        # ビジネスルール。フレームワーク非依存
 │   ├── conjugation.py  # 活用データ辞書・Pydantic モデル・判定ロジック
 │   ├── review_scheduler.py  # 初期復習間隔の算出
-│   └── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
+│   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
+│   └── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
 ├── evaluation/    # LLM抽出の固定fixtureと品質チェック（Issue #136）
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
