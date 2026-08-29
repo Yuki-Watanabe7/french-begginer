@@ -15,7 +15,8 @@ LLM Extraction Service（Issue #132）、
 抽出・採否 API（Issue #134）、
 Source 詳細の Candidate レビュー UI（Issue #135）、
 LLM抽出品質の固定 fixture・評価ハーネス（Issue #136）、
-および Phase 2 vertical slice と Exit Criteria（Issue #137）
+Phase 2 vertical slice と Exit Criteria（Issue #137）、
+および Phase 3 の LearningItem → Exercise 契約（Issue #145）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -46,6 +47,8 @@ LLM抽出品質の固定 fixture・評価ハーネス（Issue #136）、
   / `docs/tutor_extraction_quality.md`
 - Phase 2 vertical slice: `backend/tests/test_tutor_phase2_vertical_slice.py`
   / `frontend/src/test/TutorPhase2Flow.test.tsx`
+- Exercise 契約: `backend/app/domain/exercise.py`
+  / `backend/tests/test_exercise.py`
 
 ## 目指す学習ループ
 
@@ -262,6 +265,12 @@ enum相当の値はすべて `Literal` で定義しており、未知の値は
 `ExerciseType` には既存モード（`verb_conjugation` / `noun_gender` /
 `noun_article`）を含めてある。これは将来の接続のための型であり、
 Phase 0 の API が quiz 回答を Tutor 履歴へ書き込むことはない。
+
+Phase 3 では Tutor layer から既存 quiz へ委譲する境界だけを定義し、
+既存クイズの全面刷新はしない。`noun_gender` / `noun_article` は
+既存クイズ専用のまま LearningItem から新規生成しない。
+`verb_conjugation` は lemma が `CONJUGATIONS` にある conjugation item に
+限って既存実装へ委譲できる。
 
 Phase 0時点では `backend/app/domain/conjugation.py` /
 `backend/app/domain/noun.py` に一切変更を加えていない（破壊的変更なし）。
@@ -1005,22 +1014,158 @@ Issue #107 の Phase 2 は、保存済み Source から LLM が学習候補を�
 ## Phase 3 への引き継ぎ
 
 Phase 3 では accepted `LearningItem` を実際の Exercise へ接続する。
+Issue #145 で契約・適用条件・skill direction を定義した。
 Phase 2 では LearningItem を作れるところまでで止め、以下はまだ行わない。
 
-- 意味認識問題
-- FR→JP / JP→FR
-- cloze
-- expression 再構成
-- grammar 問題
-- 既存動詞活用への接続
+- 実際の Exercise 生成（prompt / 選択肢の組み立て）
+- HTTP API / Frontend
 - LearningEvent の自動記録
 - 自動学習開始
 - long-term review UI
 - Tutor recommendation
 - URL / PDF / YouTube ingestion
+- by_direction の長期 SRS 最適化
+- LLM semantic grading
 
 Phase 3 へ進む前提は、Phase 0〜2 が `bash scripts/quality-check.sh` で
 継続して通ることである。
+
+## Phase 3 — LearningItem → Exercise 契約（Issue #145）
+
+Phase 2 で確定した `LearningItem` を、実際の学習問題へ変換するための
+共通 Exercise 契約。既存クイズを全面的に作り直すのではなく、Tutor layer
+から「この LearningItem にはどの Exercise を出せるか」を判断し、
+既存 / 新規の出題実装へ委譲できる薄い境界にする。
+
+```text
+LearningItem
+  -> Exercise eligibility / policy
+  -> ExerciseSpec
+  -> renderer / evaluator（後続Issue）
+  -> LearningEvent（exercise_version を metadata で追跡）
+```
+
+実装は `backend/app/domain/exercise.py`。DB / FastAPI / OpenAI に依存しない。
+Exercise 自体は永続化しない。同じ `(learning_item_id, exercise_type, exercise_version)`
+から同じ Exercise を再構成できることを優先する。
+
+### 共通契約
+
+| 型 | 責務 |
+|----|------|
+| `ExerciseSpec` | 出題の内部契約。prompt / options / source_context を持つ。正解は持たない |
+| `PublicExercise` | Frontend 向け DTO。`metadata` と正解・判定内部情報を持たない |
+| `ExerciseAnswerKey` | evaluator 内部用。`to_public_exercise` に混ぜない |
+| `ExerciseEligibility` | item × ExerciseType の適用可否と skip 理由 |
+
+`ExerciseSpec.metadata` に `expected` / `answer` / `correct_index` 等を載せると
+ValidationError。Frontend へ返すときは必ず `to_public_exercise` を通す。
+
+`response_kind`:
+
+| 値 | 用途 |
+|----|------|
+| `choice` | 選択肢（meaning_recognition / noun_gender / noun_article） |
+| `text` | 文字列入力（ja_to_fr / cloze / verb_conjugation / fr_to_ja） |
+| `reconstruction` | 表現の再構成（`expression_reconstruction`） |
+
+### ExerciseType と既存型の対応
+
+| ExerciseType | 由来 | Phase 3 での扱い |
+|--------------|------|------------------|
+| `meaning_recognition` | Tutor | 意味の選択。日本語自由記述ではない |
+| `fr_to_ja` | Tutor（LearningEvent 記録用） | 日本語自由記述の意味判定が必要なため生成しない |
+| `ja_to_fr` | Tutor | canonical_form との照合が可能な production |
+| `cloze` | Tutor | source cloze。evidence があるときだけ |
+| `expression_reconstruction` | Roadmap の expression 再構成。cloze とは別型 | 複数トークンの expression のみ |
+| `verb_conjugation` | 既存動詞クイズ | lemma が `CONJUGATIONS` にある conjugation のみ委譲 |
+| `noun_gender` | 既存名詞クイズ | LearningItem から新規生成しない |
+| `noun_article` | 既存冠詞クイズ | LearningItem から新規生成しない |
+
+文法選択問題（もっともらしい誤答選択肢の LLM 生成）は型を増やさない。
+grammar は `meaning_recognition` と source cloze に限定する。
+
+### ExerciseType → SkillDirection
+
+曖昧な形式は暗黙に決めず、`skill_direction_for` が一元管理する。
+1つの ExerciseType は常に 1つの SkillDirection。
+
+| ExerciseType | SkillDirection | 理由 |
+|--------------|----------------|------|
+| `meaning_recognition` | recognition | 仏語を見て意味が分かるか |
+| `fr_to_ja` | recognition | 仏語の理解（生成はしない） |
+| `ja_to_fr` | production | 仏語を自力で書く |
+| `cloze` | production | 空所に仏語を入れる |
+| `expression_reconstruction` | production | 表現を組み直す |
+| `verb_conjugation` | production | 活用形を書く |
+| `noun_gender` | recognition | 性を識別する |
+| `noun_article` | production | 冠詞付き形を選ぶ |
+
+Phase 0 と同様、`LearnerState.by_direction` の更新はこの Issue では行わない。
+
+### LearningItemType ごとの eligibility
+
+`eligible_exercise_types(item)` は metadata を満たすものだけを返す。
+満たさない組合せは `list_exercise_eligibility` で skip 理由付きにする。
+`make_exercise_spec` は unsupported を `UnsupportedExerciseError` で拒否する。
+
+| item_type | Phase 3 で安全に生成可能な Exercise | 追加条件 |
+|-----------|-------------------------------------|----------|
+| vocabulary | meaning_recognition / ja_to_fr / source cloze | cloze は evidence_span 付き source_ref |
+| expression | meaning_recognition / ja_to_fr / reconstruction / source cloze | reconstruction は複数トークン。cloze は evidence |
+| grammar | meaning_recognition / source cloze | cloze は evidence。文法選択問題は作らない |
+| conjugation | source cloze / 条件付き verb_conjugation | cloze は evidence。verb_conjugation は lemma が `CONJUGATIONS` にあること |
+
+skip 理由:
+
+| skip_reason | 意味 |
+|------------|------|
+| `unsupported_combination` | その item_type に出さない形式 |
+| `missing_source_evidence` | source cloze なのに evidence がない |
+| `unknown_conjugation_lemma` | 既存動詞データに接続できない |
+| `requires_semantic_grading` | 日本語自由記述の意味判定が必要（fr_to_ja） |
+| `existing_quiz_only` | 既存クイズ専用（noun_gender / noun_article） |
+| `insufficient_expression_tokens` | 再構成できない短い expression |
+
+metadata 不足の Exercise を無理に生成しない。
+文法選択の誤答選択肢や日本語自由記述の意味判定を、Phase 3 で LLM に
+丸投げして正解判定しない。
+
+### versioning
+
+`EXERCISE_VERSION`（現行 `exercise-v1`）を `ExerciseSpec.exercise_version` に載せる。
+`exercise_event_metadata(spec)` が LearningEvent.metadata へ
+`exercise_version` / `skill_direction` / `response_kind` /
+`reconstruction_key` を載せる。正解は含めない。
+
+生成ロジックを後から変えるときは version を bump する。
+過去の LearningEvent から「どの版で回答したか」を追跡できる。
+
+### 既存クイズとの関係
+
+既存の動詞・名詞・冠詞クイズ実装（`conjugation.py` / `noun.py` と quiz API）は
+変更しない。Tutor は eligibility を見て、条件を満たす conjugation だけ
+既存 `verb_conjugation` へ委譲できる、という境界を置いただけである。
+
+Exercise 生成 API はまだ公開しない（Phase 2 の
+`test_phase2_does_not_expose_exercise_generation_endpoints` を維持）。
+
+| 観点 | 自動テスト |
+|------|------------|
+| item type ごとの eligible 一覧が deterministic | `test_eligible_exercises_by_item_type_are_deterministic` |
+| unsupported を拒否 / skip できる | `test_unsupported_combinations_are_explicitly_skipped` / `test_make_exercise_spec_rejects_unsupported_combination` |
+| ExerciseType → SkillDirection が一意 | `test_exercise_type_to_skill_direction_is_unique_and_total` |
+| 正解情報が public DTO へ混入しない | `test_public_dto_does_not_include_internal_answer_fields` |
+| domain が FastAPI / SQLAlchemy / OpenAI 非依存 | `test_domain_module_does_not_depend_on_fastapi_sqlalchemy_or_openai` |
+| exercise_version を LearningEvent で追跡できる | `test_learning_event_can_track_exercise_version` |
+
+### Phase 3 の残り（#145 のスコープ外）
+
+- 実際の prompt / 選択肢 / cloze 文の生成
+- HTTP API と Frontend
+- renderer / evaluator の実装
+- by_direction の更新
+- due review session（Phase 4）
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 

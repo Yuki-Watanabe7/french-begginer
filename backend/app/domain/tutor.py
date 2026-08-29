@@ -1,5 +1,5 @@
 """
-Tutor機能の中核ドメインモデル（Phase 0 / Phase 2 Candidate）。
+Tutor機能の中核ドメインモデル（Phase 0 / Phase 2 Candidate / Phase 3 Exercise）。
 
 責務: ユーザーが触れたフランス語ソースを教材化し、学習履歴・習熟状態・
 復習予定を追跡するための型・不変条件・LearnerState更新を定義する。
@@ -27,6 +27,7 @@ LLM 抽出は `services/extraction_service` が担う（Issue #132）。
 Candidate の evidence 検証・正規化・重複統合は
 `candidate_normalization` が担う（Issue #133）。
 抽出結果の保存と採否 API は `services/candidate_service` が担う（Issue #134）。
+LearningItem → Exercise の契約・適用条件は `exercise` が担う（Issue #145）。
 SRS / UI は後続Issue。
 """
 
@@ -90,11 +91,17 @@ ExerciseType = Literal[
     "fr_to_ja",
     "ja_to_fr",
     "cloze",
+    "expression_reconstruction",
     "verb_conjugation",
     "noun_gender",
     "noun_article",
 ]
-"""出題形式。既存の動詞・名詞クイズもLearningEventとして記録できるようにしてある。"""
+"""出題形式。既存の動詞・名詞クイズもLearningEventとして記録できるようにしてある。
+
+`expression_reconstruction` は表現を部品から組み直す形式。cloze（穴埋め）とは
+別型にする。SkillDirection と LearningItemType ごとの適用可否は
+`domain.exercise` の policy が一元管理する（Issue #145）。
+"""
 
 AnswerOutcome = Literal["correct", "incorrect"]
 
