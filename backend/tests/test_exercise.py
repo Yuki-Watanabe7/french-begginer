@@ -34,6 +34,7 @@ from app.domain.exercise import (
     make_exercise_spec,
     skill_direction_for,
     to_public_exercise,
+    tokenize_canonical_form,
 )
 from app.domain.tutor import (
     EvidenceSpan,
@@ -179,6 +180,27 @@ def test_verb_conjugation_is_eligible_when_lemma_is_in_existing_dataset():
     assert "verb_conjugation" in eligible_exercise_types(item)
 
 
+@pytest.mark.parametrize("status", ["suspended", "mastered"])
+def test_inactive_items_are_not_eligible_for_new_session(status: str):
+    item = _item(item_type="vocabulary", with_evidence=True)
+    item = item.model_copy(update={"status": status})
+    types = eligible_exercise_types(item)
+    assert types == ()
+    skipped = evaluate_exercise_eligibility(item, "ja_to_fr")
+    assert skipped.eligible is False
+    assert skipped.skip_reason == "inactive_item"
+
+
+def test_tokenize_canonical_form_does_not_split_elision():
+    assert tokenize_canonical_form("s'en aller") == ("s'en", "aller")
+    assert tokenize_canonical_form("  se   rendre   compte  de ") == (
+        "se",
+        "rendre",
+        "compte",
+        "de",
+    )
+
+
 def test_expression_reconstruction_is_skipped_for_single_token():
     item = _item(
         item_type="expression",
@@ -254,8 +276,10 @@ def test_make_exercise_spec_fills_skill_direction_from_policy():
         item,
         "expression_reconstruction",
         prompt="表現を組み立ててください",
+        options=("compte", "de", "se", "rendre"),
     )
     assert reconstructed.response_kind == "reconstruction"
+    assert reconstructed.options == ("compte", "de", "se", "rendre")
     event = LearningEvent(
         learning_item_id=item.id,
         exercise_type="expression_reconstruction",
@@ -375,6 +399,19 @@ def test_choice_requires_options_and_text_rejects_them():
             "ja_to_fr",
             prompt="書いてください",
             options=("livre", "maison"),
+        )
+    expression = _item(
+        item_type="expression",
+        canonical_form="se rendre compte de",
+        meaning_ja="〜に気づく",
+        with_evidence=True,
+    )
+    with pytest.raises(ValidationError):
+        make_exercise_spec(
+            expression,
+            "expression_reconstruction",
+            prompt="並べてください",
+            options=("seul",),
         )
 
 

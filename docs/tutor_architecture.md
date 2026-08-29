@@ -16,7 +16,8 @@ LLM Extraction Service（Issue #132）、
 Source 詳細の Candidate レビュー UI（Issue #135）、
 LLM抽出品質の固定 fixture・評価ハーネス（Issue #136）、
 Phase 2 vertical slice と Exit Criteria（Issue #137）、
-および Phase 3 の LearningItem → Exercise 契約（Issue #145）
+および Phase 3 の LearningItem → Exercise 契約（Issue #145）、
+vocabulary / expression 向け deterministic Exercise 生成（Issue #146）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -49,6 +50,8 @@ Phase 2 vertical slice と Exit Criteria（Issue #137）、
   / `frontend/src/test/TutorPhase2Flow.test.tsx`
 - Exercise 契約: `backend/app/domain/exercise.py`
   / `backend/tests/test_exercise.py`
+- Exercise 生成: `backend/app/domain/exercise_generation.py`
+  / `backend/tests/test_exercise_generation.py`
 
 ## 目指す学習ループ
 
@@ -1015,9 +1018,11 @@ Issue #107 の Phase 2 は、保存済み Source から LLM が学習候補を�
 
 Phase 3 では accepted `LearningItem` を実際の Exercise へ接続する。
 Issue #145 で契約・適用条件・skill direction を定義した。
-Phase 2 では LearningItem を作れるところまでで止め、以下はまだ行わない。
+Issue #146 で vocabulary / expression の deterministic な基本 Exercise
+生成を追加した。Phase 2 では LearningItem を作れるところまでで止め、
+以下はまだ行わない。
 
-- 実際の Exercise 生成（prompt / 選択肢の組み立て）
+- source cloze / conjugation adapter の生成
 - HTTP API / Frontend
 - LearningEvent の自動記録
 - 自動学習開始
@@ -1126,6 +1131,9 @@ skip 理由:
 | `requires_semantic_grading` | 日本語自由記述の意味判定が必要（fr_to_ja） |
 | `existing_quiz_only` | 既存クイズ専用（noun_gender / noun_article） |
 | `insufficient_expression_tokens` | 再構成できない短い expression |
+| `inactive_item` | suspended / mastered。新規学習 Session の対象外 |
+| `insufficient_distractors` | meaning_recognition のユニークな誤答選択肢が足りない |
+| `generation_not_implemented` | 契約上は出せるが、この生成器の初期対象外（cloze 等） |
 
 metadata 不足の Exercise を無理に生成しない。
 文法選択の誤答選択肢や日本語自由記述の意味判定を、Phase 3 で LLM に
@@ -1159,13 +1167,88 @@ Exercise 生成 API はまだ公開しない（Phase 2 の
 | domain が FastAPI / SQLAlchemy / OpenAI 非依存 | `test_domain_module_does_not_depend_on_fastapi_sqlalchemy_or_openai` |
 | exercise_version を LearningEvent で追跡できる | `test_learning_event_can_track_exercise_version` |
 
-### Phase 3 の残り（#145 のスコープ外）
+### Phase 3 の残り（#145 / #146 のスコープ外）
 
-- 実際の prompt / 選択肢 / cloze 文の生成
+- source cloze の文生成
 - HTTP API と Frontend
-- renderer / evaluator の実装
+- renderer / evaluator の本実装（回答送信）
+- conjugation adapter
 - by_direction の更新
 - due review session（Phase 4）
+
+## Phase 3 — vocabulary / expression の deterministic 生成（Issue #146）
+
+Issue #145 の契約の上に、accepted かつ active な `vocabulary` /
+`expression` LearningItem から基本 Exercise を組み立てる。
+出題のたびに LLM が問題と正解を作る構成にはしない。
+LearningItem に確定済みの情報だけを使い、OpenAI API を要求しない。
+
+```text
+LearningItem (+ active pool, seed)
+  -> eligibility / skip reason
+  -> ExerciseSpec + ExerciseAnswerKey
+  -> PublicExercise（正解を含めない）
+```
+
+実装は `backend/app/domain/exercise_generation.py`。
+DB / FastAPI / OpenAI に依存しない。HTTP API は公開しない
+（`test_phase2_does_not_expose_exercise_generation_endpoints` を維持）。
+
+### 初期対象
+
+| ExerciseType | 形式 | 内容 |
+|--------------|------|------|
+| `meaning_recognition` | recognition / choice | `canonical_form` を提示し、`meaning_ja` を選ぶ |
+| `ja_to_fr` | production / text | 日本語意味を提示し、`canonical_form` を入力する |
+| `expression_reconstruction` | production / reconstruction | expression を語/まとまりに分けて再構成する |
+
+`fr_to_ja` の日本語自由記述は `meaning_ja` との単純文字列一致で判定しない。
+FR→JA 方向は `meaning_recognition` が担う。
+
+### meaning recognition
+
+- 正解: 対象 Item の `meaning_ja`
+- distractor: 他の **active** LearningItem の `meaning_ja`
+- 同じ意味（NFC + 空白正規化）の重複 option は出さない
+- 目標 4 択。ユニークな distractor が 1 件もなければ生成せず
+  `insufficient_distractors`
+- distractor 選択と option 順は injectable な `seed` と
+  `(item.id, exercise_type, exercise_version)` から deterministic
+
+### ja_to_fr
+
+- prompt には日本語意味だけを載せ、canonical_form は載せない
+- 正解根拠は `ExerciseAnswerKey.expected_answers` に `canonical_form` を保持する
+- 正解判定そのもの（evaluator）は後続 Issue
+
+### expression reconstruction
+
+- whitespace で分割し、apostrophe / elision（`l'heure`, `s'en aller`）と
+  hyphen は切らない（`tokenize_canonical_form`）
+- 語順の正解は canonical form から導出する
+- 提示順は seed 付きで shuffle し、`options` に載せる
+- 1 token しかない item には出さない（既存の eligibility）
+
+### 共通方針
+
+- suspended / mastered Item は新規学習 Session 対象外（`inactive_item`）
+- unsupported / 材料不足は例外で全体停止せず、skip reason を返す
+- 同じ Item + seed / version から同じ Exercise を生成できる
+- 正解は public DTO に含めない
+- grammar / conjugation の生成、source cloze、既存クイズ adapter は対象外
+
+| 観点 | 自動テスト |
+|------|------------|
+| vocabulary meaning recognition | `test_vocabulary_meaning_recognition_uses_pool_meanings` |
+| expression meaning recognition | `test_expression_meaning_recognition_uses_japanese_options` |
+| ja_to_fr prompt / 内部正解の分離 | `test_ja_to_fr_keeps_canonical_form_as_internal_answer` |
+| expression reconstruction | `test_expression_reconstruction_shuffles_tokens_without_breaking_elision` |
+| distractor 不足時の skip | `test_meaning_recognition_skips_when_distractors_are_insufficient` |
+| duplicate meaning を option に入れない | `test_duplicate_meanings_are_not_used_as_options` |
+| suspended / mastered 除外 | `test_suspended_and_mastered_items_are_skipped` / `test_inactive_items_are_not_eligible_for_new_session` |
+| deterministic generation | `test_generation_is_deterministic_for_same_item_and_seed` |
+| 日本語自由記述を完全一致で採点しない | `test_fr_to_ja_is_not_graded_by_meaning_string_match` |
+| API key なしで動く | `test_generation_works_without_openai_api_key` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
