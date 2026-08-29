@@ -17,7 +17,8 @@ Source 詳細の Candidate レビュー UI（Issue #135）、
 LLM抽出品質の固定 fixture・評価ハーネス（Issue #136）、
 Phase 2 vertical slice と Exit Criteria（Issue #137）、
 および Phase 3 の LearningItem → Exercise 契約（Issue #145）、
-vocabulary / expression 向け deterministic Exercise 生成（Issue #146）
+vocabulary / expression 向け deterministic Exercise 生成（Issue #146）、
+Source evidence からの cloze Exercise 生成（Issue #147）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -52,6 +53,7 @@ vocabulary / expression 向け deterministic Exercise 生成（Issue #146）
   / `backend/tests/test_exercise.py`
 - Exercise 生成: `backend/app/domain/exercise_generation.py`
   / `backend/tests/test_exercise_generation.py`
+  / `backend/tests/test_exercise_cloze.py`
 
 ## 目指す学習ループ
 
@@ -1019,10 +1021,11 @@ Issue #107 の Phase 2 は、保存済み Source から LLM が学習候補を�
 Phase 3 では accepted `LearningItem` を実際の Exercise へ接続する。
 Issue #145 で契約・適用条件・skill direction を定義した。
 Issue #146 で vocabulary / expression の deterministic な基本 Exercise
-生成を追加した。Phase 2 では LearningItem を作れるところまでで止め、
+生成を追加した。Issue #147 で Source evidence からの cloze 生成を追加した。
+Phase 2 では LearningItem を作れるところまでで止め、
 以下はまだ行わない。
 
-- source cloze / conjugation adapter の生成
+- conjugation adapter の生成
 - HTTP API / Frontend
 - LearningEvent の自動記録
 - 自動学習開始
@@ -1127,13 +1130,17 @@ skip 理由:
 |------------|------|
 | `unsupported_combination` | その item_type に出さない形式 |
 | `missing_source_evidence` | source cloze なのに evidence がない |
+| `source_not_found` | evidence の SourceDocument が渡されていない / 存在しない |
+| `evidence_span_out_of_range` | evidence_span が Source 本文の範囲外 |
+| `evidence_span_empty` | 再構成結果が空または whitespace のみ |
+| `context_unavailable` | blank 前後の context を十分な長さで切り出せない |
 | `unknown_conjugation_lemma` | 既存動詞データに接続できない |
 | `requires_semantic_grading` | 日本語自由記述の意味判定が必要（fr_to_ja） |
 | `existing_quiz_only` | 既存クイズ専用（noun_gender / noun_article） |
 | `insufficient_expression_tokens` | 再構成できない短い expression |
 | `inactive_item` | suspended / mastered。新規学習 Session の対象外 |
 | `insufficient_distractors` | meaning_recognition のユニークな誤答選択肢が足りない |
-| `generation_not_implemented` | 契約上は出せるが、この生成器の初期対象外（cloze 等） |
+| `generation_not_implemented` | 契約上は出せるが、この生成器の初期対象外 |
 
 metadata 不足の Exercise を無理に生成しない。
 文法選択の誤答選択肢や日本語自由記述の意味判定を、Phase 3 で LLM に
@@ -1167,9 +1174,8 @@ Exercise 生成 API はまだ公開しない（Phase 2 の
 | domain が FastAPI / SQLAlchemy / OpenAI 非依存 | `test_domain_module_does_not_depend_on_fastapi_sqlalchemy_or_openai` |
 | exercise_version を LearningEvent で追跡できる | `test_learning_event_can_track_exercise_version` |
 
-### Phase 3 の残り（#145 / #146 のスコープ外）
+### Phase 3 の残り（#145 / #146 / #147 のスコープ外）
 
-- source cloze の文生成
 - HTTP API と Frontend
 - renderer / evaluator の本実装（回答送信）
 - conjugation adapter
@@ -1235,7 +1241,8 @@ FR→JA 方向は `meaning_recognition` が担う。
 - unsupported / 材料不足は例外で全体停止せず、skip reason を返す
 - 同じ Item + seed / version から同じ Exercise を生成できる
 - 正解は public DTO に含めない
-- grammar / conjugation の生成、source cloze、既存クイズ adapter は対象外
+- grammar の meaning_recognition、conjugation adapter は対象外
+- source cloze は Issue #147
 
 | 観点 | 自動テスト |
 |------|------------|
@@ -1249,6 +1256,90 @@ FR→JA 方向は `meaning_recognition` が担う。
 | deterministic generation | `test_generation_is_deterministic_for_same_item_and_seed` |
 | 日本語自由記述を完全一致で採点しない | `test_fr_to_ja_is_not_graded_by_meaning_string_match` |
 | API key なしで動く | `test_generation_works_without_openai_api_key` |
+
+## Phase 3 — Source evidence からの cloze 生成（Issue #147）
+
+Phase 3 の差別化は、一般的な単語帳ではなく「自分が読んだ文脈から学ぶ」
+ことにある。accepted `LearningItem` の `SourceRef.evidence_span` と
+元 Source 本文から、deterministic に cloze Exercise を組み立てる。
+
+```text
+LearningItem
+  -> SourceRef選択（oldest-source）
+  -> SourceDocument取得
+  -> evidence_span検証
+  -> 前後context切り出し
+  -> evidence部分をblank化
+  -> cloze ExerciseSpec + ExerciseAnswerKey
+```
+
+実装は `backend/app/domain/exercise_generation.py` の cloze 経路。
+DB / FastAPI / OpenAI に依存しない。HTTP API は公開しない。
+
+### 対象 item type
+
+`vocabulary` / `expression` / `grammar` / `conjugation`。
+有効な SourceRef / evidence がなければ cloze を生成しない。
+grammar の初期 Exercise として source cloze を採用する。
+もっともらしい誤答文法選択肢を LLM で都度生成しない。
+
+### cloze 仕様
+
+- 正解は `SourceDocument.content[start:end]` から再構成する
+- LLM が返した raw evidence text（`EvidenceSpan.text`）や
+  `canonical_form` を正解にしない
+- prompt / `source_context` には blank 済みの前後文脈を載せる
+- context 長は `CLOZE_CONTEXT_MAX_CHARS`（160）を上限とし、
+  長文 Source 全文を返さない。収まるなら evidence を含む文を優先する
+- 改行 / Unicode / apostrophe は Source slice のまま残す
+- 空欄は `____`。文字列 replace ではなく span 位置で置き換える
+
+例:
+
+```text
+Je me suis rendu compte qu'il fallait changer de stratégie.
+```
+
+evidence が `rendu compte` 相当を指す場合:
+
+```text
+Je me suis ____ qu'il fallait changer de stratégie.
+```
+
+### SourceRef が複数ある場合
+
+有効な evidence（Source が存在し、span が本文内で空でなく、
+context を切れる）だけを候補にし、**oldest-source** で1件選ぶ。
+
+- `SourceDocument.created_at` 昇順
+- 同刻なら `source_document_id` 昇順
+- さらに同順位なら `evidence_span.start` / `end` 昇順
+
+暗黙の random は使わない。invalid な ref は出題に使わず、
+valid な別 ref があればそちらを使う。
+
+### invalid / unavailable
+
+既存データ不整合を無言で誤問題へ変換しない。skip reason:
+
+| skip_reason | 条件 |
+|------------|------|
+| `missing_source_evidence` | SourceRef なし、または evidence_span なし |
+| `source_not_found` | 参照先 SourceDocument が渡されていない |
+| `evidence_span_out_of_range` | span が本文範囲外 |
+| `evidence_span_empty` | 再構成結果が空 / whitespace のみ |
+| `context_unavailable` | evidence が本文全体、または上限内に前後 context を切れない |
+
+| 観点 | 自動テスト |
+|------|------------|
+| 4 item type の cloze | `test_cloze_is_generated_for_four_item_types` |
+| 正解は Source slice | `test_cloze_answer_is_reconstructed_from_source_slice_not_llm_text` |
+| source 外 span の拒否 | `test_cloze_rejects_span_outside_source` |
+| context 長上限 | `test_cloze_caps_context_length` / `test_cloze_uses_containing_sentence_instead_of_full_long_source` |
+| 複数 SourceRef の選択 | `test_multiple_source_refs_choose_oldest_deterministically` |
+| apostrophe / Unicode / 改行 | `test_cloze_preserves_apostrophe_unicode_and_newlines` |
+| SourceRef なしの skip | `test_cloze_skips_item_without_source_ref` |
+| Source 不存在 / 空 evidence / context 不能 | `test_cloze_skips_missing_source_document` / `test_cloze_skips_whitespace_only_evidence` / `test_cloze_skips_when_context_cannot_be_built` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
