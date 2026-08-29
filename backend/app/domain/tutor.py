@@ -28,6 +28,8 @@ Candidate の evidence 検証・正規化・重複統合は
 `candidate_normalization` が担う（Issue #133）。
 抽出結果の保存と採否 API は `services/candidate_service` が担う（Issue #134）。
 LearningItem → Exercise の契約・適用条件は `exercise` が担う（Issue #145）。
+vocabulary / expression の deterministic 生成は `exercise_generation` が担う
+（Issue #146）。
 SRS / UI は後続Issue。
 """
 

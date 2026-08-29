@@ -22,6 +22,7 @@ LearningItem
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Set
 from typing import Any, Literal, get_args
 
@@ -48,6 +49,9 @@ ExerciseSkipReason = Literal[
     "requires_semantic_grading",
     "existing_quiz_only",
     "insufficient_expression_tokens",
+    "inactive_item",
+    "insufficient_distractors",
+    "generation_not_implemented",
 ]
 
 MIN_CHOICE_OPTIONS = 2
@@ -55,6 +59,8 @@ MIN_CHOICE_OPTIONS = 2
 
 MIN_RECONSTRUCTION_TOKENS = 2
 """expression_reconstruction に必要な canonical_form のトークン数下限。"""
+
+_WHITESPACE_RE = re.compile(r"\s+")
 
 # 公開 DTO に混ぜてはいけない内部判定フィールド。
 _INTERNAL_ANSWER_FIELDS = frozenset(
@@ -165,6 +171,15 @@ class ExerciseSpec(BaseModel):
                 )
             if any(not option.strip() for option in self.options):
                 raise ValueError("choice の options に空文字は使えない")
+        elif self.response_kind == "reconstruction":
+            if self.options is not None:
+                if len(self.options) < MIN_RECONSTRUCTION_TOKENS:
+                    raise ValueError(
+                        f"reconstruction には {MIN_RECONSTRUCTION_TOKENS} 件以上の "
+                        "options（提示トークン）が必要"
+                    )
+                if any(not option.strip() for option in self.options):
+                    raise ValueError("reconstruction の options に空文字は使えない")
         elif self.options is not None:
             raise ValueError(
                 f"{self.response_kind} に options は不要: {self.exercise_type}"
@@ -239,6 +254,22 @@ def skill_direction_for(exercise_type: ExerciseType) -> SkillDirection:
 def response_kind_for(exercise_type: ExerciseType) -> ResponseKind:
     """ExerciseType に対する ResponseKind。常に一意。"""
     return EXERCISE_RESPONSE_KINDS[exercise_type]
+
+
+def tokenize_canonical_form(canonical_form: str) -> tuple[str, ...]:
+    """canonical_form を語 / まとまりへ分割する。
+
+    方針:
+      - Unicode whitespace で分割する
+      - apostrophe / elision（l'heure, d'accord, s'en, j'ai）は
+        1トークンのまま残す。whitespace 以外では切らない
+      - hyphen も分割しない（peut-être, n'est-ce）
+      - 空トークンは捨てる
+    """
+    stripped = canonical_form.strip()
+    if not stripped:
+        return ()
+    return tuple(token for token in _WHITESPACE_RE.split(stripped) if token)
 
 
 def conjugation_lemma(item: LearningItem) -> str:
@@ -404,6 +435,11 @@ def _skip_reason(
     *,
     known_conjugation_lemmas: Set[str] | None,
 ) -> tuple[ExerciseSkipReason, str] | None:
+    if item.status != "active":
+        return (
+            "inactive_item",
+            f"{item.status} の LearningItem は新規学習 Session の対象外",
+        )
     if exercise_type in _EXISTING_QUIZ_EXERCISE_TYPES:
         return (
             "existing_quiz_only",
@@ -436,7 +472,7 @@ def _skip_reason(
                 f"既存 verb_conjugation に接続できない lemma: {lemma}",
             )
     if exercise_type == "expression_reconstruction":
-        tokens = [token for token in item.canonical_form.split() if token]
+        tokens = tokenize_canonical_form(item.canonical_form)
         if len(tokens) < MIN_RECONSTRUCTION_TOKENS:
             return (
                 "insufficient_expression_tokens",
