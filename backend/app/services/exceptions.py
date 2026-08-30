@@ -79,6 +79,10 @@ class TutorMalformedAnswerError(TutorServiceError):
     """Exercise 回答の形が response_kind と合わない。"""
 
 
+class InvalidPracticeFilterError(TutorServiceError):
+    """source_id と item_ids の同時指定など、Practice Session 入力が不正。"""
+
+
 class ExtractionError(TutorServiceError):
     """Source からの学習候補抽出に失敗した。
 

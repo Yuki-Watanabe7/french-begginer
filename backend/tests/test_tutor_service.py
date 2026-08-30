@@ -109,6 +109,26 @@ def test_get_item_missing_raises_not_found(service: TutorService):
         service.get_item("missing-item")
 
 
+def test_list_items_returns_active_only(service: TutorService):
+    active = service.create_item(
+        item_type="vocabulary",
+        canonical_form="livre",
+        meaning_ja="本",
+    )
+    service.create_item(
+        item_type="vocabulary",
+        canonical_form="eau",
+        meaning_ja="水",
+        status="suspended",
+    )
+    listed = service.list_items()
+    assert [item.id for item in listed] == [active.id]
+
+
+def test_list_items_empty(service: TutorService):
+    assert service.list_items() == []
+
+
 def test_record_review_updates_event_state_and_schedule(
     store: TutorSqliteStore, service: TutorService
 ):

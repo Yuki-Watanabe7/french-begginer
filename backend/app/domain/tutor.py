@@ -33,6 +33,7 @@ vocabulary / expression の deterministic 生成は `exercise_generation` が担
 conjugation の既存動詞クイズ adapter は `conjugation_adapter` が担う（Issue #148）。
 Exercise の server-side 採点と LearningEvent 記録は `exercise_evaluation` /
 `exercise_service` が担う（Issue #149）。
+Practice Session の組み立ては `practice_session` が担う（Issue #150）。
 SRS / UI は後続Issue。
 """
 

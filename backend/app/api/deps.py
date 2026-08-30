@@ -15,6 +15,10 @@ from app.services.exercise_service import ExerciseService, build_exercise_servic
 from app.services.extraction_service import ExtractionService
 from app.services.extractors import LearningItemExtractor
 from app.services.openai_extractor import OpenAILearningItemExtractor
+from app.services.practice_session_service import (
+    PracticeSessionService,
+    build_practice_session_service,
+)
 from app.services.tutor_service import TutorService, build_tutor_service
 
 
@@ -51,3 +55,9 @@ def get_exercise_service(
     tutor: Annotated[TutorService, Depends(get_tutor_service)],
 ) -> ExerciseService:
     return build_exercise_service(store, tutor)
+
+
+def get_practice_session_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+) -> PracticeSessionService:
+    return build_practice_session_service(store)
