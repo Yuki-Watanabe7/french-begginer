@@ -16,6 +16,10 @@ from app.domain.candidate_normalization import (
     candidate_normalization_key,
     learning_item_normalization_key,
 )
+from app.domain.conjugation_adapter import (
+    conjugation_item_metadata,
+    merge_conjugation_item_metadata,
+)
 from app.domain.tutor import (
     EvidenceSpan,
     LearningItem,
@@ -277,6 +281,7 @@ class CandidateService:
             explanation_ja=candidate.explanation_ja,
             level=candidate.level,
             source_refs=[_source_ref_from_candidate(candidate)],
+            metadata=conjugation_item_metadata(candidate),
         )
 
     def _with_source_ref(
@@ -290,7 +295,8 @@ class CandidateService:
                 "source_refs": [
                     *item.source_refs,
                     _source_ref_from_candidate(candidate),
-                ]
+                ],
+                "metadata": merge_conjugation_item_metadata(item, candidate),
             }
         )
 

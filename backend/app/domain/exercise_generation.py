@@ -1,11 +1,12 @@
-"""LearningItem 向け deterministic Exercise 生成（Issue #146 / #147）。
+"""LearningItem 向け deterministic Exercise 生成（Issue #146 / #147 / #148）。
 
 accepted かつ active な LearningItem の確定済み情報と Source provenance から、
 LLM 再呼び出しなしで Exercise を組み立てる。出題のたびに問題と正解を
 LLM に作らせない。
 
 このモジュールが依存してよいのは Python 標準ライブラリ、Pydantic、
-`domain.tutor`、`domain.exercise` のみ。DB / FastAPI / OpenAI には依存しない。
+`domain.tutor`、`domain.exercise`、`domain.conjugation_adapter` のみ。
+DB / FastAPI / OpenAI には依存しない。
 
 同じ (item, exercise_type, seed, exercise_version, sources) からは
 同じ Exercise になる。正解は `ExerciseAnswerKey` に閉じ、
@@ -22,8 +23,9 @@ Phase 3 初期対象:
   - ja_to_fr（日本語意味 → canonical_form の production）
   - expression_reconstruction（expression の語順再構成）
   - source cloze（evidence_span から原文 slice を blank 化）
+  - verb_conjugation（既存 CONJUGATIONS への adapter。条件を満たす conjugation のみ）
 
-verb_conjugation adapter / HTTP API / Frontend / 回答送信は対象外。
+HTTP API / Frontend / 回答送信は対象外。
 fr_to_ja の日本語自由記述は meaning_ja との文字列一致で採点しない。
 cloze の正解は LLM の raw evidence text ではなく Source 本文の slice。
 """
@@ -40,6 +42,11 @@ from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from app.domain.conjugation_adapter import (
+    build_conjugation_prompt_material,
+    evaluate_conjugation_adapter,
+    pronouns_for,
+)
 from app.domain.exercise import (
     EXERCISE_VERSION,
     MIN_CHOICE_OPTIONS,
@@ -77,7 +84,7 @@ SUPPORTED_ITEM_EXERCISE_TYPES: dict[LearningItemType, tuple[ExerciseType, ...]] 
         "cloze",
     ),
     "grammar": ("cloze",),
-    "conjugation": ("cloze",),
+    "conjugation": ("verb_conjugation", "cloze"),
 }
 """item_type ごとにこの生成器が組み立てる形式。"""
 
@@ -100,6 +107,10 @@ _MEANING_RECOGNITION_PROMPT = (
 _JA_TO_FR_PROMPT = "次の意味をフランス語で書いてください。\n\n{meaning_ja}"
 _RECONSTRUCTION_PROMPT = "次の語を正しい順に並べて、表現を完成させてください。"
 _CLOZE_PROMPT = "次の空欄に入るフランス語を、原文のまま書いてください。\n\n{cloze_text}"
+_VERB_CONJUGATION_PROMPT = (
+    "次の動詞を、指定された時制・主語で活用してください。\n\n"
+    "動詞: {verb}\n時制: {tense}\n主語: {pronoun}"
+)
 _SENTENCE_BREAK_RE = re.compile(r"(?:[.!?…]+\s+|\n+)")
 _SENTENCE_END_RE = re.compile(r"[.!?…]+|\n")
 
@@ -196,6 +207,8 @@ def generate_exercise(
             metadata,
             cloze_context_max_chars=cloze_context_max_chars,
         )
+    if exercise_type == "verb_conjugation":
+        return _generate_verb_conjugation(item, rng, metadata)
     return _skipped(
         exercise_type,
         "generation_not_implemented",
@@ -352,6 +365,54 @@ def _generate_expression_reconstruction(
     return _generated(
         spec,
         ExerciseAnswerKey(expected_answers=(" ".join(tokens),)),
+    )
+
+
+def _generate_verb_conjugation(
+    item: LearningItem,
+    rng: random.Random,
+    metadata: dict[str, Any],
+) -> ExerciseGenerationResult:
+    target, skip = evaluate_conjugation_adapter(item)
+    if target is None or skip is not None:
+        reason, detail = skip or (
+            "unknown_conjugation_lemma",
+            "conjugation adapter の対象を解決できない",
+        )
+        return _skipped("verb_conjugation", reason, detail)
+    pronouns = pronouns_for(target.lemma, target.tense)
+    if not pronouns:
+        return _skipped(
+            "verb_conjugation",
+            "unsupported_conjugation_tense",
+            f"既存 domain に pronoun がない: {target.lemma}/{target.tense}",
+        )
+    pronoun = pronouns[rng.randrange(len(pronouns))]
+    material = build_conjugation_prompt_material(target, pronoun)
+    if material is None:
+        return _skipped(
+            "verb_conjugation",
+            "unsupported_conjugation_tense",
+            f"既存 domain に正解がない: {target.lemma}/{target.tense}/{pronoun}",
+        )
+    spec = make_exercise_spec(
+        item,
+        "verb_conjugation",
+        prompt=_VERB_CONJUGATION_PROMPT.format(
+            verb=material.lemma,
+            tense=material.tense,
+            pronoun=material.pronoun,
+        ),
+        metadata={
+            **metadata,
+            "verb": material.lemma,
+            "tense": material.tense,
+            "pronoun": material.pronoun,
+        },
+    )
+    return _generated(
+        spec,
+        ExerciseAnswerKey(expected_answers=(material.expected,)),
     )
 
 

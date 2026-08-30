@@ -312,3 +312,65 @@ def test_extract_merges_duplicates_from_fake_llm_response():
     assert result.candidates[0].confidence == 0.95
     assert result.exclusions[0].reason == "duplicate"
     assert result.candidates[0].metadata["normalization_key"]
+
+
+def test_extract_copies_conjugation_tense_and_mood():
+    fake = FakeLearningItemExtractor(
+        result=_result(
+            (
+                _extracted(
+                    item_type="conjugation",
+                    canonical_form="parler",
+                    meaning_ja="話す",
+                    fragment="changer",
+                    tense="présent",
+                    mood="indicatif",
+                    confidence=0.8,
+                ),
+            )
+        )
+    )
+    result = ExtractionService(fake).extract(_source())
+    candidate = result.candidates[0]
+    assert candidate.item_type == "conjugation"
+    assert candidate.metadata["lemma"] == "parler"
+    assert candidate.metadata["tense"] == "présent"
+    assert candidate.metadata["mood"] == "indicatif"
+
+
+def test_extract_drops_unknown_conjugation_tense():
+    fake = FakeLearningItemExtractor(
+        result=_result(
+            (
+                _extracted(
+                    item_type="conjugation",
+                    canonical_form="parler",
+                    meaning_ja="話す",
+                    fragment="changer",
+                    tense="not-a-tense",
+                ),
+            )
+        )
+    )
+    result = ExtractionService(fake).extract(_source())
+    candidate = result.candidates[0]
+    assert candidate.metadata["lemma"] == "parler"
+    assert "tense" not in candidate.metadata
+
+
+def test_extract_does_not_copy_tense_for_non_conjugation():
+    fake = FakeLearningItemExtractor(
+        result=_result(
+            (
+                _extracted(
+                    item_type="vocabulary",
+                    canonical_form="stratégie",
+                    meaning_ja="戦略",
+                    fragment="stratégie",
+                    tense="présent",
+                ),
+            )
+        )
+    )
+    result = ExtractionService(fake).extract(_source())
+    assert "tense" not in result.candidates[0].metadata

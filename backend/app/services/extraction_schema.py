@@ -39,8 +39,22 @@ class ExtractedCandidate(BaseModel):
     meaning_ja: str = Field(min_length=1)
     explanation_ja: str | None = None
     level: CefrLevel | None = None
+    tense: str | None = None
+    mood: str | None = None
     evidence_span: ExtractedEvidenceSpan
     confidence: float = Field(ge=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _blank_grammar_labels_are_none(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        updated = dict(data)
+        for key in ("tense", "mood"):
+            value = updated.get(key)
+            if isinstance(value, str):
+                updated[key] = value.strip() or None
+        return updated
 
 
 class ExtractionLlmOutput(BaseModel):

@@ -3,7 +3,8 @@
 LLM 出力の後ろに置く deterministic な防波堤。embedding / vector DB には
 依存しない。同じ入力からは常に同じ結果になる。
 
-このモジュールが依存してよいのは Python 標準ライブラリと domain.tutor のみ。
+このモジュールが依存してよいのは Python 標準ライブラリと domain.tutor、
+conjugation adapter のラベル正規化のみ。
 
 ## whitespace / Unicode 方針
 
@@ -40,6 +41,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from app.domain.conjugation_adapter import conjugation_candidate_metadata
 from app.domain.tutor import (
     EvidenceSpan,
     LearningItem,
@@ -212,7 +214,12 @@ def _normalize_one(
         "normalization_version": NORMALIZATION_VERSION,
     }
     if candidate.item_type == "conjugation":
-        metadata["lemma"] = canonical_form
+        metadata = conjugation_candidate_metadata(
+            lemma=canonical_form,
+            tense=_nonempty_metadata_string(candidate.metadata.get("tense")),
+            mood=_nonempty_metadata_string(candidate.metadata.get("mood")),
+            extra=metadata,
+        )
 
     return candidate.model_copy(
         update={
@@ -300,6 +307,13 @@ def _confidence_value(candidate: LearningItemCandidate) -> float:
     if candidate.confidence is None:
         return -1.0
     return candidate.confidence
+
+
+def _nonempty_metadata_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def _nfc(value: str) -> str:

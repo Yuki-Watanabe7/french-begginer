@@ -133,7 +133,11 @@ def test_eligible_exercises_by_item_type_are_deterministic(
         canonical_form=canonical_form,
         meaning_ja="意味",
         with_evidence=True,
-        metadata={"lemma": canonical_form} if item_type == "conjugation" else {},
+        metadata=(
+            {"lemma": canonical_form, "tense": "présent"}
+            if item_type == "conjugation"
+            else {}
+        ),
     )
     first = eligible_exercise_types(item)
     second = eligible_exercise_types(item)
@@ -159,7 +163,7 @@ def test_verb_conjugation_is_skipped_for_unknown_lemma():
         canonical_form="changer",
         meaning_ja="変える",
         with_evidence=True,
-        metadata={"lemma": "changer"},
+        metadata={"lemma": "changer", "tense": "présent"},
     )
     assert "changer" not in CONJUGATIONS
     types = eligible_exercise_types(item)
@@ -168,13 +172,42 @@ def test_verb_conjugation_is_skipped_for_unknown_lemma():
     assert skipped.skip_reason == "unknown_conjugation_lemma"
 
 
-def test_verb_conjugation_is_eligible_when_lemma_is_in_existing_dataset():
+def test_verb_conjugation_is_skipped_when_tense_metadata_is_missing():
     item = _item(
         item_type="conjugation",
         canonical_form="être",
         meaning_ja="〜である",
         with_evidence=True,
         metadata={"lemma": "être"},
+    )
+    assert "être" in CONJUGATIONS
+    types = eligible_exercise_types(item)
+    assert types == ("cloze",)
+    skipped = evaluate_exercise_eligibility(item, "verb_conjugation")
+    assert skipped.skip_reason == "missing_conjugation_tense"
+
+
+def test_verb_conjugation_is_skipped_for_unsupported_tense():
+    item = _item(
+        item_type="conjugation",
+        canonical_form="parler",
+        meaning_ja="話す",
+        with_evidence=True,
+        metadata={"lemma": "parler", "tense": "imparfait"},
+    )
+    types = eligible_exercise_types(item)
+    assert types == ("cloze",)
+    skipped = evaluate_exercise_eligibility(item, "verb_conjugation")
+    assert skipped.skip_reason == "unsupported_conjugation_tense"
+
+
+def test_verb_conjugation_is_eligible_when_lemma_and_present_are_in_existing_dataset():
+    item = _item(
+        item_type="conjugation",
+        canonical_form="être",
+        meaning_ja="〜である",
+        with_evidence=True,
+        metadata={"lemma": "être", "tense": "présent"},
     )
     assert "être" in CONJUGATIONS
     assert "verb_conjugation" in eligible_exercise_types(item)

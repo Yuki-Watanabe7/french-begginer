@@ -46,7 +46,8 @@ backend/app/
 │   ├── review_scheduler.py  # 初期復習間隔の算出
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 │   ├── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
-│   └── exercise_generation.py  # LearningItemからのdeterministic Exercise生成（vocab/expression/cloze）
+│   ├── exercise_generation.py  # LearningItemからのdeterministic Exercise生成（vocab/expression/cloze/conjugation adapter）
+│   └── conjugation_adapter.py  # conjugation Item→既存動詞活用への安全な接続
 ├── evaluation/    # LLM抽出の固定fixtureと品質チェック（Issue #136）
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）

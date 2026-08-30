@@ -18,7 +18,8 @@ LLM抽出品質の固定 fixture・評価ハーネス（Issue #136）、
 Phase 2 vertical slice と Exit Criteria（Issue #137）、
 および Phase 3 の LearningItem → Exercise 契約（Issue #145）、
 vocabulary / expression 向け deterministic Exercise 生成（Issue #146）、
-Source evidence からの cloze Exercise 生成（Issue #147）
+Source evidence からの cloze Exercise 生成（Issue #147）、
+conjugation LearningItem の既存動詞活用 adapter（Issue #148）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -54,6 +55,8 @@ Source evidence からの cloze Exercise 生成（Issue #147）
 - Exercise 生成: `backend/app/domain/exercise_generation.py`
   / `backend/tests/test_exercise_generation.py`
   / `backend/tests/test_exercise_cloze.py`
+- conjugation adapter: `backend/app/domain/conjugation_adapter.py`
+  / `backend/tests/test_exercise_conjugation_adapter.py`
 
 ## 目指す学習ループ
 
@@ -274,8 +277,9 @@ Phase 0 の API が quiz 回答を Tutor 履歴へ書き込むことはない。
 Phase 3 では Tutor layer から既存 quiz へ委譲する境界だけを定義し、
 既存クイズの全面刷新はしない。`noun_gender` / `noun_article` は
 既存クイズ専用のまま LearningItem から新規生成しない。
-`verb_conjugation` は lemma が `CONJUGATIONS` にある conjugation item に
-限って既存実装へ委譲できる。
+`verb_conjugation` は lemma が `CONJUGATIONS` にあり、かつ
+`metadata.tense` が既存実装の対応時制と一致する conjugation item に
+限って既存実装へ委譲できる。tense 欠落を présent とみなさない。
 
 Phase 0時点では `backend/app/domain/conjugation.py` /
 `backend/app/domain/noun.py` に一切変更を加えていない（破壊的変更なし）。
@@ -741,7 +745,7 @@ embedding / vector DB には依存しない。
 | vocabulary | 文末記号、またはトークン数が 3 を超える文脈付き断片は除外（`pomme de terre` は許容） |
 | expression | 再利用可能な表記へ空白・引用符を揃える。活用形から原形への変換はしない |
 | grammar | 共通規則のみ |
-| conjugation | 正規化後の canonical_form を `metadata.lemma` に載せる。tense は未抽出なら載せない |
+| conjugation | 正規化後の canonical_form を `metadata.lemma` に載せる。tense / mood は許可リスト内のときだけ載せ、未知の自由文字列は捨てる。未抽出なら載せない |
 
 ### 重複統合と既存 LearningItem
 
@@ -1022,10 +1026,10 @@ Phase 3 では accepted `LearningItem` を実際の Exercise へ接続する。
 Issue #145 で契約・適用条件・skill direction を定義した。
 Issue #146 で vocabulary / expression の deterministic な基本 Exercise
 生成を追加した。Issue #147 で Source evidence からの cloze 生成を追加した。
+Issue #148 で conjugation を既存動詞活用へ安全に接続する adapter を追加した。
 Phase 2 では LearningItem を作れるところまでで止め、
 以下はまだ行わない。
 
-- conjugation adapter の生成
 - HTTP API / Frontend
 - LearningEvent の自動記録
 - 自動学習開始
@@ -1086,7 +1090,7 @@ ValidationError。Frontend へ返すときは必ず `to_public_exercise` を通�
 | `ja_to_fr` | Tutor | canonical_form との照合が可能な production |
 | `cloze` | Tutor | source cloze。evidence があるときだけ |
 | `expression_reconstruction` | Roadmap の expression 再構成。cloze とは別型 | 複数トークンの expression のみ |
-| `verb_conjugation` | 既存動詞クイズ | lemma が `CONJUGATIONS` にある conjugation のみ委譲 |
+| `verb_conjugation` | 既存動詞クイズ | lemma が `CONJUGATIONS` にあり、`metadata.tense` が既存時制と一致する conjugation のみ委譲 |
 | `noun_gender` | 既存名詞クイズ | LearningItem から新規生成しない |
 | `noun_article` | 既存冠詞クイズ | LearningItem から新規生成しない |
 
@@ -1122,7 +1126,7 @@ Phase 0 と同様、`LearnerState.by_direction` の更新はこの Issue では�
 | vocabulary | meaning_recognition / ja_to_fr / source cloze | cloze は evidence_span 付き source_ref |
 | expression | meaning_recognition / ja_to_fr / reconstruction / source cloze | reconstruction は複数トークン。cloze は evidence |
 | grammar | meaning_recognition / source cloze | cloze は evidence。文法選択問題は作らない |
-| conjugation | source cloze / 条件付き verb_conjugation | cloze は evidence。verb_conjugation は lemma が `CONJUGATIONS` にあること |
+| conjugation | source cloze / 条件付き verb_conjugation | cloze は evidence。verb_conjugation は lemma が `CONJUGATIONS` にあり、tense が既存実装と一致すること。tense 欠落は présent 扱いしない |
 
 skip 理由:
 
@@ -1135,6 +1139,9 @@ skip 理由:
 | `evidence_span_empty` | 再構成結果が空または whitespace のみ |
 | `context_unavailable` | blank 前後の context を十分な長さで切り出せない |
 | `unknown_conjugation_lemma` | 既存動詞データに接続できない |
+| `missing_conjugation_tense` | conjugation adapter に必要な tense metadata が無い |
+| `unsupported_conjugation_tense` | tense はあるが既存 CONJUGATIONS の対応範囲外 |
+| `unsupported_conjugation_mood` | mood があるが既存実装（indicatif）と一致しない |
 | `requires_semantic_grading` | 日本語自由記述の意味判定が必要（fr_to_ja） |
 | `existing_quiz_only` | 既存クイズ専用（noun_gender / noun_article） |
 | `insufficient_expression_tokens` | 再構成できない短い expression |
@@ -1159,8 +1166,9 @@ metadata 不足の Exercise を無理に生成しない。
 ### 既存クイズとの関係
 
 既存の動詞・名詞・冠詞クイズ実装（`conjugation.py` / `noun.py` と quiz API）は
-変更しない。Tutor は eligibility を見て、条件を満たす conjugation だけ
-既存 `verb_conjugation` へ委譲できる、という境界を置いただけである。
+変更しない。Tutor は eligibility を見て、lemma と tense が既存 domain と
+一致する conjugation だけ既存 `verb_conjugation` へ委譲する。
+LLM が「現在形だから既存 quiz へ流してよい」と最終判断しない。
 
 Exercise 生成 API はまだ公開しない（Phase 2 の
 `test_phase2_does_not_expose_exercise_generation_endpoints` を維持）。
@@ -1178,7 +1186,6 @@ Exercise 生成 API はまだ公開しない（Phase 2 の
 
 - HTTP API と Frontend
 - renderer / evaluator の本実装（回答送信）
-- conjugation adapter
 - by_direction の更新
 - due review session（Phase 4）
 
@@ -1241,8 +1248,9 @@ FR→JA 方向は `meaning_recognition` が担う。
 - unsupported / 材料不足は例外で全体停止せず、skip reason を返す
 - 同じ Item + seed / version から同じ Exercise を生成できる
 - 正解は public DTO に含めない
-- grammar の meaning_recognition、conjugation adapter は対象外
+- grammar の meaning_recognition は対象外（この Issue）
 - source cloze は Issue #147
+- conjugation の既存動詞 adapter は Issue #148
 
 | 観点 | 自動テスト |
 |------|------------|
@@ -1340,6 +1348,78 @@ valid な別 ref があればそちらを使う。
 | apostrophe / Unicode / 改行 | `test_cloze_preserves_apostrophe_unicode_and_newlines` |
 | SourceRef なしの skip | `test_cloze_skips_item_without_source_ref` |
 | Source 不存在 / 空 evidence / context 不能 | `test_cloze_skips_missing_source_document` / `test_cloze_skips_whitespace_only_evidence` / `test_cloze_skips_when_context_cannot_be_built` |
+
+## Phase 3 — conjugation の既存動詞活用 adapter（Issue #148）
+
+`conjugation` LearningItem を、既存の動詞活用データ・問題生成・正解判定へ
+安全に接続する。既存クイズをコピーして別実装を作らず、adapter として再利用する。
+metadata 不足や時制不一致のときに誤った問題を生成しない。
+
+```text
+conjugation item
+  -> lemma 特定 + CONJUGATIONS に動詞がある
+  -> metadata.tense が明示され、既存実装の時制と一致する
+  -> 既存 pronoun 集合から seed 付きで1つ選ぶ
+  -> get_correct_answer で正解を取る
+  -> 条件を満たさなければ verb_conjugation を出さず、source cloze へ fallback
+```
+
+実装は `backend/app/domain/conjugation_adapter.py`。生成は
+`exercise_generation.py` の verb_conjugation 経路。既存 `conjugation.py` の
+活用データは複製しない。HTTP API / Frontend は公開しない。
+
+### adapter eligibility
+
+次をすべて満たすときだけ `verb_conjugation` を生成する。
+
+- lemma が特定できる（`metadata.lemma` 優先、なければ `canonical_form`）
+- 既存 `CONJUGATIONS` にその動詞がある
+- `metadata.tense` が明示されている
+- その tense が `CONJUGATIONS[lemma]` のキーと一致する
+- `metadata.mood` がある場合は `indicatif` のみ許可
+
+満たさない場合の skip reason:
+
+| skip_reason | 条件 |
+|------------|------|
+| `unknown_conjugation_lemma` | lemma が既存動詞データにない |
+| `missing_conjugation_tense` | tense metadata が無い。présent を補完しない |
+| `unsupported_conjugation_tense` | tense はあるが既存実装の対応範囲外（例: imparfait） |
+| `unsupported_conjugation_mood` | mood が indicatif 以外 |
+
+adapter 対象外でも LearningItem 自体は無効にしない。source cloze が
+出せるならそちらへ fallback する。
+
+### metadata
+
+安全な判定のため、extraction / normalization / accept で最小限の
+grammar metadata を載せる。
+
+| フィールド | 永続化する値 | 備考 |
+|------------|--------------|------|
+| `lemma` | 正規化後の canonical_form | conjugation では必須相当 |
+| `tense` | `présent` / `imparfait` / `futur` / `passé composé` | 許可リスト外は捨てる |
+| `mood` | `indicatif` / `subjonctif` / `conditionnel` / `impératif` | 任意。許可リスト外は捨てる |
+
+LLM が tense を返しても、adapter 可否の最終判断は metadata +
+`CONJUGATIONS` lookup だけが行う。既存 Candidate / LearningItem との
+後方互換を保つ（tense 欠落の Item は cloze のみ）。
+
+### 既存 domain の再利用
+
+- 正解は `get_correct_answer(verb, tense, pronoun)` から取る
+- pronoun は `CONJUGATIONS[lemma][tense]` のキー順を再利用する
+- 既存 quiz API / `conjugation.py` のデータ辞書は変更しない
+
+| 観点 | 自動テスト |
+|------|------------|
+| 既存対応動詞 + present | `test_adapter_is_eligible_for_known_verb_and_present` |
+| 未対応 lemma | `test_adapter_skips_unknown_lemma` |
+| tense 不一致 | `test_adapter_skips_tense_mismatch` |
+| metadata 欠落を present 扱いしない | `test_adapter_does_not_default_missing_tense_to_present` |
+| adapter 正解が既存 domain と一致 | `test_adapter_answer_matches_existing_domain` |
+| source cloze fallback | `test_source_cloze_fallback_when_adapter_is_ineligible` |
+| 活用データを複製しない | `test_adapter_does_not_copy_conjugation_tables` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 

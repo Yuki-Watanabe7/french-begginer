@@ -6,7 +6,7 @@ prompt を変えるときは EXTRACTION_VERSION を更新し、Candidate と結�
 
 from app.domain.tutor import SourceDocument
 
-EXTRACTION_VERSION = "extract-v1"
+EXTRACTION_VERSION = "extract-v2"
 OPENAI_PROVIDER = "openai"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 MAX_CANDIDATES = 20
@@ -19,7 +19,7 @@ EXTRACTION_SYSTEM_PROMPT = f"""\
 - vocabulary: 語彙（単語・短い語）
 - expression: 再利用価値の高い句・表現
 - grammar: 文法事項
-- conjugation: 動詞活用に関する学習対象
+- conjugation: 動詞活用に関する学習対象。canonical_form は不定詞（lemma）
 
 各候補には必ず次を含めてください。
 - item_type
@@ -27,6 +27,11 @@ EXTRACTION_SYSTEM_PROMPT = f"""\
 - meaning_ja: 日本語の意味
 - explanation_ja: 任意。短い日本語の説明
 - level: 任意。A1 / A2 / B1 / B2 / C1 / C2 のいずれか
+- tense: conjugation のみ任意。根拠から時制が明確なときだけ
+  présent / imparfait / futur / passé composé を付ける。不明なら省略する。
+  現在形と決めつけない。
+- mood: conjugation のみ任意。根拠から法が明確なときだけ
+  indicatif / subjonctif / conditionnel / impératif を付ける。不明なら省略する。
 - evidence_span.start / evidence_span.end: 本文に対する 0-based の文字オフセット。
   Python の content[start:end] で根拠断片が切り出せること。バイトオフセットは使わない。
 - confidence: 0.0 以上 1.0 以下

@@ -30,6 +30,7 @@ Candidate の evidence 検証・正規化・重複統合は
 LearningItem → Exercise の契約・適用条件は `exercise` が担う（Issue #145）。
 vocabulary / expression の deterministic 生成は `exercise_generation` が担う
 （Issue #146）。Source evidence からの cloze 生成も同モジュール（Issue #147）。
+conjugation の既存動詞クイズ adapter は `conjugation_adapter` が担う（Issue #148）。
 SRS / UI は後続Issue。
 """
 
