@@ -7,7 +7,7 @@ LearningEvent（Issue #149）とする。
 
 このモジュールが依存してよいのは Python 標準ライブラリ、Pydantic、
 `domain.tutor`、`domain.exercise`、`domain.exercise_generation` のみ。
-DB / FastAPI / OpenAI には依存しない。
+CONJUGATIONS（動詞活用表）は参照しない。DB / FastAPI / OpenAI には依存しない。
 
 ```text
 active LearningItems
