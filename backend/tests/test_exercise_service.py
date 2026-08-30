@@ -1,6 +1,6 @@
 """ExerciseService（Issue #149）のユースケーステスト。"""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -57,7 +57,8 @@ def test_correct_and_incorrect_each_append_one_event_and_update_state(
     items = _vocab_pool(store)
     target = items[0]
 
-    correct = exercises.submit_answer(target.id, "ja_to_fr", "livre")
+    later = NOW + timedelta(seconds=1)
+    correct = exercises.submit_answer(target.id, "ja_to_fr", "livre", occurred_at=NOW)
     assert correct.evaluation.correct is True
     assert correct.learner_state.attempt_count == 1
     assert correct.learner_state.correct_count == 1
@@ -67,7 +68,7 @@ def test_correct_and_incorrect_each_append_one_event_and_update_state(
     assert correct.event.metadata["generation_method"] == "deterministic"
     assert correct.event.exercise_type == "ja_to_fr"
 
-    wrong = exercises.submit_answer(target.id, "ja_to_fr", "maison")
+    wrong = exercises.submit_answer(target.id, "ja_to_fr", "maison", occurred_at=later)
     assert wrong.evaluation.correct is False
     assert wrong.learner_state.attempt_count == 2
     assert wrong.learner_state.correct_count == 1
