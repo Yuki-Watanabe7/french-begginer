@@ -186,8 +186,9 @@ backend/app/
 > Phase 2 の Source → Candidate → LearningItem vertical slice は
 > `backend/tests/test_tutor_phase2_vertical_slice.py` と
 > `frontend/src/test/TutorPhase2Flow.test.tsx` で統合テストする。
-> Phase 3 の Practice Session UI は
-> `frontend/src/test/PracticeSessionFlow.test.tsx` で統合テストする。
+> Phase 3 の Source → LearningItem → Practice → LearningEvent vertical slice は
+> `backend/tests/test_tutor_phase3_vertical_slice.py` と
+> `frontend/src/test/TutorPhase3Flow.test.tsx` で統合テストする。
 
 ## 動詞データ管理方針
 
