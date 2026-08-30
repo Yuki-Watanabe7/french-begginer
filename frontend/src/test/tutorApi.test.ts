@@ -2,13 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   ApiError,
   acceptCandidate,
+  createPracticeSession,
   createTutorSource,
   extractCandidates,
   fetchCandidates,
+  fetchTutorItem,
+  fetchTutorItems,
   fetchTutorSource,
   fetchTutorSources,
   isNotFoundError,
   rejectCandidate,
+  submitExerciseAnswer,
 } from '../api/tutor'
 import { checkAnswer, fetchNextQuestion } from '../api/client'
 import type { SourceDocument, SourceSummary } from '../types'
@@ -272,5 +276,159 @@ describe('acceptCandidate / rejectCandidate', () => {
       name: 'ApiError',
       status: 503,
     })
+  })
+})
+
+const EXERCISE = {
+  learning_item_id: 'item-1',
+  exercise_type: 'meaning_recognition',
+  skill_direction: 'recognition',
+  prompt: '次のフランス語の意味を選んでください。\n\nlivre',
+  response_kind: 'choice',
+  options: ['本', '家', '猫', '犬'],
+  source_context: null,
+  exercise_version: 'exercise-v1',
+}
+
+const SESSION = {
+  session_id: 'sess-1',
+  exercises: [EXERCISE],
+  skipped_items: [],
+  requested_count: 5,
+  generated_count: 1,
+}
+
+const ITEM = {
+  id: 'item-1',
+  item_type: 'vocabulary',
+  canonical_form: 'livre',
+  meaning_ja: '本',
+  explanation_ja: null,
+  level: 'A1',
+  source_refs: [],
+  created_at: '2026-08-24T12:00:00+00:00',
+  status: 'active',
+}
+
+describe('createPracticeSession', () => {
+  it('POST /api/tutor/practice/sessions に source_id / question_count を送る', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(SESSION))
+
+    const result = await createPracticeSession({ source_id: 'src-1', question_count: 5 })
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith('/api/tutor/practice/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_id: 'src-1', question_count: 5 }),
+    })
+    expect(result).toEqual(SESSION)
+    expect(result.exercises[0]).not.toHaveProperty('correct_answer')
+  })
+
+  it('未指定フィールドは body に載せない', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(SESSION))
+
+    await createPracticeSession()
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      '/api/tutor/practice/sessions',
+      expect.objectContaining({ body: JSON.stringify({}) }),
+    )
+  })
+})
+
+describe('submitExerciseAnswer', () => {
+  it('POST .../exercises/:type/answer に answer を送り、正解は回答後のみ返す', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse(
+        {
+          correct: true,
+          correct_answer: '本',
+          given: '本',
+          explanation_ja: '本のこと',
+          source_context: null,
+        },
+        201,
+      ),
+    )
+
+    const itemId = 'item/あ'
+    const result = await submitExerciseAnswer(itemId, 'meaning_recognition', '本', {
+      id: 'evt-1',
+    })
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      `/api/tutor/items/${encodeURIComponent(itemId)}/exercises/meaning_recognition/answer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer: '本', id: 'evt-1' }),
+      },
+    )
+    expect(result.correct).toBe(true)
+    expect(result.correct_answer).toBe('本')
+    expect(result.explanation_ja).toBe('本のこと')
+  })
+
+  it('reconstruction は token 配列を送る', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse(
+        {
+          correct: true,
+          correct_answer: 'se rendre compte de',
+          given: ['se', 'rendre', 'compte', 'de'],
+        },
+        201,
+      ),
+    )
+
+    await submitExerciseAnswer('item-1', 'expression_reconstruction', [
+      'se',
+      'rendre',
+      'compte',
+      'de',
+    ])
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      '/api/tutor/items/item-1/exercises/expression_reconstruction/answer',
+      expect.objectContaining({
+        body: JSON.stringify({ answer: ['se', 'rendre', 'compte', 'de'] }),
+      }),
+    )
+  })
+
+  it('non-2xx は成功値として返さない', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse({ detail: 'boom' }, 500),
+    )
+
+    await expect(
+      submitExerciseAnswer('item-1', 'ja_to_fr', 'livre'),
+    ).rejects.toMatchObject({ name: 'ApiError', status: 500 })
+  })
+})
+
+describe('fetchTutorItems / fetchTutorItem', () => {
+  it('GET /api/tutor/items を呼ぶ', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse([ITEM]))
+
+    const rows = await fetchTutorItems({ limit: 20 })
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith('/api/tutor/items?limit=20')
+    expect(rows).toEqual([ITEM])
+  })
+
+  it('item id を encode して詳細の item を返す', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse({ item: ITEM, learner_state: null, review_schedule: null }),
+    )
+
+    const itemId = 'item/あ'
+    const item = await fetchTutorItem(itemId)
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      `/api/tutor/items/${encodeURIComponent(itemId)}`,
+    )
+    expect(item).toEqual(ITEM)
   })
 })

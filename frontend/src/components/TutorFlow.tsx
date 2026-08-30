@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { PracticeSessionFlow } from './PracticeSessionFlow'
+import { QuizSettings } from './QuizSettings'
 import { TutorSourceDetail } from './TutorSourceDetail'
 import { TutorSourceForm } from './TutorSourceForm'
 import { TutorSourceList } from './TutorSourceList'
 import type { SourceDocument } from '../types'
 
-type TutorView = 'list' | 'form' | 'detail'
+type TutorView = 'list' | 'form' | 'detail' | 'practice-settings' | 'practice'
 
 interface Props {
   onBack: () => void
@@ -15,6 +17,8 @@ export function TutorFlow({ onBack }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [savedSource, setSavedSource] = useState<SourceDocument | null>(null)
   const [justSaved, setJustSaved] = useState(false)
+  const [practiceSourceId, setPracticeSourceId] = useState<string | undefined>(undefined)
+  const [questionCount, setQuestionCount] = useState(5)
 
   const openList = () => {
     setJustSaved(false)
@@ -36,6 +40,19 @@ export function TutorFlow({ onBack }: Props) {
     setView('detail')
   }
 
+  const openPracticeSettings = (sourceId?: string) => {
+    setPracticeSourceId(sourceId)
+    setView('practice-settings')
+  }
+
+  const backFromPractice = () => {
+    if (practiceSourceId && selectedId) {
+      setView('detail')
+      return
+    }
+    setView('list')
+  }
+
   if (view === 'form') {
     return (
       <TutorSourceForm
@@ -53,6 +70,29 @@ export function TutorFlow({ onBack }: Props) {
         justSaved={justSaved}
         onBackToList={openList}
         onAddAnother={openForm}
+        onStartPractice={() => openPracticeSettings(selectedId)}
+      />
+    )
+  }
+
+  if (view === 'practice-settings') {
+    return (
+      <QuizSettings
+        onStart={size => {
+          setQuestionCount(size)
+          setView('practice')
+        }}
+        onBack={backFromPractice}
+      />
+    )
+  }
+
+  if (view === 'practice') {
+    return (
+      <PracticeSessionFlow
+        sourceId={practiceSourceId}
+        questionCount={questionCount}
+        onExit={backFromPractice}
       />
     )
   }
@@ -62,6 +102,7 @@ export function TutorFlow({ onBack }: Props) {
       onSelect={sourceId => openDetail(sourceId)}
       onAdd={openForm}
       onBack={onBack}
+      onStartPractice={() => openPracticeSettings()}
     />
   )
 }

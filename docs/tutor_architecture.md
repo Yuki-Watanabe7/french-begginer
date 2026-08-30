@@ -21,7 +21,8 @@ vocabulary / expression 向け deterministic Exercise 生成（Issue #146）、
 Source evidence からの cloze Exercise 生成（Issue #147）、
 conjugation LearningItem の既存動詞活用 adapter（Issue #148）、
 Exercise の server-side 採点と LearningEvent 記録（Issue #149）、
-accepted LearningItem からの Practice Session 組み立て（Issue #150）
+accepted LearningItem からの Practice Session 組み立て（Issue #150）、
+Tutor Practice Session の Frontend UI と TTS/feedback（Issue #151）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -69,6 +70,11 @@ accepted LearningItem からの Practice Session 組み立て（Issue #150）
   / `backend/tests/test_practice_session.py`
   / `backend/tests/test_practice_session_service.py`
   / `backend/tests/test_practice_session_api.py`
+- Practice Session UI: `frontend/src/hooks/usePracticeSession.ts`
+  / `frontend/src/components/PracticeSessionFlow.tsx`
+  / `frontend/src/components/PracticeExerciseCard.tsx`
+  / `frontend/src/test/PracticeSessionFlow.test.tsx`
+  / `frontend/src/test/PracticeExerciseCard.test.tsx`
 
 ## 目指す学習ループ
 
@@ -1041,11 +1047,11 @@ Issue #146 で vocabulary / expression の deterministic な基本 Exercise
 Issue #148 で conjugation を既存動詞活用へ安全に接続する adapter を追加した。
 Issue #149 で Exercise の server-side 採点と LearningEvent 記録 API を追加した。
 Issue #150 で accepted LearningItem から手動開始できる Practice Session を
-組み立てる API を追加した。
+組み立てる API を追加した。Issue #151 で Frontend から解ける Practice
+Session UI を追加した。
 Phase 2 では LearningItem を作れるところまでで止め、
 以下はまだ行わない。
 
-- Frontend session UI
 - 自動学習開始
 - long-term review UI
 - Tutor recommendation
@@ -1197,9 +1203,8 @@ generic な `/api/tutor/exercises` 等を禁止したまま維持する。
 | domain が FastAPI / SQLAlchemy / OpenAI 非依存 | `test_domain_module_does_not_depend_on_fastapi_sqlalchemy_or_openai` |
 | exercise_version を LearningEvent で追跡できる | `test_learning_event_can_track_exercise_version` |
 
-### Phase 3 の残り（#145〜#150 のスコープ外）
+### Phase 3 の残り（#145〜#151 のスコープ外）
 
-- Frontend session UI（Issue #151）
 - by_direction の更新
 - due review session（Phase 4）
 
@@ -1462,7 +1467,7 @@ GET Exercise（PublicExercise。正解なし）
 - HTTP: `GET/POST /api/tutor/items/{item_id}/exercises/{exercise_type}`
 - 記録は既存 `TutorService.record_review` を再利用する
 
-Frontend session UI は対象外。LLM semantic grading は行わない。
+Frontend session UI は Issue #151。LLM semantic grading は行わない。
 
 ### エンドポイント
 
@@ -1616,6 +1621,42 @@ due_at / overdue / lapse / mastery / recognition-production imbalance では
 | seed 固定 | `test_same_seed_is_deterministic` / `test_practice_session_seed_is_deterministic` |
 | 0件 | `test_empty_items_returns_empty_session` / `test_practice_session_zero_items` |
 | due を先取りしない | `test_selection_policy_does_not_use_due_or_review_schedule` |
+
+## Phase 3 — Practice Session Frontend UI（Issue #151）
+
+Issue #150 の Session を Frontend から解けるようにする。
+Candidate 未採用のまま Exercise には進まない。Session 自体は
+永続化せず、回答は既存の Exercise 採点 API（Issue #149）へ送る。
+
+```text
+Tutor / Source詳細
+  -> 「学習する」
+  -> 出題数選択
+  -> Practice Session 開始
+  -> 問題表示
+  -> 回答
+  -> 判定
+  -> 正解 / 意味 / 解説 / 出典
+  -> 次へ
+  -> Session 結果
+```
+
+実装:
+
+- API client: `createPracticeSession` / `submitExerciseAnswer`
+- hook: `frontend/src/hooks/usePracticeSession.ts`
+- renderer: `PracticeExerciseCard`（choice / text / reconstruction）
+- reconstruction: タップ中心。drag は必須にしない
+- TTS: 既存 `useTTS`。失敗しても Session は止めない
+
+| 観点 | 自動テスト |
+|------|------------|
+| Source / Tutor 一覧から開始 | `TutorFlow.test.tsx` / `TutorSourceList.test.tsx` / `TutorSourceDetail.test.tsx` |
+| choice / text / cloze / reconstruction / verb | `PracticeSessionFlow.test.tsx` / `PracticeExerciseCard.test.tsx` |
+| 正誤 feedback と explanation / evidence | 同上 |
+| 送信失敗時に現在問題を保持 | `PracticeSessionFlow.test.tsx` |
+| TTS 失敗で学習フローが止まらない | `PracticeExerciseCard.test.tsx` |
+| Session 完了結果 | `PracticeSessionFlow.test.tsx` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 

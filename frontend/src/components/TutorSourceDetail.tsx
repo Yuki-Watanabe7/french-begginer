@@ -9,6 +9,7 @@ interface Props {
   justSaved?: boolean
   onBackToList: () => void
   onAddAnother?: () => void
+  onStartPractice?: () => void
 }
 
 export function TutorSourceDetail({
@@ -17,6 +18,7 @@ export function TutorSourceDetail({
   justSaved = false,
   onBackToList,
   onAddAnother,
+  onStartPractice,
 }: Props) {
   const { status, source, error, retry } = useTutorSourceDetail(sourceId, initialSource)
 
@@ -79,6 +81,11 @@ export function TutorSourceDetail({
       <div lang="fr" style={styles.content}>
         {source.content}
       </div>
+      {onStartPractice && (
+        <button type="button" style={styles.primaryBtn} onClick={onStartPractice}>
+          学習する
+        </button>
+      )}
       <TutorCandidateList sourceId={source.id} />
       {justSaved && onAddAnother && (
         <button type="button" style={styles.primaryBtn} onClick={onAddAnother}>
@@ -169,6 +176,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 17,
     fontWeight: 700,
     padding: '14px 0',
+    minHeight: 48,
     borderRadius: 14,
     border: 'none',
     background: '#1a56d6',
@@ -176,6 +184,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     width: '100%',
     marginTop: 12,
+    marginBottom: 8,
   },
   backBtn: {
     marginTop: 12,

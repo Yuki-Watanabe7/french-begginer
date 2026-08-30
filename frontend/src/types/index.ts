@@ -171,3 +171,71 @@ export interface AcceptCandidateResponse {
   item: LearningItem
   merged: boolean
 }
+
+export type ExerciseType =
+  | 'meaning_recognition'
+  | 'fr_to_ja'
+  | 'ja_to_fr'
+  | 'cloze'
+  | 'expression_reconstruction'
+  | 'verb_conjugation'
+  | 'noun_gender'
+  | 'noun_article'
+
+export type SkillDirection = 'recognition' | 'production'
+export type ResponseKind = 'choice' | 'text' | 'reconstruction'
+
+/** 出題 DTO。正解は含めない。 */
+export interface ExerciseView {
+  learning_item_id: string
+  exercise_type: ExerciseType
+  skill_direction: SkillDirection
+  prompt: string
+  response_kind: ResponseKind
+  options: string[] | null
+  source_context: string | null
+  exercise_version: string
+}
+
+export interface SkippedPracticeItem {
+  learning_item_id: string
+  skip_reason: string
+  detail?: string | null
+}
+
+export interface PracticeSession {
+  session_id: string
+  exercises: ExerciseView[]
+  skipped_items: SkippedPracticeItem[]
+  requested_count: number
+  generated_count: number
+}
+
+export interface CreatePracticeSessionInput {
+  source_id?: string
+  item_ids?: string[]
+  question_count?: number
+  seed?: string
+}
+
+export interface FetchTutorItemsOptions {
+  limit?: number
+}
+
+/** 回答後 feedback。correct_answer は回答後のみ存在する。 */
+export interface ExerciseFeedback {
+  correct: boolean
+  correct_answer: string
+  given: string | string[]
+  explanation_ja: string | null
+  source_context: string | null
+  meaning_ja: string | null
+  canonical_form: string | null
+}
+
+export interface PracticeWrongAnswer {
+  prompt: string
+  exerciseType: ExerciseType
+  correctAnswer: string
+  userAnswer: string
+}

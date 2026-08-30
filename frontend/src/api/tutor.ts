@@ -1,9 +1,15 @@
 import type {
   AcceptCandidateResponse,
+  CreatePracticeSessionInput,
   CreateTutorSourceInput,
+  ExerciseFeedback,
+  ExerciseType,
   ExtractCandidatesResponse,
+  FetchTutorItemsOptions,
   FetchTutorSourcesOptions,
+  LearningItem,
   LearningItemCandidate,
+  PracticeSession,
   SourceDocument,
   SourceSummary,
 } from '../types'
@@ -118,4 +124,76 @@ export async function rejectCandidate(
       { method: 'POST' },
     ),
   )
+}
+
+export async function fetchTutorItems(
+  options: FetchTutorItemsOptions = {},
+): Promise<LearningItem[]> {
+  const params = new URLSearchParams()
+  if (options.limit !== undefined) {
+    params.set('limit', String(options.limit))
+  }
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  return parseJson(await fetch(`${BASE}/api/tutor/items${query}`))
+}
+
+export async function fetchTutorItem(itemId: string): Promise<LearningItem> {
+  const detail = await parseJson<{ item: LearningItem }>(
+    await fetch(`${BASE}/api/tutor/items/${encodeURIComponent(itemId)}`),
+  )
+  return detail.item
+}
+
+export async function createPracticeSession(
+  input: CreatePracticeSessionInput = {},
+): Promise<PracticeSession> {
+  const body: Record<string, unknown> = {}
+  if (input.source_id !== undefined) body.source_id = input.source_id
+  if (input.item_ids !== undefined) body.item_ids = input.item_ids
+  if (input.question_count !== undefined) body.question_count = input.question_count
+  if (input.seed !== undefined) body.seed = input.seed
+  return parseJson(
+    await fetch(`${BASE}/api/tutor/practice/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+}
+
+interface ExerciseAnswerApiResponse {
+  correct: boolean
+  correct_answer: string
+  given: string | string[]
+  explanation_ja?: string | null
+  source_context?: string | null
+}
+
+export async function submitExerciseAnswer(
+  itemId: string,
+  exerciseType: ExerciseType,
+  answer: string | string[],
+  options: { id?: string } = {},
+): Promise<ExerciseFeedback> {
+  const body: Record<string, unknown> = { answer }
+  if (options.id !== undefined) body.id = options.id
+  const raw = await parseJson<ExerciseAnswerApiResponse>(
+    await fetch(
+      `${BASE}/api/tutor/items/${encodeURIComponent(itemId)}/exercises/${encodeURIComponent(exerciseType)}/answer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ),
+  )
+  return {
+    correct: raw.correct,
+    correct_answer: raw.correct_answer,
+    given: raw.given,
+    explanation_ja: raw.explanation_ja ?? null,
+    source_context: raw.source_context ?? null,
+    meaning_ja: null,
+    canonical_form: null,
+  }
 }
