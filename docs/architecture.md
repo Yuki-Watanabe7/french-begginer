@@ -42,9 +42,11 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/candidates/{candidate_id}/accept` | Candidate を採用し LearningItem を作成、または既存 Item へ SourceRef を追加する。再 accept は冪等。rejected からの accept は 409 |
 | POST | `/api/tutor/candidates/{candidate_id}/reject` | Candidate を却下する。LearningItem は作らない。再 reject は冪等。accepted からの reject は 409 |
 | POST | `/api/tutor/items` | 手入力の LearningItem を作成する |
+| GET | `/api/tutor/items` | active な LearningItem 一覧。管理検索はしない |
 | GET | `/api/tutor/items/{item_id}` | LearningItem と現在の LearnerState / ReviewSchedule を返す |
 | GET | `/api/tutor/items/{item_id}/exercises/{exercise_type}` | Tutor Exercise を再構成して返す。正解は含めない |
 | POST | `/api/tutor/items/{item_id}/exercises/{exercise_type}/answer` | Exercise を server-side で採点し、LearningEvent / LearnerState / ReviewSchedule を更新する |
+| POST | `/api/tutor/practice/sessions` | active LearningItem から Practice Session を組み立てる。Session 自体は永続化しない |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録し、LearnerState と ReviewSchedule を更新する |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem を返す。任意時刻の query は持たない |
 
@@ -55,6 +57,39 @@ SQLite (初期) → PostgreSQL (将来)
 | `limit` | 1〜100 の整数 | `50` | 取得件数。`created_at` 降順（同一時刻は `id` 昇順）。不正値は 422 |
 
 レスポンスは全文ではなく `SourceSummary`（`content_preview` は先頭120文字）。0件でも 200 + `[]`。
+
+### GET /api/tutor/items クエリパラメータ
+
+| パラメータ | 型 | デフォルト | 説明 |
+|------------|-----|------------|------|
+| `limit` | 1〜100 の整数 | `50` | 取得件数。`created_at` 昇順（同一時刻は `id` 昇順）。active のみ。不正値は 422 |
+
+0件でも 200 + `[]`。suspended / mastered は含めない。
+
+### POST /api/tutor/practice/sessions
+
+active な LearningItem から連続練習用の Session を組み立てる。Session 自体は DB に保存せず、学習履歴は回答ごとの LearningEvent が source of truth。
+
+| フィールド | 型 | デフォルト | 説明 |
+|------------|-----|------------|------|
+| `source_id` | string optional | （なし） | 指定 Source 由来の Item だけを対象にする |
+| `item_ids` | string[] optional | （なし） | 明示した Item だけを対象にする |
+| `question_count` | 1〜20 の整数 | `5` | 上限。候補が少なければ水増しせず短く返す |
+| `seed` | string optional | サーバー既定 | 選択順の再現用。Exercise 本文の再構成には使わない |
+
+`source_id` と `item_ids` の同時指定は 422。どちらも無ければ active Item 全体から選ぶ。存在しない Source / Item は 404。0件でも 200。
+
+レスポンス:
+
+| フィールド | 説明 |
+|------------|------|
+| `session_id` | エフェメラルな識別子。再取得 API は持たない |
+| `exercises` | `PublicExercise` の配列。正解・metadata は含めない |
+| `skipped_items` | 生成できなかった Item と `skip_reason` |
+| `requested_count` | 要求した出題数 |
+| `generated_count` | 実際に入れた出題数（`<= requested_count`） |
+
+due / overdue / mastery による並び替えはしない（Phase 4）。
 
 ### GET /api/questions/next クエリパラメータ
 
@@ -108,7 +143,7 @@ backend/app/
 │   ├── questions.py
 │   ├── answers.py
 │   ├── nouns.py
-│   ├── tutor.py              # Tutor最小API（Issue #112）、Candidate 採否（Issue #134）、Exercise 回答（Issue #149）
+│       ├── tutor.py              # Tutor最小API（Issue #112）、Candidate 採否（Issue #134）、Exercise 回答（Issue #149）、Practice Session（Issue #150）
 ├── domain/       # ビジネスルール（活用データ、モデル定義、判定ロジック）
 │   ├── conjugation.py
 │   ├── noun.py
@@ -118,6 +153,7 @@ backend/app/
 │   ├── exercise.py           # LearningItem→Exercise契約（Issue #145）
 │   ├── exercise_generation.py
 │   ├── exercise_evaluation.py  # Tutor Exercise の server-side 採点（Issue #149）
+│   ├── practice_session.py   # active LearningItem から Practice Session を組み立てる（Issue #150）
 │   └── conjugation_adapter.py
 ├── evaluation/   # LLM抽出の固定fixtureと品質チェック（Issue #136）。HTTPからは使わない
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
@@ -130,7 +166,8 @@ backend/app/
     ├── tutor_service.py           # Tutor最小APIのユースケース
     ├── extraction_service.py      # Source から Candidate を抽出し正規化する
     ├── candidate_service.py       # 抽出結果の保存と accept/reject（Issue #134）
-    └── exercise_service.py        # Exercise 取得・採点・LearningEvent 記録（Issue #149）
+    ├── exercise_service.py        # Exercise 取得・採点・LearningEvent 記録（Issue #149）
+    └── practice_session_service.py  # Practice Session 組み立て（Issue #150）
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。

@@ -63,6 +63,11 @@ Layer 2で `error` が出た場合は人間によるLayer 3レビューを必須
 2. `value` を指定し「使用されない」「正しくない」等を主張するが `expected` がない警告
 3. `value == expected` の無意味な警告
 4. `confidence: low` の警告（suggestions に降格）
+5. `expected` が不定詞（`verb` 名そのもの）の警告（活用形の代替になっていない）
+6. 現在形が標準・正しいと述べるだけで、別の活用形を示さない警告
+
+活用データ（`conjugation.py` / `present_conjugations.json`）が変わっていない PR では、
+CONJUGATIONS 全体のスナップショットを LLM に渡さない。diff 外の動詞を再レビューさせない。
 
 ---
 
@@ -104,6 +109,10 @@ Layer 2で `error` が出た場合は人間によるLayer 3レビューを必須
 - 同じ概念に対する表記揺れがないか
 - ç の使用（commençons など）が正しいか
 - -ger 動詞の nous 形（mangeons など）が正しいか
+
+`commençons` / `mangeons` は標準形である。正しいと確認した事実や
+地域差確認だけを理由に warning にしない。活用スロットの `expected` に
+不定詞を書かない。diff に含まれない CONJUGATIONS 項目は対象外。
 
 ### JSON出力スキーマ
 
@@ -151,9 +160,11 @@ Layer 2で `error` が出た場合は人間によるLayer 3レビューを必須
 diff:
 {git_diff}
 
-現在の CONJUGATIONS データ（変更後）:
-{conjugations_json}
+{conjugations_section}
 ```
+
+`conjugations_section` は活用データが変わったときだけ JSON スナップショット。
+未変更なら「CONJUGATIONS 全体の再レビューは不要」と明記する。
 
 ---
 

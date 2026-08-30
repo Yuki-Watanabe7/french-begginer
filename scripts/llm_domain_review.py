@@ -64,6 +64,13 @@ SYSTEM_PROMPT = """\
 - ç の使用（commençons など）が正しいか
 - -ger 動詞の nous 形（mangeons など）が正しいか
 
+【正しい標準形 — warning にしてはならない】
+- commencer/nous = commençons（ç は標準綴り）
+- manger/nous = mangeons（-ger 動詞の e 保持は標準綴り）
+- 上の形が正しいと確認した事実や、地域差・文体差の確認だけを理由に warning にしない
+- 活用スロットの expected には活用形を書く。不定詞（動詞名そのもの）を expected にしない
+- 今回の diff に含まれない CONJUGATIONS 項目はレビュー対象外
+
 【warningを出してよい条件】
 - 標準形として複数の許容表記があり得る場合（具体的な代替形を expected に示すこと）
 - 地域差・文体差として採用可否を確認すべき場合
@@ -130,10 +137,7 @@ diff:
 {git_diff}
 ```
 
-現在の CONJUGATIONS データ（変更後スナップショット）:
-```json
-{conjugations_json}
-```
+{conjugations_section}
 """
 
 MAX_DIFF_CHARS = 40_000
@@ -149,6 +153,56 @@ _INCORRECTNESS_KEYWORDS = frozenset([
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
 
+CONJUGATION_SNAPSHOT_FILES = frozenset(
+    {
+        "backend/app/domain/conjugation.py",
+        "backend/app/domain/french_reference/present_conjugations.json",
+    }
+)
+"""活用表スナップショットを付けるのは、これらのファイルが変わったときだけ。"""
+
+# 現在形が正しいと述べているだけの警告（PR #158 の false positive）
+# 「正しい」単体は「正しくない」に部分一致するため使わない。
+_AFFIRMATION_PHRASES = (
+    "使用は正しい",
+    "使用が正しい",
+    "標準的であり",
+    "標準的である",
+    "とするのが標準",
+)
+
+_NO_CONJUGATION_SNAPSHOT_NOTE = (
+    "今回の差分に活用データ（conjugation.py / "
+    "present_conjugations.json）の変更はない。"
+    "CONJUGATIONS 全体の再レビューは不要。"
+    "diff に含まれるフランス語のみを対象にすること。"
+)
+
+
+def should_attach_conjugation_snapshot(changed_files: list[str]) -> bool:
+    """活用データが変わっていない PR では CONJUGATIONS 全体を再レビューしない。"""
+    return any(path in CONJUGATION_SNAPSHOT_FILES for path in changed_files)
+
+
+def conjugation_section_for(changed_files: list[str]) -> str:
+    """LLM に渡す活用表セクション。未変更ならスナップショットを付けない。"""
+    if not should_attach_conjugation_snapshot(changed_files):
+        return _NO_CONJUGATION_SNAPSHOT_NOTE
+    return (
+        "現在の CONJUGATIONS データ（変更後スナップショット）:\n"
+        "```json\n"
+        f"{load_conjugations_json()}\n"
+        "```"
+    )
+
+
+def _normalize_form(text: str) -> str:
+    return text.strip().casefold()
+
+
+def _reason_affirms_current_form(reason: str) -> bool:
+    return any(phrase in reason for phrase in _AFFIRMATION_PHRASES)
+
 
 def filter_warnings(warnings: list[dict]) -> tuple[list[dict], list[dict]]:
     """Filter low-quality LLM warnings.
@@ -160,6 +214,8 @@ def filter_warnings(warnings: list[dict]) -> tuple[list[dict], list[dict]]:
     - Warnings that claim a specific value is incorrect without providing an expected form
     - Warnings where value == expected (nonsensical)
     - Low-confidence warnings (moved to suggestions)
+    - Warnings whose expected is the infinitive (verb name), not a conjugated form
+    - Warnings that affirm the current form is standard/correct without an alternative
     """
     kept: list[dict] = []
     demoted: list[dict] = []
@@ -168,6 +224,7 @@ def filter_warnings(warnings: list[dict]) -> tuple[list[dict], list[dict]]:
         reason = w.get("reason", "")
         value = w.get("value", "")
         expected = w.get("expected", "")
+        verb = w.get("verb", "")
         confidence = w.get("confidence", "medium")
 
         # Filter 1: reason only mentions beginner confusion — not a French correctness issue
@@ -181,7 +238,7 @@ def filter_warnings(warnings: list[dict]) -> tuple[list[dict], list[dict]]:
             continue
 
         # Filter 3: value and expected are identical — nonsensical warning
-        if value and expected and value.strip() == expected.strip():
+        if value and expected and _normalize_form(value) == _normalize_form(expected):
             demoted.append(w)
             continue
 
@@ -189,6 +246,24 @@ def filter_warnings(warnings: list[dict]) -> tuple[list[dict], list[dict]]:
         if confidence == "low":
             demoted.append(w)
             continue
+
+        # Filter 5: expected is the infinitive, not an alternative conjugated form
+        if (
+            verb
+            and expected
+            and _normalize_form(expected) == _normalize_form(verb)
+        ):
+            demoted.append(w)
+            continue
+
+        # Filter 6: affirms the current form is correct without a real alternative
+        if value and _reason_affirms_current_form(reason):
+            alternatives = {_normalize_form(value)}
+            if verb:
+                alternatives.add(_normalize_form(verb))
+            if not expected or _normalize_form(expected) in alternatives:
+                demoted.append(w)
+                continue
 
         kept.append(w)
 
@@ -473,11 +548,10 @@ def main() -> int:
     print(f"LLM provider: {provider}, model: {model}")
 
     diff = get_domain_diff(base_sha)
-    conjugations_json = load_conjugations_json()
     user_prompt = USER_PROMPT_TEMPLATE.format(
         changed_files=", ".join(changed_files),
         git_diff=diff,
-        conjugations_json=conjugations_json,
+        conjugations_section=conjugation_section_for(changed_files),
     )
 
     print(f"Calling {provider} API...")

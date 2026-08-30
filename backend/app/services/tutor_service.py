@@ -188,6 +188,13 @@ class TutorService:
             review_schedule=self._schedules.get(item_id),
         )
 
+    def list_items(self, *, limit: int | None = None) -> list[LearningItem]:
+        """active な LearningItem を created_at 昇順（同一時刻は id 昇順）で返す。"""
+        items = [item for item in self._items.list() if item.status == "active"]
+        if limit is not None:
+            return items[:limit]
+        return items
+
     def record_review(
         self,
         item_id: str,

@@ -20,7 +20,8 @@ Phase 2 vertical slice と Exit Criteria（Issue #137）、
 vocabulary / expression 向け deterministic Exercise 生成（Issue #146）、
 Source evidence からの cloze Exercise 生成（Issue #147）、
 conjugation LearningItem の既存動詞活用 adapter（Issue #148）、
-Exercise の server-side 採点と LearningEvent 記録（Issue #149）
+Exercise の server-side 採点と LearningEvent 記録（Issue #149）、
+accepted LearningItem からの Practice Session 組み立て（Issue #150）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -63,6 +64,11 @@ Exercise の server-side 採点と LearningEvent 記録（Issue #149）
   / `backend/tests/test_exercise_evaluation.py`
   / `backend/tests/test_exercise_service.py`
   / `backend/tests/test_exercise_api.py`
+- Practice Session: `backend/app/domain/practice_session.py`
+  / `backend/app/services/practice_session_service.py`
+  / `backend/tests/test_practice_session.py`
+  / `backend/tests/test_practice_session_service.py`
+  / `backend/tests/test_practice_session_api.py`
 
 ## 目指す学習ループ
 
@@ -1034,6 +1040,8 @@ Issue #146 で vocabulary / expression の deterministic な基本 Exercise
 生成を追加した。Issue #147 で Source evidence からの cloze 生成を追加した。
 Issue #148 で conjugation を既存動詞活用へ安全に接続する adapter を追加した。
 Issue #149 で Exercise の server-side 採点と LearningEvent 記録 API を追加した。
+Issue #150 で accepted LearningItem から手動開始できる Practice Session を
+組み立てる API を追加した。
 Phase 2 では LearningItem を作れるところまでで止め、
 以下はまだ行わない。
 
@@ -1189,9 +1197,9 @@ generic な `/api/tutor/exercises` 等を禁止したまま維持する。
 | domain が FastAPI / SQLAlchemy / OpenAI 非依存 | `test_domain_module_does_not_depend_on_fastapi_sqlalchemy_or_openai` |
 | exercise_version を LearningEvent で追跡できる | `test_learning_event_can_track_exercise_version` |
 
-### Phase 3 の残り（#145 / #146 / #147 / #148 のスコープ外、#149 で一部実施）
+### Phase 3 の残り（#145〜#150 のスコープ外）
 
-- Frontend session UI
+- Frontend session UI（Issue #151）
 - by_direction の更新
 - due review session（Phase 4）
 
@@ -1536,6 +1544,78 @@ inactive item は出題不可として 422 に固定する。409 は重複 ID �
 | LearningEvent 1件追加と state/schedule | `test_correct_and_incorrect_each_append_one_event_and_update_state` |
 | duplicate で二重適用しない | `test_duplicate_answer_returns_409_without_double_apply` |
 | GET に正解が漏れない | `test_get_exercise_omits_correct_answer` |
+
+## Phase 3 — Practice Session 組み立て（Issue #150）
+
+accepted かつ active な LearningItem を複数まとめ、ユーザーが手動で
+開始できる最小の Tutor Practice Session を組み立てる。
+Phase 4 の「今日の復習」や due 優先度は導入しない。
+
+```text
+active LearningItems
+  -> eligible Exercise 列挙
+  -> session policy
+  -> PracticeSession
+  -> Exercise 回答（#149）
+  -> 次の Exercise
+```
+
+実装:
+
+- 選択 policy: `backend/app/domain/practice_session.py`
+- ユースケース: `backend/app/services/practice_session_service.py`
+- HTTP: `POST /api/tutor/practice/sessions`
+- 補助: `GET /api/tutor/items`（active Item の最小一覧。管理検索はしない）
+
+Session 自体は DB に保存しない。学習履歴の source of truth は
+回答ごとの LearningEvent。`session_id` はエフェメラルで、再取得 API は持たない。
+
+### 入力
+
+`source_id` と `item_ids` は同時指定できない。どちらも無ければ
+active LearningItem 全体から選ぶ。Candidate は直接入れない。
+
+| フィールド | 意味 |
+|------------|------|
+| `source_id` | その Source を `source_refs` に持つ Item だけ |
+| `item_ids` | 明示した Item。重複 ID は 1 回にまとめる |
+| `question_count` | 上限（default 5 / max 20）。候補が少なければ水増ししない |
+| `seed` | 選択順の再現用。省略時は `tutor-practice` |
+
+Exercise の prompt / options は既存 GET/answer と同じ
+`DEFAULT_GENERATION_SEED` で再構成する。session seed は並び順だけに使う。
+
+### Selection policy
+
+1. **active のみ** — suspended / mastered は通常の新規 practice 対象外。
+   `item_ids` や `source_id` で明示された inactive は `inactive_item` で skip
+2. **重複抑止** — 1 Session 内で同じ `(learning_item_id, exercise_type)` を入れない
+3. **recognition / production** — 可能な範囲で交互に含める。高度な個人最適化はしない
+4. **unsupported は skip** — 生成できない Item で Session 全体を失敗させない
+5. **deterministic** — 同一入力 + 同一 seed なら同一の出題列
+
+due_at / overdue / lapse / mastery / recognition-production imbalance では
+並べ替えない。
+
+### HTTP status
+
+| 状況 | status |
+|------|--------|
+| 組み立て成功（0件を含む） | 200 |
+| Source / Item 不存在 | 404 |
+| `source_id` と `item_ids` の同時指定、`question_count` 範囲外 | 422 |
+
+| 観点 | 自動テスト |
+|------|------------|
+| source_id で該当 Item のみ | `test_source_id_selects_only_items_from_that_source` / `test_practice_session_source_id_filter` |
+| item_ids 指定 | `test_item_ids_select_only_requested_items` / `test_practice_session_item_ids_filter` |
+| active のみ | `test_unfiltered_session_uses_active_items_only` / `test_explicit_inactive_item_is_skipped_with_reason` |
+| question_count 上限と非重複 | `test_question_count_caps_session_without_padding_duplicates` |
+| recognition / production 混在 | `test_mixes_recognition_and_production_when_both_exist` |
+| unsupported skip | `test_unsupported_item_is_skipped_without_failing_session` |
+| seed 固定 | `test_same_seed_is_deterministic` / `test_practice_session_seed_is_deterministic` |
+| 0件 | `test_empty_items_returns_empty_session` / `test_practice_session_zero_items` |
+| due を先取りしない | `test_selection_policy_does_not_use_due_or_review_schedule` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
