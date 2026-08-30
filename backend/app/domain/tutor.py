@@ -20,7 +20,7 @@ DB / FastAPI / OpenAI API には依存しない（domain層の原則）。
 永続化は `app/repositories` / `app/persistence` が担う。
 このモジュールは永続化実装に依存しない。
 
-LearnerState の更新は `apply_review_event` が担う（Issue #110）。
+LearnerState の更新は `apply_review_event` が担う（Issue #110 / #161）。
 復習予定の算出は `review_scheduler.schedule_next_review` が担う（Issue #111）。
 Candidate の状態遷移は `apply_candidate_status` が担う（Issue #131）。
 LLM 抽出は `services/extraction_service` が担う（Issue #132）。
@@ -34,7 +34,8 @@ conjugation の既存動詞クイズ adapter は `conjugation_adapter` が担う
 Exercise の server-side 採点と LearningEvent 記録は `exercise_evaluation` /
 `exercise_service` が担う（Issue #149）。
 Practice Session の組み立ては `practice_session` が担う（Issue #150）。
-SRS / UI は後続Issue。
+recognition / production 別の LearnerState 集計は `apply_review_event` が担う
+（Issue #161）。due queue / Frontend mastery 表示は後続Issue。
 """
 
 import uuid
@@ -112,7 +113,24 @@ ExerciseType = Literal[
 AnswerOutcome = Literal["correct", "incorrect"]
 
 SkillDirection = Literal["recognition", "production"]
-"""「見て分かる」と「自力で produce できる」を将来分離するための軸。"""
+"""「見て分かる」と「自力で produce できる」を分離する軸。"""
+
+SKILL_DIRECTION_BY_EXERCISE_TYPE: dict[ExerciseType, SkillDirection] = {
+    "meaning_recognition": "recognition",
+    "fr_to_ja": "recognition",
+    "ja_to_fr": "production",
+    "cloze": "production",
+    "expression_reconstruction": "production",
+    "verb_conjugation": "production",
+    "noun_gender": "recognition",
+    "noun_article": "production",
+}
+"""ExerciseType → SkillDirection。LearnerState 集計の source of truth。
+
+Client 由来の `LearningEvent.metadata.skill_direction` は使わない。
+Issue #145 の policy と同じ対応をここに置き、domain が exercise 層へ
+依存しないようにする。
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -338,8 +356,9 @@ class LearnerState(MasteryStats):
     「今この項目をどれだけ習得しているか」の問い合わせを、
     全イベントの再走査なしに答えられるようにするために分離している。
 
-    by_direction はrecognition / productionを分離するための拡張点。
-    Phase 0では空のままでよく、集計ロジックは後続Issueで実装する。
+    by_direction は recognition（見て分かる）と production（自力で出せる）
+    を別々に集計する。source of truth は ExerciseType の deterministic
+    mapping（`SKILL_DIRECTION_BY_EXERCISE_TYPE`）であり、Client metadata ではない。
     """
 
     learning_item_id: str = Field(min_length=1)
@@ -361,13 +380,47 @@ def compute_mastery_score(*, correct_count: int, attempt_count: int) -> float:
     return correct_count / attempt_count
 
 
+def skill_direction_for_event(event: LearningEvent) -> SkillDirection | None:
+    """LearnerState 集計用の SkillDirection。
+
+    source of truth は `SKILL_DIRECTION_BY_EXERCISE_TYPE`。
+    `event.metadata["skill_direction"]` は監査用であり、集計には使わない。
+    mapping に無い exercise_type（legacy）は None。推測で割り当てない。
+    """
+    return SKILL_DIRECTION_BY_EXERCISE_TYPE.get(event.exercise_type)
+
+
+def _apply_outcome(stats: MasteryStats, event: LearningEvent) -> MasteryStats:
+    """MasteryStats 1件へ LearningEvent の正誤を適用した新しい集計を返す。"""
+    attempt_count = stats.attempt_count + 1
+    if event.result == "correct":
+        correct_count = stats.correct_count + 1
+        incorrect_count = stats.incorrect_count
+        consecutive_correct = stats.consecutive_correct + 1
+    else:
+        correct_count = stats.correct_count
+        incorrect_count = stats.incorrect_count + 1
+        consecutive_correct = 0
+    return MasteryStats(
+        attempt_count=attempt_count,
+        correct_count=correct_count,
+        incorrect_count=incorrect_count,
+        consecutive_correct=consecutive_correct,
+        last_reviewed_at=event.occurred_at,
+        mastery_score=compute_mastery_score(
+            correct_count=correct_count, attempt_count=attempt_count
+        ),
+    )
+
+
 def apply_review_event(
     state: LearnerState | None, event: LearningEvent
 ) -> LearnerState:
     """LearningEvent 1件を LearnerState に適用した新しい状態を返す。
 
     現在の state は変更しない。同じ (state, event) からは常に同じ結果になる。
-    Phase 0 では全体集計のみ更新し、by_direction は引き継ぐだけにする。
+    1イベントにつき全体集計と、direction が決まる場合は該当
+    `by_direction` を1回だけ更新する。
     """
     if event.event_type != "review":
         raise ValueError(f"未対応の event_type: {event.event_type}")
@@ -379,27 +432,22 @@ def apply_review_event(
             f"state={state.learning_item_id}, event={event.learning_item_id}"
         )
 
-    attempt_count = state.attempt_count + 1
-    if event.result == "correct":
-        correct_count = state.correct_count + 1
-        incorrect_count = state.incorrect_count
-        consecutive_correct = state.consecutive_correct + 1
-    else:
-        correct_count = state.correct_count
-        incorrect_count = state.incorrect_count + 1
-        consecutive_correct = 0
+    overall = _apply_outcome(state, event)
+    by_direction = dict(state.by_direction)
+    direction = skill_direction_for_event(event)
+    if direction is not None:
+        previous = by_direction.get(direction, MasteryStats())
+        by_direction[direction] = _apply_outcome(previous, event)
 
     return LearnerState(
         learning_item_id=state.learning_item_id,
-        attempt_count=attempt_count,
-        correct_count=correct_count,
-        incorrect_count=incorrect_count,
-        consecutive_correct=consecutive_correct,
-        last_reviewed_at=event.occurred_at,
-        mastery_score=compute_mastery_score(
-            correct_count=correct_count, attempt_count=attempt_count
-        ),
-        by_direction=state.by_direction,
+        attempt_count=overall.attempt_count,
+        correct_count=overall.correct_count,
+        incorrect_count=overall.incorrect_count,
+        consecutive_correct=overall.consecutive_correct,
+        last_reviewed_at=overall.last_reviewed_at,
+        mastery_score=overall.mastery_score,
+        by_direction=by_direction,
     )
 
 

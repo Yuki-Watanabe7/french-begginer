@@ -23,7 +23,8 @@ conjugation LearningItem の既存動詞活用 adapter（Issue #148）、
 Exercise の server-side 採点と LearningEvent 記録（Issue #149）、
 accepted LearningItem からの Practice Session 組み立て（Issue #150）、
 Tutor Practice Session の Frontend UI と TTS/feedback（Issue #151）、
-Phase 3 vertical slice と Exit Criteria（Issue #152）
+Phase 3 vertical slice と Exit Criteria（Issue #152）、
+および Phase 4 の recognition / production 別 LearnerState 集計（Issue #161）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -31,6 +32,7 @@ Phase 3 vertical slice と Exit Criteria（Issue #152）
   / `backend/tests/test_tutor_persistence.py`
 - 状態更新: `backend/app/services/learning_state_service.py`
   / `backend/tests/test_learning_state_service.py`
+  （`by_direction` 集計は Issue #161）
 - 復習予定: `backend/app/domain/review_scheduler.py`
   / `backend/app/services/review_service.py`
   / `backend/tests/test_review_scheduler.py`
@@ -221,10 +223,11 @@ SourceDocument
 
 さらに `by_direction: dict[SkillDirection, MasteryStats]` を用意し、
 `recognition`（見て分かる）と `production`（自力で produce できる）を
-別々に追跡できる構造にしてある。
-
-Phase 0では `by_direction` は空のままでよく、集計ロジックは後続Issueで実装する。
-「高度な能力モデルを今作る」のではなく、**後から入れられる形にしておく**のが目的。
+別々に追跡する。Phase 4（Issue #161）で `apply_review_event` が
+ExerciseType の deterministic mapping から direction を決め、
+全体集計と該当 direction 集計の双方を更新する。
+Client が送った `metadata.skill_direction` は監査用であり、集計の
+source of truth にはしない。
 
 ### 4. 時刻はtimezone-aware（内部表現はUTC）
 
@@ -436,8 +439,38 @@ LearningItem の存在確認
 `mastery_score` は正答率そのもの。値域は [0.0, 1.0] で、正答で悪化せず、
 誤答で改善しない。同じイベント列からは常に同じ結果になる。
 
-Phase 0 では `by_direction`（recognition / production）は更新しない。
-`exercise_type` は LearningEvent に必ず残し、後続Issueで能力を分離する。
+`exercise_type` は LearningEvent に必ず残す。Phase 4（Issue #161）では
+このフィールドから SkillDirection を決定し、`by_direction` を更新する。
+
+### direction 別集計（Issue #161）
+
+```text
+LearningEvent
+  -> ExerciseType から SkillDirection を決定
+  -> LearnerState 全体を更新
+  -> LearnerState.by_direction[direction] を更新
+```
+
+source of truth は `SKILL_DIRECTION_BY_EXERCISE_TYPE`
+（`backend/app/domain/tutor.py`）。Issue #145 の
+`skill_direction_for` と同じ対応を domain に置き、`exercise` 層へ
+依存しない。`LearningEvent.metadata.skill_direction` は追跡用であり、
+集計ロジックは Client 由来 metadata を見ない。
+
+1イベントにつき、全体集計と該当 direction 集計が1回だけ更新される。
+recognition の正答は production の mastery を上げず、production の誤答は
+recognition の consecutive_correct を壊さない。
+
+初期 mastery は全体と同じ説明可能な正答率ベース。FSRS 等は行わない。
+
+Phase 3 以前 / legacy event:
+
+- `exercise_type` から direction を決定できる event は direction 集計へ含める
+- mapping に無い exercise_type は全体集計だけ更新し、direction には
+  metadata から推測して割り当てない
+
+再計算: `LearningStateService.recompute_learner_state` は履歴を
+`occurred_at, id` 順に replay し、全体と `by_direction` を同じ結果に戻す。
 
 ### 不整合への備え
 
@@ -1137,7 +1170,9 @@ grammar は `meaning_recognition` と source cloze に限定する。
 | `noun_gender` | recognition | 性を識別する |
 | `noun_article` | production | 冠詞付き形を選ぶ |
 
-Phase 0 と同様、`LearnerState.by_direction` の更新はこの Issue では行わない。
+Phase 0 と同様、Issue #145 時点では `LearnerState.by_direction` は更新しない。
+集計は Issue #161。mapping 自体は `SKILL_DIRECTION_BY_EXERCISE_TYPE` が
+source of truth。
 
 ### LearningItemType ごとの eligibility
 
@@ -1209,8 +1244,8 @@ generic な `/api/tutor/exercises` 等を禁止したまま維持する。
 
 ### Phase 3 の残り（#145〜#151 時点のスコープ外。#152 で vertical slice として閉じる）
 
-- by_direction の更新（Phase 4）
 - due review session（Phase 4）
+- ReviewSchedule の direction 分離（後続 Issue）
 
 ## Phase 3 — vocabulary / expression の deterministic 生成（Issue #146）
 
@@ -1513,7 +1548,8 @@ Exercise 自体は永続化しない。
 - cloze のとき `source_document_id`
 
 正解は含めない。`exercise_type` は LearningEvent の既存フィールド。
-Phase 3 では `LearnerState.by_direction` は更新しない。
+`LearnerState.by_direction` の更新は Issue #161。source of truth は
+`exercise_type` の mapping であり、この metadata ではない。
 
 ### idempotency
 
@@ -1724,14 +1760,13 @@ Phase 3 完了時点で以下が明確であること。
 
 #### Phase 3 ではまだ行わないこと
 
-- `LearnerState.by_direction` の更新
 - due / overdue による出題優先
 - 「今日の復習」Session
 - LLM semantic grading
 - FSRS / SM-2 最適化
 
 `skill_direction` と `exercise_version` は LearningEvent.metadata に残す。
-Phase 4 が履歴から再計算できる情報を失わない。
+`LearnerState.by_direction` の更新は Phase 4（Issue #161）。
 
 ## Phase 3 Exit Criteria（Issue #107）との対応
 
@@ -1770,8 +1805,11 @@ LearningEvent を使い、以下を実ユーザー体験へ接続する。
 - due review queue
 - 「今日の復習」Session
 - overdue handling
-- recognition / production 別 LearnerState 集計（`by_direction`）
 - long-term spacing policy
+
+`LearnerState.by_direction` の recognition / production 別集計は
+Issue #161 で実装した。ReviewSchedule の direction 分離、due queue、
+Frontend mastery 表示は後続 Issue。
 
 Phase 3 の Practice Session は手動開始を基本とし、due / mastery による
 優先順位付けは Phase 4 へ残す。generic な `/api/tutor/reviews/today` や
@@ -1779,6 +1817,73 @@ recommendation API はまだ持たない。
 
 Phase 4 へ進む前提は、Phase 0〜3 が `bash scripts/quality-check.sh` で
 継続して通ることである。
+
+## Phase 4 — recognition / production 別 LearnerState 集計（Issue #161）
+
+Phase 0 からあった `LearnerState.by_direction` を、実際の回答で更新する。
+同じ LearningItem について **recognition（見て分かる）** と
+**production（自力で出せる）** を独立に集計し、「意味は分かるが自分では
+言えない」を区別できることを長期復習の前提にする。
+
+```text
+LearningEvent
+  -> ExerciseType から SkillDirection を決定
+  -> LearnerState 全体を更新
+  -> LearnerState.by_direction[direction] を更新
+```
+
+実装は既存の `apply_review_event` と `LearningStateService.recompute_learner_state`。
+新しい HTTP API は追加しない。Frontend mastery 表示は対象外。
+
+### source of truth
+
+| 使う | 使わない |
+|------|----------|
+| `SKILL_DIRECTION_BY_EXERCISE_TYPE`（`domain.tutor`） | Client が送った `metadata.skill_direction` |
+| `LearningEvent.exercise_type` | direction の推測（未知 type を recognition 等へ割り当てない） |
+
+`domain.exercise.skill_direction_for` は同じ mapping を参照する。
+1つの ExerciseType は常に 1つの SkillDirection。
+
+### 全体集計との両立
+
+既存フィールド（`attempt_count` / `correct_count` / `incorrect_count` /
+`consecutive_correct` / `last_reviewed_at` / `mastery_score`）は
+後方互換のため維持する。1イベントにつき全体と該当 direction の双方を
+1回だけ更新する。
+
+### 不変条件
+
+- `by_direction[recognition].attempt_count + by_direction[production].attempt_count`
+  は、direction 判定可能な event 件数と一致する
+- 同じ event を二重適用しない（既存の duplicate ID 拒否）
+- recognition の正答が production の mastery を上げない
+- production の誤答が recognition の consecutive_correct を壊さない
+
+### legacy event
+
+- `exercise_type` から mapping できる Phase 3 以前の event は direction 集計へ含める
+- mapping できない type は全体集計だけ残し、metadata から direction を推測しない
+
+### スコープ外
+
+- ReviewSchedule の direction 分離
+- due queue / 「今日の復習」
+- FSRS / SM-2
+- Frontend mastery 表示
+- Tutor recommendation
+
+| 観点 | 自動テスト |
+|------|------------|
+| recognition correct で recognition だけ更新 | `test_apply_review_event_updates_recognition_only_on_recognition_correct` |
+| production incorrect で production だけ更新 | `test_apply_review_event_updates_production_only_on_production_incorrect` |
+| 全体集計は両方を含む | `test_overall_stats_include_both_directions` |
+| recognition / production で異なる mastery | `test_recognition_and_production_have_independent_mastery` |
+| 複数 event replay で同じ state | `test_apply_review_event_replay_rebuilds_same_by_direction` / `test_recompute_learner_state_rebuilds_by_direction` |
+| duplicate event で二重更新されない | `test_duplicate_event_id_is_rejected_and_does_not_double_apply` |
+| legacy event の扱い | `test_legacy_event_updates_overall_but_not_by_direction` |
+| DB 再 open 後も by_direction が残る | `test_by_direction_survives_db_reopen` |
+| metadata を集計に使わない | `test_skill_direction_for_event_uses_exercise_type_not_metadata` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
@@ -1804,3 +1909,5 @@ Phase 2 自体の完了条件と Phase 3 への引継ぎは、上記
 「Phase 2 Exit Criteria」と「Phase 3 への引き継ぎ」を正とする。
 Phase 3 自体の完了条件と Phase 4 への引継ぎは、上記
 「Phase 3 Exit Criteria」と「Phase 4 への引き継ぎ」を正とする。
+`by_direction` 集計の source of truth は上記
+「Phase 4 — recognition / production 別 LearnerState 集計」を正とする。

@@ -37,6 +37,7 @@ from app.domain.exercise import (
     tokenize_canonical_form,
 )
 from app.domain.tutor import (
+    SKILL_DIRECTION_BY_EXERCISE_TYPE,
     EvidenceSpan,
     ExerciseType,
     LearningEvent,
@@ -72,6 +73,7 @@ def _item(
 
 
 def test_exercise_type_to_skill_direction_is_unique_and_total():
+    assert EXERCISE_SKILL_DIRECTIONS is SKILL_DIRECTION_BY_EXERCISE_TYPE
     assert set(EXERCISE_SKILL_DIRECTIONS) == set(EXERCISE_TYPES)
     assert len(EXERCISE_SKILL_DIRECTIONS) == len(EXERCISE_TYPES)
     for exercise_type in EXERCISE_TYPES:

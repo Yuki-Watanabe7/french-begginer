@@ -1,6 +1,7 @@
-"""LearningStateService（Issue #110）のユースケーステスト。"""
+"""LearningStateService（Issue #110 / #161）のユースケーステスト。"""
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy.orm import Session
@@ -182,6 +183,7 @@ def test_duplicate_event_id_is_rejected_and_does_not_double_apply(
     assert loaded == first
     assert loaded is not None
     assert loaded.attempt_count == 1
+    assert loaded.by_direction["recognition"].attempt_count == 1
     assert len(store.learning_events.list_by_item(item.id)) == 1
 
 
@@ -260,6 +262,128 @@ def test_recompute_learner_state_rebuilds_from_event_history(
     assert rebuilt.consecutive_correct == 0
     assert rebuilt.mastery_score == pytest.approx(2 / 3)
     assert store.learner_states.get(item.id) == rebuilt
+    recognition = rebuilt.by_direction["recognition"]
+    assert recognition.attempt_count == 3
+    assert recognition.correct_count == 2
+
+
+def test_record_event_updates_recognition_independently(
+    store: TutorSqliteStore, service: LearningStateService
+):
+    item = _item()
+    store.learning_items.create(item)
+    state = service.record_event(
+        _event(item.id, exercise_type="meaning_recognition", result="correct")
+    )
+    assert state.by_direction["recognition"].correct_count == 1
+    assert "production" not in state.by_direction
+    assert state.correct_count == 1
+
+
+def test_record_event_updates_production_independently(
+    store: TutorSqliteStore, service: LearningStateService
+):
+    item = _item()
+    store.learning_items.create(item)
+    state = service.record_event(
+        _event(item.id, exercise_type="ja_to_fr", result="incorrect")
+    )
+    assert state.by_direction["production"].incorrect_count == 1
+    assert "recognition" not in state.by_direction
+    assert state.incorrect_count == 1
+
+
+def test_record_event_keeps_independent_mastery_per_direction(
+    store: TutorSqliteStore, service: LearningStateService
+):
+    item = _item()
+    store.learning_items.create(item)
+    service.record_event(
+        _event(item.id, exercise_type="meaning_recognition", result="correct")
+    )
+    state = service.record_event(
+        _event(item.id, exercise_type="ja_to_fr", result="incorrect")
+    )
+    assert state.attempt_count == 2
+    assert state.mastery_score == pytest.approx(0.5)
+    assert state.by_direction["recognition"].mastery_score == 1.0
+    assert state.by_direction["production"].mastery_score == 0.0
+
+
+def test_recompute_learner_state_rebuilds_by_direction(
+    store: TutorSqliteStore, service: LearningStateService
+):
+    item = _item()
+    store.learning_items.create(item)
+    events = [
+        _event(item.id, exercise_type="meaning_recognition", result="correct"),
+        _event(item.id, exercise_type="ja_to_fr", result="incorrect"),
+        _event(item.id, exercise_type="cloze", result="correct"),
+    ]
+    for event in events:
+        service.record_event(event)
+
+    current = store.learner_states.get(item.id)
+    assert current is not None
+    store.learner_states.upsert(current.model_copy(update={"by_direction": {}}))
+    stale = store.learner_states.get(item.id)
+    assert stale is not None
+    assert stale.by_direction == {}
+
+    rebuilt = service.recompute_learner_state(item.id)
+    assert rebuilt is not None
+    folded = None
+    for event in events:
+        folded = apply_review_event(folded, event)
+    assert rebuilt == folded
+    assert rebuilt.by_direction["recognition"].correct_count == 1
+    assert rebuilt.by_direction["production"].attempt_count == 2
+    assert rebuilt.attempt_count == 3
+
+
+def test_legacy_event_without_mappable_type_is_not_assigned_a_direction():
+    event = LearningEvent.model_construct(
+        id="evt-legacy",
+        learning_item_id="item-1",
+        event_type="review",
+        exercise_type="legacy_unknown",
+        result="correct",
+        occurred_at=datetime(2026, 3, 1, 9, 0, tzinfo=UTC),
+        response_time_ms=None,
+        metadata={"skill_direction": "production"},
+    )
+    state = apply_review_event(None, event)
+    assert state.attempt_count == 1
+    assert state.by_direction == {}
+
+
+def test_by_direction_survives_db_reopen(tmp_path: Path):
+    db_path = tmp_path / "tutor-direction.db"
+    url = f"sqlite:///{db_path}"
+    store = TutorSqliteStore(url)
+    service = LearningStateService(
+        learning_items=store.learning_items,
+        learning_events=store.learning_events,
+        learner_states=store.learner_states,
+        progress=store.learning_progress,
+    )
+    item = _item()
+    store.learning_items.create(item)
+    service.record_event(
+        _event(item.id, exercise_type="meaning_recognition", result="correct")
+    )
+    service.record_event(_event(item.id, exercise_type="ja_to_fr", result="incorrect"))
+    store.engine.dispose()
+
+    reopened = TutorSqliteStore(url)
+    loaded = reopened.learner_states.get(item.id)
+    assert loaded is not None
+    assert loaded.attempt_count == 2
+    assert loaded.by_direction["recognition"].correct_count == 1
+    assert loaded.by_direction["production"].incorrect_count == 1
+    assert loaded.by_direction["recognition"].mastery_score == 1.0
+    assert loaded.by_direction["production"].mastery_score == 0.0
+    reopened.engine.dispose()
 
 
 def test_recompute_learner_state_returns_none_when_no_events(

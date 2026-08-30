@@ -9,12 +9,15 @@ Tutor中核ドメインモデル（Phase 0）の型・不変条件を検証す�
 """
 
 from datetime import UTC, datetime, timedelta, timezone
+from typing import get_args
 
 import pytest
 from pydantic import ValidationError
 
 from app.domain.tutor import (
+    SKILL_DIRECTION_BY_EXERCISE_TYPE,
     EvidenceSpan,
+    ExerciseType,
     LearnerState,
     LearningEvent,
     LearningItem,
@@ -28,6 +31,7 @@ from app.domain.tutor import (
     compute_mastery_score,
     new_id,
     read_source_evidence,
+    skill_direction_for_event,
     utcnow,
 )
 
@@ -502,7 +506,7 @@ def test_learner_state_accepts_consistent_studied_state():
 
 
 def test_learner_state_can_hold_direction_breakdown():
-    """recognition / production を将来分離できる構造であることを確認する。"""
+    """recognition / production を別々に保持できる。"""
     reviewed_at = utcnow()
     state = LearnerState(
         learning_item_id="item-1",
@@ -647,6 +651,22 @@ def _review_event(item_id: str, result: str, **overrides) -> LearningEvent:
     return LearningEvent(**values)
 
 
+def _legacy_event(item_id: str, result: str, **overrides) -> LearningEvent:
+    """exercise_type から direction を決められない legacy event。"""
+    values = {
+        "id": "evt-legacy",
+        "learning_item_id": item_id,
+        "event_type": "review",
+        "exercise_type": "legacy_unknown",
+        "result": result,
+        "occurred_at": datetime(2026, 1, 1, 10, 0, tzinfo=UTC),
+        "response_time_ms": None,
+        "metadata": {},
+    }
+    values.update(overrides)
+    return LearningEvent.model_construct(**values)
+
+
 def test_compute_mastery_score_is_accuracy():
     assert compute_mastery_score(correct_count=0, attempt_count=0) == 0.0
     assert compute_mastery_score(correct_count=0, attempt_count=1) == 0.0
@@ -699,7 +719,11 @@ def test_apply_review_event_creates_state_from_first_correct():
     assert state.consecutive_correct == 1
     assert state.last_reviewed_at == occurred_at
     assert state.mastery_score == 1.0
-    assert state.by_direction == {}
+    recognition = state.by_direction["recognition"]
+    assert recognition.attempt_count == 1
+    assert recognition.correct_count == 1
+    assert recognition.mastery_score == 1.0
+    assert "production" not in state.by_direction
 
 
 def test_apply_review_event_creates_state_from_first_incorrect():
@@ -752,20 +776,175 @@ def test_apply_review_event_rejects_mismatched_item_id():
         apply_review_event(state, _review_event("item-b", "correct"))
 
 
-def test_apply_review_event_preserves_by_direction_without_updating_it():
-    reviewed_at = utcnow()
-    by_direction = {
-        "recognition": MasteryStats(
-            attempt_count=1,
-            correct_count=1,
-            last_reviewed_at=reviewed_at,
-            mastery_score=1.0,
-        )
-    }
-    state = LearnerState(learning_item_id="item-1", by_direction=by_direction)
-    updated = apply_review_event(state, _review_event("item-1", "correct"))
-    assert updated.by_direction == by_direction
-    assert updated.attempt_count == 1
+def test_skill_direction_mapping_covers_every_exercise_type():
+    assert set(SKILL_DIRECTION_BY_EXERCISE_TYPE) == set(get_args(ExerciseType))
+
+
+def test_skill_direction_for_event_uses_exercise_type_not_metadata():
+    event = _review_event(
+        "item-1",
+        "correct",
+        exercise_type="meaning_recognition",
+        metadata={"skill_direction": "production"},
+    )
+    assert skill_direction_for_event(event) == "recognition"
+
+
+def test_apply_review_event_updates_recognition_only_on_recognition_correct():
+    event = _review_event("item-1", "correct", exercise_type="meaning_recognition")
+    state = apply_review_event(None, event)
+    assert state.attempt_count == 1
+    assert state.correct_count == 1
+    assert state.by_direction["recognition"].correct_count == 1
+    assert "production" not in state.by_direction
+
+
+def test_apply_review_event_updates_production_only_on_production_incorrect():
+    event = _review_event("item-1", "incorrect", exercise_type="ja_to_fr")
+    state = apply_review_event(None, event)
+    assert state.attempt_count == 1
+    assert state.incorrect_count == 1
+    assert state.by_direction["production"].incorrect_count == 1
+    assert "recognition" not in state.by_direction
+
+
+def test_overall_stats_include_both_directions():
+    rec = _review_event("item-1", "correct", exercise_type="meaning_recognition")
+    prod = _review_event("item-1", "incorrect", exercise_type="ja_to_fr")
+    state = apply_review_event(None, rec)
+    state = apply_review_event(state, prod)
+    assert state.attempt_count == 2
+    assert state.correct_count == 1
+    assert state.incorrect_count == 1
+    assert state.mastery_score == pytest.approx(0.5)
+    assert state.by_direction["recognition"].attempt_count == 1
+    assert state.by_direction["production"].attempt_count == 1
+
+
+def test_recognition_and_production_have_independent_mastery():
+    rec = _review_event("item-1", "correct", exercise_type="fr_to_ja")
+    prod = _review_event("item-1", "incorrect", exercise_type="cloze")
+    state = apply_review_event(None, rec)
+    state = apply_review_event(state, prod)
+    assert state.by_direction["recognition"].mastery_score == 1.0
+    assert state.by_direction["production"].mastery_score == 0.0
+    assert state.mastery_score == pytest.approx(0.5)
+
+
+def test_recognition_correct_does_not_raise_production_mastery():
+    prod = _review_event("item-1", "incorrect", exercise_type="ja_to_fr")
+    rec = _review_event("item-1", "correct", exercise_type="meaning_recognition")
+    state = apply_review_event(None, prod)
+    assert state.by_direction["production"].mastery_score == 0.0
+    state = apply_review_event(state, rec)
+    assert state.by_direction["production"].mastery_score == 0.0
+    assert state.by_direction["recognition"].mastery_score == 1.0
+
+
+def test_production_incorrect_does_not_reset_recognition_streak():
+    rec1 = _review_event("item-1", "correct", exercise_type="meaning_recognition")
+    rec2 = _review_event("item-1", "correct", exercise_type="noun_gender")
+    prod = _review_event("item-1", "incorrect", exercise_type="verb_conjugation")
+    state = apply_review_event(None, rec1)
+    state = apply_review_event(state, rec2)
+    assert state.consecutive_correct == 2
+    assert state.by_direction["recognition"].consecutive_correct == 2
+    state = apply_review_event(state, prod)
+    assert state.consecutive_correct == 0
+    assert state.by_direction["recognition"].consecutive_correct == 2
+    assert state.by_direction["production"].consecutive_correct == 0
+
+
+def test_direction_attempt_counts_match_classified_events_only():
+    events = [
+        _review_event("item-1", "correct", exercise_type="meaning_recognition"),
+        _review_event("item-1", "correct", exercise_type="ja_to_fr"),
+        _review_event("item-1", "incorrect", exercise_type="cloze"),
+        _legacy_event("item-1", "correct"),
+    ]
+    state: LearnerState | None = None
+    for event in events:
+        state = apply_review_event(state, event)
+    assert state is not None
+    assert state.attempt_count == 4
+    classified = (
+        state.by_direction["recognition"].attempt_count
+        + state.by_direction["production"].attempt_count
+    )
+    assert classified == 3
+    assert state.by_direction["recognition"].attempt_count == 1
+    assert state.by_direction["production"].attempt_count == 2
+
+
+def test_apply_review_event_replay_rebuilds_same_by_direction():
+    events = [
+        _review_event(
+            "item-1",
+            "correct",
+            exercise_type="meaning_recognition",
+            occurred_at=datetime(2026, 1, 1, 10, tzinfo=UTC),
+        ),
+        _review_event(
+            "item-1",
+            "incorrect",
+            exercise_type="ja_to_fr",
+            occurred_at=datetime(2026, 1, 1, 11, tzinfo=UTC),
+        ),
+        _review_event(
+            "item-1",
+            "correct",
+            exercise_type="cloze",
+            occurred_at=datetime(2026, 1, 1, 12, tzinfo=UTC),
+        ),
+        _legacy_event(
+            "item-1",
+            "incorrect",
+            occurred_at=datetime(2026, 1, 1, 13, tzinfo=UTC),
+        ),
+    ]
+
+    def fold(sequence: list[LearningEvent]) -> LearnerState:
+        state: LearnerState | None = None
+        for event in sequence:
+            state = apply_review_event(state, event)
+        assert state is not None
+        return state
+
+    first = fold(events)
+    second = fold(events)
+    assert first == second
+    assert first.by_direction["recognition"].correct_count == 1
+    assert first.by_direction["production"].attempt_count == 2
+    assert first.attempt_count == 4
+
+
+def test_legacy_event_updates_overall_but_not_by_direction():
+    event = _legacy_event(
+        "item-1",
+        "correct",
+        metadata={"skill_direction": "recognition"},
+    )
+    state = apply_review_event(None, event)
+    assert skill_direction_for_event(event) is None
+    assert state.attempt_count == 1
+    assert state.correct_count == 1
+    assert state.mastery_score == 1.0
+    assert state.by_direction == {}
+
+
+def test_apply_review_event_does_not_mutate_previous_by_direction():
+    original = apply_review_event(
+        None,
+        _review_event("item-1", "correct", exercise_type="meaning_recognition"),
+    )
+    updated = apply_review_event(
+        original,
+        _review_event("item-1", "correct", exercise_type="ja_to_fr"),
+    )
+    assert original.attempt_count == 1
+    assert "production" not in original.by_direction
+    assert original.by_direction["recognition"].attempt_count == 1
+    assert updated.by_direction["production"].attempt_count == 1
 
 
 def test_apply_review_event_sequence_is_deterministic():
@@ -791,3 +970,8 @@ def test_apply_review_event_sequence_is_deterministic():
     assert first.consecutive_correct == 1
     assert first.mastery_score == pytest.approx(4 / 7)
     assert first.last_reviewed_at == events[-1].occurred_at
+    recognition = first.by_direction["recognition"]
+    assert recognition.attempt_count == first.attempt_count
+    assert recognition.correct_count == first.correct_count
+    assert recognition.mastery_score == first.mastery_score
+    assert "production" not in first.by_direction

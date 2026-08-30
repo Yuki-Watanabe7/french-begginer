@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.conjugation_adapter import evaluate_conjugation_adapter
 from app.domain.tutor import (
+    SKILL_DIRECTION_BY_EXERCISE_TYPE,
     ExerciseType,
     LearningItem,
     LearningItemType,
@@ -93,17 +94,8 @@ _INTERNAL_ANSWER_FIELDS = frozenset(
     }
 )
 
-EXERCISE_SKILL_DIRECTIONS: dict[ExerciseType, SkillDirection] = {
-    "meaning_recognition": "recognition",
-    "fr_to_ja": "recognition",
-    "ja_to_fr": "production",
-    "cloze": "production",
-    "expression_reconstruction": "production",
-    "verb_conjugation": "production",
-    "noun_gender": "recognition",
-    "noun_article": "production",
-}
-"""ExerciseType → SkillDirection。曖昧な形式もここに一元化する。"""
+EXERCISE_SKILL_DIRECTIONS = SKILL_DIRECTION_BY_EXERCISE_TYPE
+"""ExerciseType → SkillDirection。source of truth は domain.tutor。"""
 
 EXERCISE_GENERATION_METHODS: dict[ExerciseType, GenerationMethod] = {
     "meaning_recognition": "deterministic",
