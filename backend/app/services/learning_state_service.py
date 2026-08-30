@@ -2,7 +2,8 @@
 
 LearningEvent が事実の履歴、LearnerState はその集約キャッシュ。
 状態更新は domain の `apply_review_event` に任せ、このサービスは
-存在確認・トランザクション・再構築を担う。
+存在確認・トランザクション・再構築を担う。`by_direction` も同じ
+畳み込みで再計算する（Issue #161）。
 """
 
 from app.domain.tutor import LearnerState, LearningEvent, apply_review_event
@@ -45,7 +46,9 @@ class LearningStateService:
         """LearningEvent 履歴から LearnerState を再構築して保存する。
 
         履歴が source of truth。トランザクション外で state だけ欠けた
-        場合の回復に使う。イベントが無ければ None を返し、既存 state は触らない。
+        場合の回復に使う。イベントを `occurred_at, id` 順に replay し、
+        全体集計と by_direction を同じ履歴から再構築する。
+        イベントが無ければ None を返し、既存 state は触らない。
         """
         if self._items.get(item_id) is None:
             raise ValueError(f"LearningItem が存在しない: id={item_id}")

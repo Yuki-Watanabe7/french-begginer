@@ -400,7 +400,10 @@ def test_phase3_source_to_practice_to_learning_event_vertical_slice(
             assert rec_body["learner_state"]["correct_count"] == 1
             assert rec_body["learner_state"]["attempt_count"] == 1
             assert rec_body["review_schedule"]["review_count"] == 1
-            assert rec_body["learner_state"]["by_direction"] == {}
+            rec_direction = rec_body["learner_state"]["by_direction"]
+            assert rec_direction["recognition"]["correct_count"] == 1
+            assert rec_direction["recognition"]["attempt_count"] == 1
+            assert "production" not in rec_direction
 
             prod_answer, prod_expected = _answer_payload(
                 file_store,
@@ -419,6 +422,15 @@ def test_phase3_source_to_practice_to_learning_event_vertical_slice(
             assert wrong_body["event"]["metadata"]["skill_direction"] == "production"
             assert wrong_body["learner_state"]["incorrect_count"] == 1
             assert wrong_body["review_schedule"]["lapse_count"] == 1
+            prod_direction = wrong_body["learner_state"]["by_direction"]
+            assert prod_direction["production"]["incorrect_count"] == 1
+            if (
+                production_row["learning_item_id"]
+                == recognition_row["learning_item_id"]
+            ):
+                assert prod_direction["recognition"]["consecutive_correct"] == 1
+            else:
+                assert "recognition" not in prod_direction
 
             dup = http.post(
                 f"/api/tutor/items/{recognition_row['learning_item_id']}"
@@ -451,6 +463,12 @@ def test_phase3_source_to_practice_to_learning_event_vertical_slice(
             rec_loaded = rec_detail.json()
             assert rec_loaded["learner_state"]["correct_count"] == 1
             assert rec_loaded["learner_state"]["attempt_count"] == 1
+            assert (
+                rec_loaded["learner_state"]["by_direction"]["recognition"][
+                    "correct_count"
+                ]
+                == 1
+            )
             assert rec_loaded["review_schedule"]["review_count"] == 1
             events = reopened.learning_events.list_by_item(rec_item_id)
             assert len(events) == 1
@@ -461,6 +479,12 @@ def test_phase3_source_to_practice_to_learning_event_vertical_slice(
                 f"/api/tutor/items/{production_row['learning_item_id']}"
             )
             assert prod_detail.json()["learner_state"]["incorrect_count"] == 1
+            assert (
+                prod_detail.json()["learner_state"]["by_direction"]["production"][
+                    "incorrect_count"
+                ]
+                == 1
+            )
             assert prod_detail.json()["review_schedule"]["lapse_count"] == 1
             prod_events = reopened.learning_events.list_by_item(
                 production_row["learning_item_id"]
