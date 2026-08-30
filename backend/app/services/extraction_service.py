@@ -89,9 +89,22 @@ def _to_learning_item_candidate(
         ),
         confidence=item.confidence,
         extraction_version=raw.extraction_version,
-        metadata={
-            "provider": raw.provider,
-            "model": raw.model,
-            "prompt_version": raw.extraction_version,
-        },
+        metadata=_candidate_metadata(item, raw),
     )
+
+
+def _candidate_metadata(
+    item: ExtractedCandidate, raw: ExtractorResult
+) -> dict[str, str]:
+    metadata = {
+        "provider": raw.provider,
+        "model": raw.model,
+        "prompt_version": raw.extraction_version,
+    }
+    if item.item_type != "conjugation":
+        return metadata
+    if item.tense is not None:
+        metadata["tense"] = item.tense
+    if item.mood is not None:
+        metadata["mood"] = item.mood
+    return metadata

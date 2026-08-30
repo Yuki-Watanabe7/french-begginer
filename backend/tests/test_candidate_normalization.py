@@ -158,6 +158,48 @@ def test_different_item_types_are_not_merged():
     assert result.exclusions == ()
     conjugation = next(c for c in result.candidates if c.item_type == "conjugation")
     assert conjugation.metadata["lemma"] == "changer"
+    assert "tense" not in conjugation.metadata
+
+
+def test_conjugation_tense_and_mood_are_canonicalized():
+    source = _source()
+    result = normalize_candidates(
+        source,
+        [
+            _candidate(
+                source,
+                item_type="conjugation",
+                canonical_form="parler",
+                evidence_span=_span_for("changer"),
+                metadata={"tense": "Présent", "mood": "Indicatif"},
+            )
+        ],
+    )
+    kept = result.candidates[0]
+    assert kept.metadata["lemma"] == "parler"
+    assert kept.metadata["tense"] == "présent"
+    assert kept.metadata["mood"] == "indicatif"
+
+
+def test_conjugation_unknown_tense_is_not_persisted():
+    source = _source()
+    result = normalize_candidates(
+        source,
+        [
+            _candidate(
+                source,
+                item_type="conjugation",
+                canonical_form="parler",
+                evidence_span=_span_for("changer"),
+                metadata={"tense": "not-a-real-tense", "mood": "mystery"},
+            )
+        ],
+    )
+    kept = result.candidates[0]
+    assert kept.metadata["lemma"] == "parler"
+    assert "tense" not in kept.metadata
+    assert "mood" not in kept.metadata
+    assert result.exclusions == ()
 
 
 def test_normalization_is_deterministic():

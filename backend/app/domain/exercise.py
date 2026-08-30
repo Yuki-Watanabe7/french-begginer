@@ -5,7 +5,8 @@ Tutor layer が「この LearningItem にどの Exercise を出せるか」を�
 Frontend はこのモジュールの責務ではない。
 
 このモジュールが依存してよいのは Python 標準ライブラリ、Pydantic、
-`domain.tutor`、既存動詞データ（`conjugation.CONJUGATIONS`）のみ。
+`domain.tutor`、`domain.conjugation_adapter` のみ。
+既存動詞データ（`conjugation.CONJUGATIONS`）への接続は adapter が担う。
 DB / FastAPI / OpenAI には依存しない。
 
 Exercise 自体は永続化しない。同じ (item, exercise_type, exercise_version)
@@ -28,7 +29,7 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.conjugation import CONJUGATIONS
+from app.domain.conjugation_adapter import evaluate_conjugation_adapter
 from app.domain.tutor import (
     ExerciseType,
     LearningItem,
@@ -50,6 +51,9 @@ ExerciseSkipReason = Literal[
     "evidence_span_empty",
     "context_unavailable",
     "unknown_conjugation_lemma",
+    "missing_conjugation_tense",
+    "unsupported_conjugation_tense",
+    "unsupported_conjugation_mood",
     "requires_semantic_grading",
     "existing_quiz_only",
     "insufficient_expression_tokens",
@@ -276,14 +280,6 @@ def tokenize_canonical_form(canonical_form: str) -> tuple[str, ...]:
     return tuple(token for token in _WHITESPACE_RE.split(stripped) if token)
 
 
-def conjugation_lemma(item: LearningItem) -> str:
-    """conjugation item の lemma。metadata.lemma があればそれを優先する。"""
-    raw = item.metadata.get("lemma")
-    if isinstance(raw, str) and raw.strip():
-        return raw.strip()
-    return item.canonical_form.strip()
-
-
 def has_source_evidence(item: LearningItem) -> bool:
     """source cloze に必要な原文根拠が1件以上あるか。"""
     return any(ref.evidence_span is not None for ref in item.source_refs)
@@ -466,15 +462,11 @@ def _skip_reason(
             "source cloze には evidence_span 付きの source_ref が必要",
         )
     if exercise_type == "verb_conjugation":
-        lemma = conjugation_lemma(item)
-        known = known_conjugation_lemmas
-        if known is None:
-            known = CONJUGATIONS.keys()
-        if lemma.casefold() not in {value.casefold() for value in known}:
-            return (
-                "unknown_conjugation_lemma",
-                f"既存 verb_conjugation に接続できない lemma: {lemma}",
-            )
+        _target, skip = evaluate_conjugation_adapter(
+            item, known_conjugation_lemmas=known_conjugation_lemmas
+        )
+        if skip is not None:
+            return skip
     if exercise_type == "expression_reconstruction":
         tokens = tokenize_canonical_form(item.canonical_form)
         if len(tokens) < MIN_RECONSTRUCTION_TOKENS:

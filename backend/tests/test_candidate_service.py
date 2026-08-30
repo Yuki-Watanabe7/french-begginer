@@ -393,6 +393,68 @@ def test_item_write_failure_leaves_candidate_pending(
     assert remaining.status == "candidate"
 
 
+def test_accept_copies_conjugation_lemma_and_tense(
+    store: TutorSqliteStore, fake: FakeLearningItemExtractor
+):
+    fake.result = _result(
+        (
+            _extracted(
+                item_type="conjugation",
+                canonical_form="parler",
+                meaning_ja="話す",
+                fragment="changer",
+                tense="présent",
+                mood="indicatif",
+            ),
+        )
+    )
+    service = build_candidate_service(store, ExtractionService(fake))
+    source = _create_source(store)
+    created = service.extract_for_source(source.id).created[0]
+    result = service.accept(created.candidate.id)
+
+    assert result.merged is False
+    assert result.item.item_type == "conjugation"
+    assert result.item.metadata["lemma"] == "parler"
+    assert result.item.metadata["tense"] == "présent"
+    assert result.item.metadata["mood"] == "indicatif"
+    assert "provider" not in result.item.metadata
+
+
+def test_accept_merge_fills_missing_conjugation_metadata(
+    store: TutorSqliteStore, fake: FakeLearningItemExtractor
+):
+    fake.result = _result(
+        (
+            _extracted(
+                item_type="conjugation",
+                canonical_form="parler",
+                meaning_ja="話す",
+                fragment="changer",
+                tense="présent",
+            ),
+        )
+    )
+    service = build_candidate_service(store, ExtractionService(fake))
+    source = _create_source(store)
+    existing = store.learning_items.create(
+        LearningItem(
+            item_type="conjugation",
+            canonical_form="parler",
+            meaning_ja="話す（手入力）",
+            metadata={"lemma": "parler"},
+        )
+    )
+    created = service.extract_for_source(source.id).created[0]
+    result = service.accept(created.candidate.id)
+
+    assert result.merged is True
+    assert result.item.id == existing.id
+    assert result.item.metadata["lemma"] == "parler"
+    assert result.item.metadata["tense"] == "présent"
+    assert result.item.meaning_ja == "話す（手入力）"
+
+
 def test_extract_config_error_does_not_save(
     store: TutorSqliteStore, fake: FakeLearningItemExtractor
 ):
