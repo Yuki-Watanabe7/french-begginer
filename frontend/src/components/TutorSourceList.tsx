@@ -6,9 +6,10 @@ interface Props {
   onSelect: (sourceId: string) => void
   onAdd: () => void
   onBack: () => void
+  onStartPractice?: () => void
 }
 
-export function TutorSourceList({ onSelect, onAdd, onBack }: Props) {
+export function TutorSourceList({ onSelect, onAdd, onBack, onStartPractice }: Props) {
   const { status, sources, error, retry } = useTutorSourceList()
 
   return (
@@ -46,6 +47,11 @@ export function TutorSourceList({ onSelect, onAdd, onBack }: Props) {
           <button type="button" style={styles.primaryBtn} onClick={onAdd}>
             新しいテキストを追加
           </button>
+          {onStartPractice && (
+            <button type="button" style={styles.practiceBtn} onClick={onStartPractice}>
+              学習する
+            </button>
+          )}
           <ul style={styles.list}>
             {sources.map(source => (
               <li key={source.id} style={styles.listItem}>
@@ -157,6 +163,19 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#fff',
     cursor: 'pointer',
     width: '100%',
+  },
+  practiceBtn: {
+    fontSize: 17,
+    fontWeight: 700,
+    padding: '14px 0',
+    minHeight: 48,
+    borderRadius: 14,
+    border: '2px solid #1a56d6',
+    background: '#fff',
+    color: '#1a56d6',
+    cursor: 'pointer',
+    width: '100%',
+    marginTop: 12,
   },
   list: {
     listStyle: 'none',

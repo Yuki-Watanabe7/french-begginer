@@ -96,4 +96,25 @@ describe('TutorFlow', () => {
     await userEvent.click(screen.getByRole('button', { name: 'モード選択に戻る' }))
     expect(onBack).toHaveBeenCalledTimes(1)
   })
+
+  it('一覧の学習するから出題数選択へ進める', async () => {
+    mockList.mockResolvedValue([SUMMARY])
+    render(<TutorFlow onBack={() => {}} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: '学習する' }))
+    expect(screen.getByText('出題数を選択')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '戻る' }))
+    await screen.findByRole('button', { name: /Le Monde/ })
+  })
+
+  it('Source詳細の学習するから練習設定へ進める', async () => {
+    mockList.mockResolvedValue([SUMMARY])
+    mockGet.mockResolvedValue(SOURCE)
+    render(<TutorFlow onBack={() => {}} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /Le Monde/ }))
+    await screen.findByRole('heading', { name: 'Le Monde' })
+    await userEvent.click(screen.getByRole('button', { name: '学習する' }))
+    expect(screen.getByText('出題数を選択')).toBeInTheDocument()
+  })
 })

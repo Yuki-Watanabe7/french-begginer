@@ -156,6 +156,21 @@ describe('TutorSourceDetail', () => {
     expect(onBackToList).toHaveBeenCalledTimes(1)
   })
 
+  it('学習する でこの Source の練習を開始できる', async () => {
+    const onStartPractice = vi.fn()
+    render(
+      <TutorSourceDetail
+        sourceId="src-1"
+        initialSource={SOURCE}
+        onBackToList={() => {}}
+        onStartPractice={onStartPractice}
+      />,
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: '学習する' }))
+    expect(onStartPractice).toHaveBeenCalledTimes(1)
+  })
+
   it('404 時に Sourceが見つかりません を出す', async () => {
     mockGet.mockRejectedValueOnce(new ApiError(404, { detail: 'missing' }))
     render(

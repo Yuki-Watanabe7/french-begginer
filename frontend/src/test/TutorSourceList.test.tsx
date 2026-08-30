@@ -127,4 +127,24 @@ describe('TutorSourceList', () => {
     await userEvent.click(screen.getByRole('button', { name: 'モード選択に戻る' }))
     expect(onBack).toHaveBeenCalledTimes(1)
   })
+
+  it('学習する で全体練習を開始できる', async () => {
+    mockList.mockResolvedValueOnce([NEWER])
+    const onStartPractice = vi.fn()
+    render(
+      <TutorSourceList
+        onSelect={() => {}}
+        onAdd={() => {}}
+        onBack={() => {}}
+        onStartPractice={onStartPractice}
+      />,
+    )
+
+    await userEvent.click(await screen.findByRole('button', { name: '学習する' }))
+    expect(onStartPractice).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '学習する' })).toHaveStyle({
+      width: '100%',
+      minHeight: '48px',
+    })
+  })
 })

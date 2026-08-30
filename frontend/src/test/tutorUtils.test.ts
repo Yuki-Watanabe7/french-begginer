@@ -3,12 +3,17 @@ import { ApiError } from '../api/tutor'
 import {
   fieldErrorsFromTutorApiBody,
   formatCandidateConfidence,
+  formatPracticeGiven,
   formatTutorDateTime,
+  looksLikeFrench,
+  practiceFrenchTtsTargets,
   tutorCandidateActionErrorMessage,
+  tutorExerciseAnswerErrorMessage,
   tutorExtractErrorMessage,
   tutorFetchErrorMessage,
   tutorNoteFromMetadata,
   tutorNoteMetadata,
+  tutorPracticeSessionErrorMessage,
   tutorSaveErrorMessage,
 } from '../utils/tutor'
 
@@ -139,5 +144,74 @@ describe('formatCandidateConfidence', () => {
   it('0.9 をパーセント表示し、null は出さない', () => {
     expect(formatCandidateConfidence(0.9)).toBe('確信度 90%')
     expect(formatCandidateConfidence(null)).toBeNull()
+  })
+})
+
+describe('tutorPracticeSessionErrorMessage', () => {
+  it('404 / 422 / 通信失敗を日本語へ変換する', () => {
+    expect(tutorPracticeSessionErrorMessage(new ApiError(404))).toBe(
+      '教材または学習項目が見つかりません',
+    )
+    expect(tutorPracticeSessionErrorMessage(new ApiError(422))).toBe(
+      '練習の条件を確認してください',
+    )
+    expect(tutorPracticeSessionErrorMessage(new Error('network'))).toBe(
+      '練習の開始に失敗しました。通信環境を確認して再度お試しください',
+    )
+  })
+})
+
+describe('tutorExerciseAnswerErrorMessage', () => {
+  it('409 / 5xx を日本語へ変換する', () => {
+    expect(tutorExerciseAnswerErrorMessage(new ApiError(409))).toBe(
+      'この回答はすでに記録されています',
+    )
+    expect(tutorExerciseAnswerErrorMessage(new ApiError(500))).toBe(
+      'サーバーでエラーが発生しました。時間をおいて再度お試しください',
+    )
+    expect(tutorExerciseAnswerErrorMessage(new Error('network'))).toBe(
+      '判定に失敗しました。通信環境を確認して再度お試しください',
+    )
+  })
+})
+
+describe('practiceFrenchTtsTargets', () => {
+  const exercise = {
+    learning_item_id: 'item-1',
+    exercise_type: 'meaning_recognition' as const,
+    skill_direction: 'recognition' as const,
+    prompt: 'livre',
+    response_kind: 'choice' as const,
+    options: ['本'],
+    source_context: null,
+    exercise_version: 'exercise-v1',
+  }
+  const item = {
+    id: 'item-1',
+    item_type: 'vocabulary' as const,
+    canonical_form: 'livre',
+    meaning_ja: '本',
+    explanation_ja: null,
+    level: null,
+    source_refs: [],
+    created_at: '2026-08-24T12:00:00+00:00',
+    status: 'active',
+  }
+
+  it('日本語の意味は TTS 対象にしない', () => {
+    expect(looksLikeFrench('本')).toBe(false)
+    expect(practiceFrenchTtsTargets(exercise, item, '本')).toEqual(['livre'])
+  })
+
+  it('production の正解はフランス語なら対象にする', () => {
+    const jaToFr = { ...exercise, exercise_type: 'ja_to_fr' as const, response_kind: 'text' as const }
+    expect(practiceFrenchTtsTargets(jaToFr, item, 'livre')).toEqual(['livre'])
+  })
+})
+
+describe('formatPracticeGiven', () => {
+  it('配列は空白区切りにする', () => {
+    expect(formatPracticeGiven(['se', 'rendre'])).toBe('se rendre')
+    expect(formatPracticeGiven('livre')).toBe('livre')
   })
 })

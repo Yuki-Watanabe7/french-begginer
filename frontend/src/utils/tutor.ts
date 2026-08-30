@@ -1,5 +1,11 @@
 import { ApiError, isNotFoundError } from '../api/tutor'
-import type { CandidateStatus, LearningItemType } from '../types'
+import type {
+  CandidateStatus,
+  ExerciseType,
+  ExerciseView,
+  LearningItem,
+  LearningItemType,
+} from '../types'
 
 const NOTE_KEY = 'note'
 
@@ -167,4 +173,75 @@ export function tutorCandidateActionErrorMessage(error: unknown): string {
 export function formatCandidateConfidence(confidence: number | null): string | null {
   if (confidence == null) return null
   return `確信度 ${Math.round(confidence * 100)}%`
+}
+
+export const EXERCISE_TYPE_LABELS: Record<ExerciseType, string> = {
+  meaning_recognition: '意味',
+  fr_to_ja: '和訳',
+  ja_to_fr: '仏作文',
+  cloze: '穴埋め',
+  expression_reconstruction: '並べ替え',
+  verb_conjugation: '活用',
+  noun_gender: '名詞の性',
+  noun_article: '冠詞',
+}
+
+export function tutorPracticeSessionErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 404) {
+      return '教材または学習項目が見つかりません'
+    }
+    if (error.status === 422) {
+      return '練習の条件を確認してください'
+    }
+    if (error.status >= 500) {
+      return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+    }
+  }
+  return '練習の開始に失敗しました。通信環境を確認して再度お試しください'
+}
+
+export function tutorExerciseAnswerErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 404) {
+      return '学習項目が見つかりません'
+    }
+    if (error.status === 409) {
+      return 'この回答はすでに記録されています'
+    }
+    if (error.status === 422) {
+      return '回答の形式を確認してください'
+    }
+    if (error.status >= 500) {
+      return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+    }
+  }
+  return '判定に失敗しました。通信環境を確認して再度お試しください'
+}
+
+export function looksLikeFrench(text: string): boolean {
+  return /[A-Za-zÀ-ÿ]/.test(text)
+}
+
+export function formatPracticeGiven(given: string | string[]): string {
+  return Array.isArray(given) ? given.join(' ') : given
+}
+
+/** フランス語として自然な TTS 対象。日本語の意味は含めない。 */
+export function practiceFrenchTtsTargets(
+  exercise: ExerciseView,
+  item: LearningItem | undefined,
+  correctAnswer: string | null,
+): string[] {
+  const texts: string[] = []
+  const push = (text: string | null | undefined) => {
+    const trimmed = text?.trim()
+    if (!trimmed || !looksLikeFrench(trimmed)) return
+    if (!texts.includes(trimmed)) texts.push(trimmed)
+  }
+  push(item?.canonical_form)
+  if (exercise.exercise_type !== 'meaning_recognition') {
+    push(correctAnswer)
+  }
+  return texts
 }
