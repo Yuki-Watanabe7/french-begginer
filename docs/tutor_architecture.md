@@ -22,7 +22,8 @@ Source evidence からの cloze Exercise 生成（Issue #147）、
 conjugation LearningItem の既存動詞活用 adapter（Issue #148）、
 Exercise の server-side 採点と LearningEvent 記録（Issue #149）、
 accepted LearningItem からの Practice Session 組み立て（Issue #150）、
-Tutor Practice Session の Frontend UI と TTS/feedback（Issue #151）
+Tutor Practice Session の Frontend UI と TTS/feedback（Issue #151）、
+Phase 3 vertical slice と Exit Criteria（Issue #152）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -53,6 +54,8 @@ Tutor Practice Session の Frontend UI と TTS/feedback（Issue #151）
   / `docs/tutor_extraction_quality.md`
 - Phase 2 vertical slice: `backend/tests/test_tutor_phase2_vertical_slice.py`
   / `frontend/src/test/TutorPhase2Flow.test.tsx`
+- Phase 3 vertical slice: `backend/tests/test_tutor_phase3_vertical_slice.py`
+  / `frontend/src/test/TutorPhase3Flow.test.tsx`
 - Exercise 契約: `backend/app/domain/exercise.py`
   / `backend/tests/test_exercise.py`
 - Exercise 生成: `backend/app/domain/exercise_generation.py`
@@ -1048,7 +1051,8 @@ Issue #148 で conjugation を既存動詞活用へ安全に接続する adapter
 Issue #149 で Exercise の server-side 採点と LearningEvent 記録 API を追加した。
 Issue #150 で accepted LearningItem から手動開始できる Practice Session を
 組み立てる API を追加した。Issue #151 で Frontend から解ける Practice
-Session UI を追加した。
+Session UI を追加した。Issue #152 でこれらを一本の vertical slice として
+閉じ、Phase 3 Exit Criteria を固定した。
 Phase 2 では LearningItem を作れるところまでで止め、
 以下はまだ行わない。
 
@@ -1203,9 +1207,9 @@ generic な `/api/tutor/exercises` 等を禁止したまま維持する。
 | domain が FastAPI / SQLAlchemy / OpenAI 非依存 | `test_domain_module_does_not_depend_on_fastapi_sqlalchemy_or_openai` |
 | exercise_version を LearningEvent で追跡できる | `test_learning_event_can_track_exercise_version` |
 
-### Phase 3 の残り（#145〜#151 のスコープ外）
+### Phase 3 の残り（#145〜#151 時点のスコープ外。#152 で vertical slice として閉じる）
 
-- by_direction の更新
+- by_direction の更新（Phase 4）
 - due review session（Phase 4）
 
 ## Phase 3 — vocabulary / expression の deterministic 生成（Issue #146）
@@ -1658,6 +1662,124 @@ Tutor / Source詳細
 | TTS 失敗で学習フローが止まらない | `PracticeExerciseCard.test.tsx` |
 | Session 完了結果 | `PracticeSessionFlow.test.tsx` |
 
+## Phase 3 vertical slice（Issue #152）
+
+Issue #145〜#151 で追加した Exercise 生成・回答判定・Practice Session・
+Frontend を、ユーザー操作として一本につながった vertical slice として検証する。
+
+Phase 3 のゴールは、Phase 2 で accepted になった LearningItem を
+**実際に解き、その結果が LearningEvent / LearnerState / ReviewSchedule へ残ること**。
+
+必須フロー:
+
+```text
+1. SourceDocumentを保存
+2. CandidateをacceptedにしてLearningItemを作成
+3. LearningItemからeligible Exerciseを生成
+4. Practice Sessionを開始
+5. recognition問題へ回答
+6. production問題へ回答
+7. correct / incorrect feedbackを受ける
+8. LearningEventがappendされる
+9. LearnerStateが更新される
+10. ReviewScheduleが更新される
+11. Session結果を表示
+12. DB再open後もEvent / State / Scheduleが残る
+```
+
+推奨 fixture は Phase 2 と同じ原文:
+
+```text
+Je me suis rendu compte qu'il fallait changer de stratégie.
+```
+
+LearningItem 例: `se rendre compte de` / expression / 〜に気づく。
+ここから meaning recognition / ja_to_fr または reconstruction / source cloze
+を安全に生成できる。
+
+conjugation adapter fixture は既存 domain の現在形動詞（`parler` + `présent`）を使い、
+legacy adapter が既存正解データを再利用することを確認する。
+tense 不明の `être` や未対応 lemma の `changer` は現在形 quiz へ流さず、
+skip / cloze fallback する。
+
+### 品質境界
+
+Phase 3 完了時点で以下が明確であること。
+
+#### deterministic layer が保証すること
+
+- Exercise public DTO に correct answer を含めない
+- item type ごとの eligibility と skip reason
+- vocabulary / expression の deterministic 生成
+- Source evidence からの cloze 再構成
+- conjugation の既存動詞 adapter（metadata 不足で présent を推測しない）
+- server-side 採点と text normalization
+- apostrophe 差は方針どおり許容し、accent 差は無条件許容しない
+- 日本語自由記述を完全一致で誤判定しない
+- grammar に LLM distractor を自動生成しない
+- LearningEvent / LearnerState / ReviewSchedule の記録
+- duplicate submit で二重記録しない
+- Session 内の同一 `(learning_item_id, exercise_type)` 重複抑止
+- unsupported Item の skip reason
+
+#### Phase 3 ではまだ行わないこと
+
+- `LearnerState.by_direction` の更新
+- due / overdue による出題優先
+- 「今日の復習」Session
+- LLM semantic grading
+- FSRS / SM-2 最適化
+
+`skill_direction` と `exercise_version` は LearningEvent.metadata に残す。
+Phase 4 が履歴から再計算できる情報を失わない。
+
+## Phase 3 Exit Criteria（Issue #107）との対応
+
+Issue #107 の Phase 3 は、accepted LearningItem から Exercise を生成し、
+ユーザーが解き、結果が学習履歴として残ることである。
+
+| Exit Criteria | 満たした実装 | 自動テスト |
+|---------------|--------------|------------|
+| accepted LearningItem から Exercise を生成できる | `GET /api/tutor/items/{id}/exercises/{type}` | `test_phase3_source_to_practice_to_learning_event_vertical_slice` |
+| vocabulary / expression を実際に練習できる | meaning_recognition / ja_to_fr / reconstruction | 同上 / `TutorPhase3Flow.test.tsx` |
+| grammar / conjugation は安全な形式のみ生成し、metadata 不足で捏造しない | eligibility + skip reason | 同上 / `test_phase3_conjugation_adapter_reuses_existing_domain` / `test_phase3_exercise_quality_fixture` |
+| 同じ LearningItem を recognition / production の両方向で確認できる | Session policy が両方向を混在 | 同上（Session の skill_direction） |
+| Source evidence を使った context / cloze 問題を生成できる | source cloze | 同上 / `test_phase3_exercise_quality_fixture` |
+| 対応可能な conjugation Item は既存 verb domain を再利用できる | conjugation adapter | `test_phase3_conjugation_adapter_reuses_existing_domain` |
+| correct answer を問題提示時に Client へ漏らさない | `PublicExercise` / Session DTO | 同上（`_assert_no_answer_leak`） / `TutorPhase3Flow.test.tsx` |
+| 回答を server-side で判定できる | `POST .../answer` | 同上 |
+| 回答結果が LearningEvent として保存される | `record_review` | 同上 |
+| LearnerState / ReviewSchedule が更新される | 既存パイプライン | 同上 |
+| direction / exercise_version が履歴に残る | `exercise_event_metadata` | 同上 |
+| Practice Session を複数問連続して完了できる | Practice Session API + UI | 同上 / `TutorPhase3Flow.test.tsx` |
+| TTS を Exercise feedback から利用でき、失敗しても学習継続できる | `useTTS` | `TutorPhase3Flow.test.tsx` / `PracticeExerciseCard.test.tsx` |
+| DB 再 open 後も学習履歴・状態・予定が残る | file SQLite | `test_phase3_source_to_practice_to_learning_event_vertical_slice` |
+| 既存 Source / Candidate / 動詞 / 名詞 / TTS フローに回帰がない | 既存 API は Tutor practice と独立 | `test_phase3_existing_quiz_and_tts_contracts_are_unchanged` / `TutorPhase3Flow.test.tsx` |
+| スマホ相当幅で主要操作が実用的である | 全幅ボタン、`minHeight` 44/48、折り返し | `TutorPhase3Flow.test.tsx` |
+| `bash scripts/quality-check.sh` が通る | ruff / pytest / lint / frontend test / build | 作業完了時に実行 |
+| Phase 3 境界と Phase 4 への引継ぎを記載する | 本セクション | 本ドキュメント |
+
+スマホ実機の使用感は自動 style test だけでは完全代替しない。
+実機未確認の場合は PR に残す。
+
+## Phase 4 への引き継ぎ
+
+Phase 4 では Phase 0 から存在する ReviewSchedule と Phase 3 で蓄積した
+LearningEvent を使い、以下を実ユーザー体験へ接続する。
+
+- due review queue
+- 「今日の復習」Session
+- overdue handling
+- recognition / production 別 LearnerState 集計（`by_direction`）
+- long-term spacing policy
+
+Phase 3 の Practice Session は手動開始を基本とし、due / mastery による
+優先順位付けは Phase 4 へ残す。generic な `/api/tutor/reviews/today` や
+recommendation API はまだ持たない。
+
+Phase 4 へ進む前提は、Phase 0〜3 が `bash scripts/quality-check.sh` で
+継続して通ることである。
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -1680,3 +1802,5 @@ Phase 2 以降へ進む前提は、Phase 0 と Phase 1 が
 `bash scripts/quality-check.sh` で継続して通ることである。
 Phase 2 自体の完了条件と Phase 3 への引継ぎは、上記
 「Phase 2 Exit Criteria」と「Phase 3 への引き継ぎ」を正とする。
+Phase 3 自体の完了条件と Phase 4 への引継ぎは、上記
+「Phase 3 Exit Criteria」と「Phase 4 への引き継ぎ」を正とする。
