@@ -31,6 +31,8 @@ LearningItem → Exercise の契約・適用条件は `exercise` が担う（Iss
 vocabulary / expression の deterministic 生成は `exercise_generation` が担う
 （Issue #146）。Source evidence からの cloze 生成も同モジュール（Issue #147）。
 conjugation の既存動詞クイズ adapter は `conjugation_adapter` が担う（Issue #148）。
+Exercise の server-side 採点と LearningEvent 記録は `exercise_evaluation` /
+`exercise_service` が担う（Issue #149）。
 SRS / UI は後続Issue。
 """
 

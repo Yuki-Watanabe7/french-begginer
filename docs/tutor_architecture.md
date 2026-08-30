@@ -19,7 +19,8 @@ Phase 2 vertical slice と Exit Criteria（Issue #137）、
 および Phase 3 の LearningItem → Exercise 契約（Issue #145）、
 vocabulary / expression 向け deterministic Exercise 生成（Issue #146）、
 Source evidence からの cloze Exercise 生成（Issue #147）、
-conjugation LearningItem の既存動詞活用 adapter（Issue #148）
+conjugation LearningItem の既存動詞活用 adapter（Issue #148）、
+Exercise の server-side 採点と LearningEvent 記録（Issue #149）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -57,6 +58,11 @@ conjugation LearningItem の既存動詞活用 adapter（Issue #148）
   / `backend/tests/test_exercise_cloze.py`
 - conjugation adapter: `backend/app/domain/conjugation_adapter.py`
   / `backend/tests/test_exercise_conjugation_adapter.py`
+- Exercise 採点: `backend/app/domain/exercise_evaluation.py`
+  / `backend/app/services/exercise_service.py`
+  / `backend/tests/test_exercise_evaluation.py`
+  / `backend/tests/test_exercise_service.py`
+  / `backend/tests/test_exercise_api.py`
 
 ## 目指す学習ループ
 
@@ -1027,11 +1033,11 @@ Issue #145 で契約・適用条件・skill direction を定義した。
 Issue #146 で vocabulary / expression の deterministic な基本 Exercise
 生成を追加した。Issue #147 で Source evidence からの cloze 生成を追加した。
 Issue #148 で conjugation を既存動詞活用へ安全に接続する adapter を追加した。
+Issue #149 で Exercise の server-side 採点と LearningEvent 記録 API を追加した。
 Phase 2 では LearningItem を作れるところまでで止め、
 以下はまだ行わない。
 
-- HTTP API / Frontend
-- LearningEvent の自動記録
+- Frontend session UI
 - 自動学習開始
 - long-term review UI
 - Tutor recommendation
@@ -1053,8 +1059,8 @@ Phase 2 で確定した `LearningItem` を、実際の学習問題へ変換す�
 LearningItem
   -> Exercise eligibility / policy
   -> ExerciseSpec
-  -> renderer / evaluator（後続Issue）
-  -> LearningEvent（exercise_version を metadata で追跡）
+  -> evaluator（Issue #149）
+  -> LearningEvent（exercise_version / skill_direction を metadata で追跡）
 ```
 
 実装は `backend/app/domain/exercise.py`。DB / FastAPI / OpenAI に依存しない。
@@ -1158,7 +1164,7 @@ metadata 不足の Exercise を無理に生成しない。
 `EXERCISE_VERSION`（現行 `exercise-v1`）を `ExerciseSpec.exercise_version` に載せる。
 `exercise_event_metadata(spec)` が LearningEvent.metadata へ
 `exercise_version` / `skill_direction` / `response_kind` /
-`reconstruction_key` を載せる。正解は含めない。
+`generation_method` / `reconstruction_key` を載せる。正解は含めない。
 
 生成ロジックを後から変えるときは version を bump する。
 過去の LearningEvent から「どの版で回答したか」を追跡できる。
@@ -1170,8 +1176,9 @@ metadata 不足の Exercise を無理に生成しない。
 一致する conjugation だけ既存 `verb_conjugation` へ委譲する。
 LLM が「現在形だから既存 quiz へ流してよい」と最終判断しない。
 
-Exercise 生成 API はまだ公開しない（Phase 2 の
-`test_phase2_does_not_expose_exercise_generation_endpoints` を維持）。
+item 単位の Exercise 取得・回答 API は Issue #149。
+Phase 2 の `test_phase2_does_not_expose_exercise_generation_endpoints` は
+generic な `/api/tutor/exercises` 等を禁止したまま維持する。
 
 | 観点 | 自動テスト |
 |------|------------|
@@ -1182,10 +1189,9 @@ Exercise 生成 API はまだ公開しない（Phase 2 の
 | domain が FastAPI / SQLAlchemy / OpenAI 非依存 | `test_domain_module_does_not_depend_on_fastapi_sqlalchemy_or_openai` |
 | exercise_version を LearningEvent で追跡できる | `test_learning_event_can_track_exercise_version` |
 
-### Phase 3 の残り（#145 / #146 / #147 のスコープ外）
+### Phase 3 の残り（#145 / #146 / #147 / #148 のスコープ外、#149 で一部実施）
 
-- HTTP API と Frontend
-- renderer / evaluator の本実装（回答送信）
+- Frontend session UI
 - by_direction の更新
 - due review session（Phase 4）
 
@@ -1204,8 +1210,8 @@ LearningItem (+ active pool, seed)
 ```
 
 実装は `backend/app/domain/exercise_generation.py`。
-DB / FastAPI / OpenAI に依存しない。HTTP API は公開しない
-（`test_phase2_does_not_expose_exercise_generation_endpoints` を維持）。
+DB / FastAPI / OpenAI に依存しない。HTTP 変換はこのモジュールの責務ではない
+（取得・回答 API は Issue #149）。
 
 ### 初期対象
 
@@ -1282,7 +1288,7 @@ LearningItem
 ```
 
 実装は `backend/app/domain/exercise_generation.py` の cloze 経路。
-DB / FastAPI / OpenAI に依存しない。HTTP API は公開しない。
+DB / FastAPI / OpenAI に依存しない。HTTP 変換はこのモジュールの責務ではない。
 
 ### 対象 item type
 
@@ -1366,7 +1372,8 @@ conjugation item
 
 実装は `backend/app/domain/conjugation_adapter.py`。生成は
 `exercise_generation.py` の verb_conjugation 経路。既存 `conjugation.py` の
-活用データは複製しない。HTTP API / Frontend は公開しない。
+活用データは複製しない。HTTP 変換はこのモジュールの責務ではない
+（取得・回答 API は Issue #149）。Frontend は対象外。
 
 ### adapter eligibility
 
@@ -1420,6 +1427,115 @@ LLM が tense を返しても、adapter 可否の最終判断は metadata +
 | adapter 正解が既存 domain と一致 | `test_adapter_answer_matches_existing_domain` |
 | source cloze fallback | `test_source_cloze_fallback_when_adapter_is_ineligible` |
 | 活用データを複製しない | `test_adapter_does_not_copy_conjugation_tables` |
+
+## Phase 3 — Exercise 回答判定と LearningEvent 記録（Issue #149）
+
+生成した Tutor Exercise への回答を Backend で判定し、既存の
+`LearningEvent -> LearnerState -> ReviewSchedule` パイプラインへ接続する。
+Frontend から `expected_answer` を送り返して採点しない。
+Backend は LearningItem / Source / 既存動詞 domain から同じ Exercise を
+再構成し、正解根拠を server-side で取得する。
+
+```text
+GET Exercise（PublicExercise。正解なし）
+  -> user response
+  -> server-side evaluator
+  -> correct / incorrect
+  -> LearningEvent append
+  -> LearnerState update
+  -> ReviewSchedule update
+  -> feedback（correct_answer は回答後のみ）
+```
+
+実装:
+
+- 採点・正規化: `backend/app/domain/exercise_evaluation.py`
+- ユースケース: `backend/app/services/exercise_service.py`
+- HTTP: `GET/POST /api/tutor/items/{item_id}/exercises/{exercise_type}`
+- 記録は既存 `TutorService.record_review` を再利用する
+
+Frontend session UI は対象外。LLM semantic grading は行わない。
+
+### エンドポイント
+
+| Method | Path | 説明 |
+|--------|------|------|
+| GET | `/api/tutor/items/{item_id}/exercises/{exercise_type}` | PublicExercise。正解・metadata は返さない |
+| POST | `/api/tutor/items/{item_id}/exercises/{exercise_type}/answer` | 採点し LearningEvent を記録（201） |
+
+GET と POST は同じ `DEFAULT_GENERATION_SEED` で Exercise を再構成する。
+Exercise 自体は永続化しない。
+
+### 回答形式別 evaluation
+
+| response_kind | 判定 |
+|---------------|------|
+| choice | option 文字列（meaning_ja）を安定識別子として比較。index / 表示順には依存しない |
+| text | `normalize_french_production` で揃えてから `expected_answers` と比較 |
+| reconstruction | 表示 token の順序を、同じ正規化をかけた正解順と比較 |
+
+フランス語 production の正規化（順序固定）:
+
+1. Unicode NFC
+2. typographic apostrophe（U+2019 等）を ASCII `'` へ置換
+3. 前後空白除去と連続 Unicode 空白の圧縮
+4. casefold（大文字小文字を無視）
+
+**accent は除去しない。** `été` と `ete` は不一致。
+日本語自由記述（fr_to_ja）は Phase 3 でも生成・採点しない。
+
+### LearningEvent metadata
+
+`exercise_event_metadata` が載せる追跡情報:
+
+- `exercise_version`
+- `skill_direction`
+- `response_kind`
+- `generation_method`（`deterministic` / `source_cloze` / `conjugation_adapter`）
+- `reconstruction_key`
+- cloze のとき `source_document_id`
+
+正解は含めない。`exercise_type` は LearningEvent の既存フィールド。
+Phase 3 では `LearnerState.by_direction` は更新しない。
+
+### idempotency
+
+client は回答 POST に `id`（LearningEvent.id）を付けられる。
+重複は既存方針どおり 409。LearnerState は二重加算しない。
+
+### feedback
+
+回答後のみ:
+
+- `correct` / `correct_answer` / `given`
+- `explanation_ja` optional（LearningItem 由来）
+- `source_context` optional（cloze の blank 済み文脈）
+- `event` / `learner_state` / `review_schedule`
+
+### HTTP status
+
+| 状況 | status |
+|------|--------|
+| 問題取得成功 | 200 |
+| 回答記録成功 | 201 |
+| item 不存在 | 404 |
+| unsupported / inactive（suspended, mastered）/ 材料不足 | 422（`skip_reason` 付き） |
+| malformed な回答（空、response_kind と型不一致） | 422 |
+| duplicate event id | 409 |
+
+inactive item は出題不可として 422 に固定する。409 は重複 ID 専用。
+
+| 観点 | 自動テスト |
+|------|------------|
+| meaning recognition 正誤 | `test_meaning_recognition_correct_and_incorrect` |
+| ja_to_fr 正規化 | `test_ja_to_fr_normalizes_and_rejects_missing_accent` |
+| accent 誤りを正解にしない | `test_accent_error_is_not_accepted_as_correct` |
+| apostrophe 差 | `test_apostrophe_variants_are_accepted` |
+| cloze / reconstruction | `test_cloze_and_reconstruction` / `test_cloze_grades_source_slice` |
+| verb adapter | `test_verb_conjugation_adapter_answer` |
+| LearningEvent 1件追加と state/schedule | `test_correct_and_incorrect_each_append_one_event_and_update_state` |
+| duplicate で二重適用しない | `test_duplicate_answer_returns_409_without_double_apply` |
+| GET に正解が漏れない | `test_get_exercise_omits_correct_answer` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 

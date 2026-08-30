@@ -1,8 +1,8 @@
 """Tutor 最小 API（Issue #112）と Source 一覧（Issue #121）、
-Candidate 抽出・採否（Issue #134）。
+Candidate 抽出・採否（Issue #134）、Exercise 取得・回答判定（Issue #149）。
 
-business rule は TutorService / CandidateService に任せ、このモジュールは
-request/response schema と HTTP status 変換だけを持つ。
+business rule は TutorService / CandidateService / ExerciseService に任せ、
+このモジュールは request/response schema と HTTP status 変換だけを持つ。
 """
 
 from typing import Annotated, Any
@@ -10,7 +10,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.deps import get_candidate_service, get_tutor_service
+from app.api.deps import get_candidate_service, get_exercise_service, get_tutor_service
+from app.domain.exercise import PublicExercise, to_public_exercise
 from app.domain.tutor import (
     AnswerOutcome,
     CandidateStatus,
@@ -37,15 +38,19 @@ from app.services.exceptions import (
     InvalidSourceRefError,
     TutorConflictError,
     TutorInvalidCandidateError,
+    TutorMalformedAnswerError,
     TutorNotFoundError,
     TutorServiceError,
+    TutorUnsupportedExerciseError,
 )
+from app.services.exercise_service import ExerciseService
 from app.services.tutor_service import TutorService
 
 router = APIRouter(prefix="/api/tutor", tags=["tutor"])
 
 TutorServiceDep = Annotated[TutorService, Depends(get_tutor_service)]
 CandidateServiceDep = Annotated[CandidateService, Depends(get_candidate_service)]
+ExerciseServiceDep = Annotated[ExerciseService, Depends(get_exercise_service)]
 
 SOURCE_LIST_LIMIT_DEFAULT = 50
 SOURCE_LIST_LIMIT_MAX = 100
@@ -85,6 +90,30 @@ class CreateReviewRequest(BaseModel):
     response_time_ms: int | None = Field(default=None, ge=0)
     id: str | None = Field(default=None, min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SubmitExerciseAnswerRequest(BaseModel):
+    """Exercise への回答。正解は含めない。occurred_at 未指定時はサーバー時刻。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str | list[str]
+    occurred_at: UtcDatetime | None = None
+    response_time_ms: int | None = Field(default=None, ge=0)
+    id: str | None = Field(default=None, min_length=1)
+
+
+class ExerciseAnswerResponse(BaseModel):
+    """回答後 feedback。correct_answer は回答後のみ返す。"""
+
+    correct: bool
+    correct_answer: str
+    given: str | list[str]
+    explanation_ja: str | None = None
+    source_context: str | None = None
+    event: LearningEvent
+    learner_state: LearnerState
+    review_schedule: ReviewSchedule
 
 
 class LearningItemDetailResponse(BaseModel):
@@ -187,6 +216,13 @@ def _to_http(exc: TutorServiceError) -> HTTPException:
     if isinstance(exc, InvalidSourceRefError):
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, TutorInvalidCandidateError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, TutorUnsupportedExerciseError):
+        return HTTPException(
+            status_code=422,
+            detail={"skip_reason": exc.skip_reason, "detail": exc.detail},
+        )
+    if isinstance(exc, TutorMalformedAnswerError):
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, ExtractionConfigError):
         return HTTPException(
@@ -345,6 +381,57 @@ def get_item(item_id: str, service: TutorServiceDep) -> LearningItemDetailRespon
         item=detail.item,
         learner_state=detail.learner_state,
         review_schedule=detail.review_schedule,
+    )
+
+
+@router.get(
+    "/items/{item_id}/exercises/{exercise_type}",
+    response_model=PublicExercise,
+)
+def get_item_exercise(
+    item_id: str,
+    exercise_type: ExerciseType,
+    service: ExerciseServiceDep,
+) -> PublicExercise:
+    try:
+        generated = service.get_exercise(item_id, exercise_type)
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    return to_public_exercise(generated.spec)
+
+
+@router.post(
+    "/items/{item_id}/exercises/{exercise_type}/answer",
+    response_model=ExerciseAnswerResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def submit_item_exercise_answer(
+    item_id: str,
+    exercise_type: ExerciseType,
+    req: SubmitExerciseAnswerRequest,
+    service: ExerciseServiceDep,
+) -> ExerciseAnswerResponse:
+    try:
+        record = service.submit_answer(
+            item_id,
+            exercise_type,
+            req.answer,
+            event_id=req.id,
+            occurred_at=req.occurred_at,
+            response_time_ms=req.response_time_ms,
+        )
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    given = record.evaluation.given
+    return ExerciseAnswerResponse(
+        correct=record.evaluation.correct,
+        correct_answer=record.evaluation.correct_answer,
+        given=list(given) if isinstance(given, tuple) else given,
+        explanation_ja=record.explanation_ja,
+        source_context=record.source_context,
+        event=record.event,
+        learner_state=record.learner_state,
+        review_schedule=record.review_schedule,
     )
 
 

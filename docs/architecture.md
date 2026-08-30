@@ -43,6 +43,8 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/candidates/{candidate_id}/reject` | Candidate を却下する。LearningItem は作らない。再 reject は冪等。accepted からの reject は 409 |
 | POST | `/api/tutor/items` | 手入力の LearningItem を作成する |
 | GET | `/api/tutor/items/{item_id}` | LearningItem と現在の LearnerState / ReviewSchedule を返す |
+| GET | `/api/tutor/items/{item_id}/exercises/{exercise_type}` | Tutor Exercise を再構成して返す。正解は含めない |
+| POST | `/api/tutor/items/{item_id}/exercises/{exercise_type}/answer` | Exercise を server-side で採点し、LearningEvent / LearnerState / ReviewSchedule を更新する |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録し、LearnerState と ReviewSchedule を更新する |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem を返す。任意時刻の query は持たない |
 
@@ -106,13 +108,17 @@ backend/app/
 │   ├── questions.py
 │   ├── answers.py
 │   ├── nouns.py
-│   └── tutor.py              # Tutor最小API（Issue #112）と Candidate 採否（Issue #134）
+│   ├── tutor.py              # Tutor最小API（Issue #112）、Candidate 採否（Issue #134）、Exercise 回答（Issue #149）
 ├── domain/       # ビジネスルール（活用データ、モデル定義、判定ロジック）
 │   ├── conjugation.py
 │   ├── noun.py
 │   ├── tutor.py              # Tutor機能の中核モデル（docs/tutor_architecture.md）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合（Issue #133）
-│   └── review_scheduler.py   # 初期復習間隔の算出（Issue #111）
+│   ├── review_scheduler.py   # 初期復習間隔の算出（Issue #111）
+│   ├── exercise.py           # LearningItem→Exercise契約（Issue #145）
+│   ├── exercise_generation.py
+│   ├── exercise_evaluation.py  # Tutor Exercise の server-side 採点（Issue #149）
+│   └── conjugation_adapter.py
 ├── evaluation/   # LLM抽出の固定fixtureと品質チェック（Issue #136）。HTTPからは使わない
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
@@ -123,7 +129,8 @@ backend/app/
     ├── review_service.py          # 復習予定の保存と due 取得
     ├── tutor_service.py           # Tutor最小APIのユースケース
     ├── extraction_service.py      # Source から Candidate を抽出し正規化する
-    └── candidate_service.py       # 抽出結果の保存と accept/reject（Issue #134）
+    ├── candidate_service.py       # 抽出結果の保存と accept/reject（Issue #134）
+    └── exercise_service.py        # Exercise 取得・採点・LearningEvent 記録（Issue #149）
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。

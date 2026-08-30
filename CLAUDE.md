@@ -47,6 +47,7 @@ backend/app/
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 │   ├── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
 │   ├── exercise_generation.py  # LearningItemからのdeterministic Exercise生成（vocab/expression/cloze/conjugation adapter）
+│   ├── exercise_evaluation.py  # Tutor Exercise の server-side 採点（Issue #149）
 │   └── conjugation_adapter.py  # conjugation Item→既存動詞活用への安全な接続
 ├── evaluation/    # LLM抽出の固定fixtureと品質チェック（Issue #136）
 ├── persistence/   # Tutorデータの SQLite / schema version
@@ -57,7 +58,8 @@ backend/app/
     ├── review_service.py  # 復習予定の保存と due 取得
     ├── tutor_service.py  # Tutor最小APIのユースケース
     ├── extraction_service.py  # Source から LearningItemCandidate を抽出
-    └── candidate_service.py  # 抽出結果の保存と accept/reject
+    ├── candidate_service.py  # 抽出結果の保存と accept/reject
+    └── exercise_service.py  # Exercise 取得・採点・LearningEvent 記録
 ```
 
 新しい動詞を追加する場合は `CONJUGATIONS` と `VERB_GROUPS` の両方を `conjugation.py` に追記する。`VerbGroup` は `Literal["all", "er", "ir", "irregular"]` で、`?group=` クエリパラメータで絞り込める。
@@ -106,6 +108,8 @@ setup → quiz-settings → loading → answering ⇄ result
 | POST | `/api/tutor/candidates/{candidate_id}/accept` | Candidate を採用し LearningItem を作成または既存へ統合 |
 | POST | `/api/tutor/candidates/{candidate_id}/reject` | Candidate を却下する。LearningItem は作らない |
 | GET | `/api/tutor/items/{item_id}` | LearningItem と LearnerState / ReviewSchedule |
+| GET | `/api/tutor/items/{item_id}/exercises/{exercise_type}` | Tutor Exercise 取得（正解は含めない） |
+| POST | `/api/tutor/items/{item_id}/exercises/{exercise_type}/answer` | Exercise を server-side で採点し LearningEvent を記録 |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベント記録（state / schedule も更新） |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem |
 

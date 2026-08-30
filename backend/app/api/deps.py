@@ -11,6 +11,7 @@ from fastapi import Depends
 
 from app.repositories.sqlite import TutorSqliteStore
 from app.services.candidate_service import CandidateService, build_candidate_service
+from app.services.exercise_service import ExerciseService, build_exercise_service
 from app.services.extraction_service import ExtractionService
 from app.services.extractors import LearningItemExtractor
 from app.services.openai_extractor import OpenAILearningItemExtractor
@@ -43,3 +44,10 @@ def get_candidate_service(
     extraction: Annotated[ExtractionService, Depends(get_extraction_service)],
 ) -> CandidateService:
     return build_candidate_service(store, extraction)
+
+
+def get_exercise_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+    tutor: Annotated[TutorService, Depends(get_tutor_service)],
+) -> ExerciseService:
+    return build_exercise_service(store, tutor)
