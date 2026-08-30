@@ -16,8 +16,8 @@ Exercise 自体は永続化しない。同じ (item, exercise_type, exercise_ver
 LearningItem
   -> eligibility / policy
   -> ExerciseSpec
-  -> renderer / evaluator（後続Issue）
-  -> LearningEvent（exercise_version を metadata で追跡）
+  -> evaluator（Issue #149）
+  -> LearningEvent（exercise_version / skill_direction を metadata で追跡）
 ```
 """
 
@@ -42,6 +42,9 @@ EXERCISE_VERSION = "exercise-v1"
 
 ResponseKind = Literal["choice", "text", "reconstruction"]
 """学習者の応答形式。choice=選択肢 / text=文字列入力 / reconstruction=再構成。"""
+
+GenerationMethod = Literal["deterministic", "source_cloze", "conjugation_adapter"]
+"""問題の組み立て方。LearningEvent.metadata で追跡する。"""
 
 ExerciseSkipReason = Literal[
     "unsupported_combination",
@@ -82,6 +85,7 @@ _INTERNAL_ANSWER_FIELDS = frozenset(
         "correct_option",
         "correct_index",
         "correct_option_index",
+        "correct_answer",
         "acceptable",
         "acceptable_answers",
         "grader",
@@ -100,6 +104,17 @@ EXERCISE_SKILL_DIRECTIONS: dict[ExerciseType, SkillDirection] = {
     "noun_article": "production",
 }
 """ExerciseType → SkillDirection。曖昧な形式もここに一元化する。"""
+
+EXERCISE_GENERATION_METHODS: dict[ExerciseType, GenerationMethod] = {
+    "meaning_recognition": "deterministic",
+    "fr_to_ja": "deterministic",
+    "ja_to_fr": "deterministic",
+    "cloze": "source_cloze",
+    "expression_reconstruction": "deterministic",
+    "verb_conjugation": "conjugation_adapter",
+    "noun_gender": "deterministic",
+    "noun_article": "deterministic",
+}
 
 EXERCISE_RESPONSE_KINDS: dict[ExerciseType, ResponseKind] = {
     "meaning_recognition": "choice",
@@ -264,6 +279,11 @@ def response_kind_for(exercise_type: ExerciseType) -> ResponseKind:
     return EXERCISE_RESPONSE_KINDS[exercise_type]
 
 
+def generation_method_for(exercise_type: ExerciseType) -> GenerationMethod:
+    """ExerciseType に対する生成方式。LearningEvent 追跡用。"""
+    return EXERCISE_GENERATION_METHODS[exercise_type]
+
+
 def tokenize_canonical_form(canonical_form: str) -> tuple[str, ...]:
     """canonical_form を語 / まとまりへ分割する。
 
@@ -419,14 +439,19 @@ def exercise_reconstruction_key(
 
 def exercise_event_metadata(spec: ExerciseSpec) -> dict[str, Any]:
     """LearningEvent.metadata に載せる追跡情報。正解は含めない。"""
-    return {
+    metadata: dict[str, Any] = {
         "exercise_version": spec.exercise_version,
         "skill_direction": spec.skill_direction,
         "response_kind": spec.response_kind,
+        "generation_method": generation_method_for(spec.exercise_type),
         "reconstruction_key": exercise_reconstruction_key(
             spec.learning_item_id, spec.exercise_type, spec.exercise_version
         ),
     }
+    source_document_id = spec.metadata.get("source_document_id")
+    if isinstance(source_document_id, str) and source_document_id:
+        metadata["source_document_id"] = source_document_id
+    return metadata
 
 
 def _skip_reason(

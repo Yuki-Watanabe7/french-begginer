@@ -58,6 +58,27 @@ class TutorInvalidCandidateError(TutorServiceError):
         )
 
 
+class TutorUnsupportedExerciseError(TutorServiceError):
+    """当該 LearningItem にその ExerciseType を出せない。"""
+
+    def __init__(
+        self,
+        item_id: str,
+        exercise_type: str,
+        skip_reason: str,
+        detail: str,
+    ) -> None:
+        self.item_id = item_id
+        self.exercise_type = exercise_type
+        self.skip_reason = skip_reason
+        self.detail = detail
+        super().__init__(f"{skip_reason}: {detail}")
+
+
+class TutorMalformedAnswerError(TutorServiceError):
+    """Exercise 回答の形が response_kind と合わない。"""
+
+
 class ExtractionError(TutorServiceError):
     """Source からの学習候補抽出に失敗した。
 

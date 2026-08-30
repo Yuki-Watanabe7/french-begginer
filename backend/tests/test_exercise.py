@@ -401,6 +401,8 @@ def test_learning_event_can_track_exercise_version():
     )
     metadata = exercise_event_metadata(spec)
     assert metadata["exercise_version"] == EXERCISE_VERSION
+    assert metadata["skill_direction"] == "production"
+    assert metadata["generation_method"] == "deterministic"
     assert "expected" not in metadata
     event = LearningEvent(
         learning_item_id=item.id,
