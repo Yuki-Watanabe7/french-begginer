@@ -24,7 +24,8 @@ Exercise の server-side 採点と LearningEvent 記録（Issue #149）、
 accepted LearningItem からの Practice Session 組み立て（Issue #150）、
 Tutor Practice Session の Frontend UI と TTS/feedback（Issue #151）、
 Phase 3 vertical slice と Exit Criteria（Issue #152）、
-および Phase 4 の recognition / production 別 LearnerState 集計（Issue #161）
+および Phase 4 の recognition / production 別 LearnerState 集計（Issue #161）、
+ReviewSchedule の direction 分離（Issue #162）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -37,6 +38,7 @@ Phase 3 vertical slice と Exit Criteria（Issue #152）、
   / `backend/app/services/review_service.py`
   / `backend/tests/test_review_scheduler.py`
   / `backend/tests/test_review_service.py`
+  （direction 別 schedule は Issue #162）`
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -150,7 +152,7 @@ Phase 0 の fixture は LLM で抽出しない。例:
 | `LearningItem` | 素材から抽出・正規化した「学習対象」 | 更新される（status等） |
 | `LearningEvent` | 学習者の行動の記録 | append-only（`frozen=True`） |
 | `LearnerState` | LearningEventを集約した現在の習熟状態 | 上書き更新される |
-| `ReviewSchedule` | 次にいつ復習するか | 上書き更新される |
+| `ReviewSchedule` | 次にいつ復習するか（Item × SkillDirection） | 上書き更新される |
 
 補助モデル: `SourceRef`（LearningItem → SourceDocument の参照）、
 `EvidenceSpan`（原文中の根拠位置）、`MasteryStats`（習熟度の集計値）。
@@ -279,6 +281,7 @@ UI層の責務とし、domain層はUTCで一貫させる。
 | `MasteryStats` | `mastery_score` は 0.0〜1.0 |
 | `MasteryStats` | `attempt_count == 0` ⇔ `last_reviewed_at is None` |
 | `ReviewSchedule` | `interval_days >= 0`、`review_count` / `lapse_count` は非負 |
+| `ReviewSchedule` | 同一 Item + 同一 `skill_direction` に 1 件 |
 
 enum相当の値はすべて `Literal` で定義しており、未知の値は
 `ValidationError` になる（`item_type` / `status` / `result` / `exercise_type` 等）。
@@ -359,7 +362,7 @@ service / domain は SQLite や ORM を直接 import しない。
 | `LearningEventRepository` | append / list_by_item | append-only。`occurred_at`, `id` 順 |
 | `LearnerStateRepository` | get / upsert | LearningItem につき1件（PK） |
 | `LearningProgressRepository` | append_event_and_upsert_state | event と state を同一トランザクション |
-| `ReviewScheduleRepository` | get / upsert / list_due | LearningItem につき1件（PK） |
+| `ReviewScheduleRepository` | get(item_id, direction) / upsert / list_for_item / list_due | Item × direction につき1件（複合PK） |
 
 SQLite 実装の入口は `TutorSqliteStore`。
 接続先は `TUTOR_DATABASE_URL`、未指定時は `backend/data/tutor.db`。
@@ -371,7 +374,9 @@ SQLite 実装の入口は `TutorSqliteStore`。
   `LearningItem` を参照する（FK + repository 側の存在チェック）
 - `LearningItemCandidate` は存在する `SourceDocument` を参照する
   （FK + repository 側の存在チェック）
-- `LearnerState` と `ReviewSchedule` は `learning_item_id` を主キーにし、1件に制限する
+- `LearnerState` は `learning_item_id` を主キーにし、1件に制限する
+- `ReviewSchedule` は `(learning_item_id, skill_direction)` を複合主キーにし、
+  同一 Item × 同一 direction に1件に制限する
 - `ON DELETE RESTRICT` により、履歴がある LearningItem を SQL から消しても失敗する
 - repository に `delete` を置かない（履歴消失を安易に許可しない）
 - 日時は timezone-aware のみ受け付け、UTC の ISO 8601
@@ -400,12 +405,15 @@ review を入れると 1 から再カウントされる。三者を1トランザ
 
 `schema_migrations` テーブルが適用済み version を保持する。
 
-1. version 0（未初期化）: `create_all` で現行スキーマを作り version 2 を記録する
+1. version 0（未初期化）: `create_all` で現行スキーマを作り version 3 を記録する
 2. version < 現行: `UPGRADE_STEPS` の upgrade 関数を順に適用する
 3. version > 現行: `SchemaVersionError`（新しいDBを古いコードで開いた）
 
-現行 version は `2`。version 2 の upgrade は `learning_item_candidates`
-テーブルを追加する（Issue #131）。新規DBは `create_all` で version 2 を直接作る。
+現行 version は `3`。version 2 の upgrade は `learning_item_candidates`
+テーブルを追加する（Issue #131）。version 3 の upgrade は
+`review_schedules` を `(learning_item_id, skill_direction)` の複合主キーへ再構築し、
+旧 schedule 行はコピーせず LearningEvent を direction 別に replay する
+（Issue #162）。新規DBは `create_all` で version 3 を直接作る。
 
 ローカルで生成される `*.db` は git 管理対象外（`.gitignore`）。
 
@@ -479,17 +487,23 @@ LearnerState は LearningEvent のキャッシュである。event と state の
 `LearningStateService.recompute_learner_state` が履歴を `occurred_at, id`
 順に畳み込んで state を再構築できる。
 
-## 復習スケジューラ（Issue #111）
+## 復習スケジューラ（Issue #111 / #162）
 
 `schedule_next_review(state, event, previous_schedule)` が次の
 ReviewSchedule を決める。更新ルール自体は domain の純関数に置き、
 service は存在確認と永続化、due 取得を担う。
 
+Issue #162 以降、予定は LearningItem 単位ではなく
+**recognition / production 別に 1 件** 持つ。回答時は当該 direction の
+previous schedule と `LearnerState.by_direction[direction]` だけを入力にする。
+
 ```text
 LearnerState（当該event適用後）と LearningEvent
+  -> ExerciseType から SkillDirection を決定
+  -> 該当 direction の previous schedule だけを取得
   -> schedule_next_review で次予定を算出
   -> ReviewSchedule を upsert
-  -> list_due(now) で due_at <= now かつ active の項目を取得
+  -> list_due(now, direction optional) で due_at <= now かつ active の予定を取得
 ```
 
 `datetime.now()` は domain からも service からも呼ばない。
@@ -500,7 +514,7 @@ due 算出の基準は `event.occurred_at`、due 取得の基準は引数 `now`�
 Phase 0 では SM-2 / FSRS は導入しない。日数の最適性は狙わず、
 後からアルゴリズムを差し替えられる **単純・deterministic・説明可能な
 baseline** にする。同じ (state, event, previous_schedule) からは
-常に同じ ReviewSchedule になる。
+常に同じ ReviewSchedule になる。間隔テーブル自体は Issue #111 のまま。
 
 | 条件 | interval_days |
 |------|----------------|
@@ -514,25 +528,34 @@ baseline** にする。同じ (state, event, previous_schedule) からは
 - 連続正解が増えても interval は短くならない
 - incorrect では interval を 1 日に戻し、`lapse_count` を +1
 - `review_count` は previous があれば +1、なければ 1
-- `scheduler_version` は現行アルゴリズムの版（`v0`）を書き込む
-- 過去の schedule 履歴は残さず、現行予定だけを上書きする
+- 連続正解は全体集計ではなく `by_direction[direction].consecutive_correct`
+- `scheduler_version` は現行アルゴリズムの版（`v1-directional`）を書き込む
+- 過去の schedule 履歴は残さず、当該 direction の現行予定だけを上書きする
+- recognition の正答は production の interval / review_count を進めない
+- production の誤答は recognition の lapse_count を増やさない
 
 ### due 取得
 
-`ReviewScheduleRepository.list_due(now)` / `ReviewService.list_due(now)`:
+`ReviewScheduleRepository.list_due(now, direction=None)` /
+`ReviewService.list_due(now, direction=None)`:
 
 - `due_at <= now` の予定だけ返す
 - **active な LearningItem のみ**。`suspended`（ユーザーが一時除外）と
   `mastered`（定着済み）は、予定が残っていても出題対象にしない。
   schedule 自体は消さないので、status を active に戻せば再開できる
-- 返却順は `due_at` 昇順、同じ due_at なら `learning_item_id` 昇順
+- `direction` を指定するとその方向だけ。未指定なら両方向
+- 返却順は `due_at` 昇順、同じ due_at なら `learning_item_id`、
+  `skill_direction` 昇順
+- 同一 Item の recognition と production が両方 due なら 2 件返す
 
 ### 将来拡張への備え
 
 - `scheduler_version` でアルゴリズムを識別する
 - 間隔計算（domain）と due query（repository）を分離している
-- Phase 4 で SM-2 / FSRS 等と比較・移行できる
+- 後続で SM-2 / FSRS 等と比較・移行できる
 - 過去 schedule を再計算して履歴を書き換える設計にはしない
+- 欠けた schedule は LearningEvent 履歴から
+  `rebuild_directional_schedules` で再構築できる
 
 ## 最小 API（Issue #112）
 
@@ -1245,7 +1268,7 @@ generic な `/api/tutor/exercises` 等を禁止したまま維持する。
 ### Phase 3 の残り（#145〜#151 時点のスコープ外。#152 で vertical slice として閉じる）
 
 - due review session（Phase 4）
-- ReviewSchedule の direction 分離（後続 Issue）
+- ReviewSchedule の direction 分離は Issue #162 で実装した
 
 ## Phase 3 — vocabulary / expression の deterministic 生成（Issue #146）
 
@@ -1808,8 +1831,8 @@ LearningEvent を使い、以下を実ユーザー体験へ接続する。
 - long-term spacing policy
 
 `LearnerState.by_direction` の recognition / production 別集計は
-Issue #161 で実装した。ReviewSchedule の direction 分離、due queue、
-Frontend mastery 表示は後続 Issue。
+Issue #161 で実装した。ReviewSchedule の direction 分離は Issue #162。
+due queue UI、Frontend mastery 表示は後続 Issue。
 
 Phase 3 の Practice Session は手動開始を基本とし、due / mastery による
 優先順位付けは Phase 4 へ残す。generic な `/api/tutor/reviews/today` や
@@ -1867,7 +1890,7 @@ LearningEvent
 
 ### スコープ外
 
-- ReviewSchedule の direction 分離
+- ReviewSchedule の direction 分離（Issue #162）
 - due queue / 「今日の復習」
 - FSRS / SM-2
 - Frontend mastery 表示
@@ -1884,6 +1907,90 @@ LearningEvent
 | legacy event の扱い | `test_legacy_event_updates_overall_but_not_by_direction` |
 | DB 再 open 後も by_direction が残る | `test_by_direction_survives_db_reopen` |
 | metadata を集計に使わない | `test_skill_direction_for_event_uses_exercise_type_not_metadata` |
+
+## Phase 4 — ReviewSchedule の recognition / production 分離（Issue #162）
+
+LearningItem 単位で 1 件だった `ReviewSchedule` を、
+**recognition / production 別に独立管理**する。
+「意味は分かるが自分では言えない」Item について、recognition は先送りし
+production だけ早めに復習できる。
+
+```text
+LearningItem
+  ├─ recognition schedule
+  └─ production schedule
+```
+
+### identity
+
+`(learning_item_id, skill_direction)` で一意。SQLite は複合主キー
+（および同内容の unique constraint）で保証する。
+
+### scheduler
+
+初期アルゴリズムは Issue #111 の説明可能な baseline を継続する。
+
+- 初回 / 1 回目正解: 1 日
+- 以降の正解: 3 → 7 → 14 日
+- 誤答: 1 日に戻す + lapse 増加
+
+間隔の連続正解は `LearnerState.by_direction[direction]` を使う。
+全体 LearnerState は維持するが、recognition の回答は production schedule を
+進めず、その逆も同様。`scheduler_version` は `v1-directional`。
+
+direction の source of truth は Issue #161 と同じ
+`SKILL_DIRECTION_BY_EXERCISE_TYPE`。Client metadata は使わない。
+
+### schema migration
+
+旧 DB の LearningItem 単位 schedule は **根拠なく両方向へ複製しない**。
+LearningEvent 履歴が source of truth なので、upgrade 時は
+`rebuild_directional_schedules` で event を direction 別に replay して
+新 schedule を再構築する。
+
+legacy fallback:
+
+- `exercise_type` から direction を決められない event は推測せず飛ばす
+- 履歴が無い Item の旧 schedule は移行後に残さない
+- 旧行の interval / review_count は採用しない
+
+### Repository
+
+- `get(item_id, direction)`
+- `upsert(schedule)`
+- `list_for_item(item_id)`
+- `list_due(now, direction optional)`
+
+service / domain は ORM へ直接依存しない。
+
+### 不変条件
+
+- 同一 Item + 同一 direction に schedule は 1 件
+- recognition 正答で production の interval / review_count は変わらない
+- production 誤答で recognition の lapse_count は増えない
+- `due_at` は timezone-aware UTC
+- schedule は active LearningItem だけ due 対象
+
+### スコープ外
+
+- FSRS / SM-2
+- due queue UI
+- personalized interval tuning
+- auto mastered 判定
+
+| 観点 | 自動テスト |
+|------|------------|
+| recognition / production を別々に作成 | `test_same_item_keeps_independent_direction_schedules` / `test_review_schedule_holds_both_directions_and_survives_reopen` |
+| recognition 正答のみ interval 延長 | `test_recognition_correct_does_not_extend_production_interval` |
+| production 誤答のみ lapse 増加 | `test_production_incorrect_does_not_increase_recognition_lapse` / `test_schedule_after_review_updates_only_matching_direction` |
+| 同一 Item に 2 方向を保持 | `test_review_schedule_holds_both_directions_and_survives_reopen` |
+| DB 再 open 後も保持 | 同上 |
+| schema upgrade で旧 DB を開ける | `test_schema_upgrades_from_v1_and_preserves_existing_rows` / `test_schema_upgrades_from_v2_rebuilds_directional_schedules_from_events` |
+| event replay が deterministic | `test_rebuild_directional_schedules_is_deterministic` |
+| 旧 schedule を両方向へ複製しない | `test_schema_upgrades_from_v2_rebuilds_directional_schedules_from_events` / `test_rebuild_does_not_use_old_schedule_rows` |
+| legacy event を推測しない | `test_rebuild_skips_legacy_events_without_guessing_direction` |
+| suspended / mastered 除外 | `test_list_due_excludes_suspended_and_mastered` |
+| timezone 境界 | `test_list_due_timezone_boundary_uses_utc` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
@@ -1911,3 +2018,5 @@ Phase 3 自体の完了条件と Phase 4 への引継ぎは、上記
 「Phase 3 Exit Criteria」と「Phase 4 への引き継ぎ」を正とする。
 `by_direction` 集計の source of truth は上記
 「Phase 4 — recognition / production 別 LearnerState 集計」を正とする。
+ReviewSchedule の direction 分離は上記
+「Phase 4 — ReviewSchedule の recognition / production 分離」を正とする。

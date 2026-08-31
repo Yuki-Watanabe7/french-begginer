@@ -50,6 +50,7 @@ class LearningItemDetail:
     item: LearningItem
     learner_state: LearnerState | None
     review_schedule: ReviewSchedule | None
+    review_schedules: list[ReviewSchedule]
 
 
 @dataclass(frozen=True)
@@ -182,10 +183,12 @@ class TutorService:
         item = self._items.get(item_id)
         if item is None:
             raise TutorNotFoundError("LearningItem", item_id)
+        schedules = self._schedules.list_for_item(item_id)
         return LearningItemDetail(
             item=item,
             learner_state=self._states.get(item_id),
-            review_schedule=self._schedules.get(item_id),
+            review_schedule=schedules[0] if schedules else None,
+            review_schedules=schedules,
         )
 
     def list_items(self, *, limit: int | None = None) -> list[LearningItem]:

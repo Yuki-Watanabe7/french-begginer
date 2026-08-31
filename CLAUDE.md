@@ -112,7 +112,7 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 | POST | `/api/tutor/candidates/{candidate_id}/accept` | Candidate を採用し LearningItem を作成または既存へ統合 |
 | POST | `/api/tutor/candidates/{candidate_id}/reject` | Candidate を却下する。LearningItem は作らない |
 | GET | `/api/tutor/items` | active な LearningItem 一覧 |
-| GET | `/api/tutor/items/{item_id}` | LearningItem と LearnerState / ReviewSchedule |
+| GET | `/api/tutor/items/{item_id}` | LearningItem と LearnerState / ReviewSchedule（direction 別 `review_schedules` を含む） |
 | GET | `/api/tutor/items/{item_id}/exercises/{exercise_type}` | Tutor Exercise 取得（正解は含めない） |
 | POST | `/api/tutor/items/{item_id}/exercises/{exercise_type}/answer` | Exercise を server-side で採点し LearningEvent を記録 |
 | POST | `/api/tutor/practice/sessions` | active LearningItem から Practice Session を組み立てる（永続化しない） |

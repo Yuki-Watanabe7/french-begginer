@@ -35,7 +35,8 @@ Exercise の server-side 採点と LearningEvent 記録は `exercise_evaluation`
 `exercise_service` が担う（Issue #149）。
 Practice Session の組み立ては `practice_session` が担う（Issue #150）。
 recognition / production 別の LearnerState 集計は `apply_review_event` が担う
-（Issue #161）。due queue / Frontend mastery 表示は後続Issue。
+（Issue #161）。ReviewSchedule の direction 分離は `review_scheduler` が担う
+（Issue #162）。due queue UI / Frontend mastery 表示は後続Issue。
 """
 
 import uuid
@@ -457,16 +458,18 @@ def apply_review_event(
 
 
 class ReviewSchedule(BaseModel):
-    """LearningItemの次回復習予定。
+    """LearningItem × SkillDirection の次回復習予定。
 
-    scheduler_version を持たせることで、将来アルゴリズム（SM-2 / FSRS等）を
-    差し替え・比較したときに、どの版が算出した予定かを追跡できる。
+    recognition と production は独立した予定を持つ。同一 Item でも
+    「意味は分かるが自分では言えない」場合、production だけ早めに
+    復習できる。scheduler_version でアルゴリズム版を追跡する。
     """
 
     learning_item_id: str = Field(min_length=1)
+    skill_direction: SkillDirection
     due_at: UtcDatetime
     interval_days: float = Field(ge=0.0)
     review_count: int = Field(default=0, ge=0)
     lapse_count: int = Field(default=0, ge=0)
-    scheduler_version: str = Field(default="v0", min_length=1)
+    scheduler_version: str = Field(default="v1-directional", min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)

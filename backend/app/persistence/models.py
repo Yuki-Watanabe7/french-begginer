@@ -8,7 +8,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import JSON, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.domain.tutor import (
@@ -301,12 +310,20 @@ class LearnerStateRow(Base):
 
 class ReviewScheduleRow(Base):
     __tablename__ = "review_schedules"
-    __table_args__ = (Index("ix_review_schedules_due_at", "due_at"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "learning_item_id",
+            "skill_direction",
+            name="uq_review_schedules_item_direction",
+        ),
+        Index("ix_review_schedules_due_at", "due_at"),
+    )
 
     learning_item_id: Mapped[str] = mapped_column(
         ForeignKey("learning_items.id", ondelete="RESTRICT"),
         primary_key=True,
     )
+    skill_direction: Mapped[str] = mapped_column(String, primary_key=True)
     due_at: Mapped[str] = mapped_column(String, nullable=False)
     interval_days: Mapped[float] = mapped_column(Float, nullable=False)
     review_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -320,6 +337,7 @@ class ReviewScheduleRow(Base):
     def from_domain(cls, schedule: ReviewSchedule) -> ReviewScheduleRow:
         return cls(
             learning_item_id=schedule.learning_item_id,
+            skill_direction=schedule.skill_direction,
             due_at=dump_utc(schedule.due_at),
             interval_days=schedule.interval_days,
             review_count=schedule.review_count,
@@ -331,6 +349,7 @@ class ReviewScheduleRow(Base):
     def to_domain(self) -> ReviewSchedule:
         return ReviewSchedule(
             learning_item_id=self.learning_item_id,
+            skill_direction=self.skill_direction,
             due_at=load_utc(self.due_at),
             interval_days=self.interval_days,
             review_count=self.review_count,

@@ -7,6 +7,7 @@ import pytest
 from app.domain.review_scheduler import (
     SCHEDULER_VERSION,
     interval_days_after_review,
+    rebuild_directional_schedules,
     schedule_next_review,
 )
 from app.domain.tutor import (
@@ -52,6 +53,7 @@ def test_first_correct_review_is_due_the_next_day():
     schedule = schedule_next_review(state, event)
 
     assert schedule.learning_item_id == "item-1"
+    assert schedule.skill_direction == "recognition"
     assert schedule.interval_days == 1.0
     assert schedule.due_at == event.occurred_at + timedelta(days=1)
     assert schedule.review_count == 1
@@ -158,6 +160,7 @@ def test_same_inputs_produce_the_same_schedule():
     state, event = _state_after("item-1", ("correct", "incorrect", "correct"))
     previous = ReviewSchedule(
         learning_item_id="item-1",
+        skill_direction="recognition",
         due_at=OCCURRED_AT,
         interval_days=1.0,
         review_count=2,
@@ -178,6 +181,7 @@ def test_schedule_next_review_does_not_mutate_previous_schedule():
     state, event = _state_after("item-1", ("correct",))
     previous = ReviewSchedule(
         learning_item_id="item-1",
+        skill_direction="recognition",
         due_at=OCCURRED_AT,
         interval_days=3.0,
         review_count=1,
@@ -206,6 +210,7 @@ def test_schedule_next_review_rejects_mismatched_previous_schedule():
     state, event = _state_after("item-1", ("correct",))
     previous = ReviewSchedule(
         learning_item_id="item-other",
+        skill_direction="recognition",
         due_at=OCCURRED_AT,
         interval_days=1.0,
     )
@@ -220,3 +225,177 @@ def test_interval_days_after_review_matches_baseline_table():
     assert interval_days_after_review(result="correct", consecutive_correct=3) == 7.0
     assert interval_days_after_review(result="correct", consecutive_correct=4) == 14.0
     assert interval_days_after_review(result="correct", consecutive_correct=99) == 14.0
+
+
+def test_schedule_next_review_rejects_mismatched_skill_direction():
+    state, event = _state_after("item-1", ("correct",))
+    previous = ReviewSchedule(
+        learning_item_id="item-1",
+        skill_direction="production",
+        due_at=OCCURRED_AT,
+        interval_days=1.0,
+    )
+    with pytest.raises(ValueError, match="skill_direction が一致しない"):
+        schedule_next_review(state, event, previous)
+
+
+def test_recognition_correct_does_not_extend_production_interval():
+    rec_event = _event("item-1", "correct", exercise_type="meaning_recognition")
+    rec_state = apply_review_event(None, rec_event)
+    rec_schedule = schedule_next_review(rec_state, rec_event)
+    assert rec_schedule.skill_direction == "recognition"
+    assert rec_schedule.interval_days == 1.0
+    assert rec_schedule.review_count == 1
+
+    rec2 = _event(
+        "item-1",
+        "correct",
+        exercise_type="meaning_recognition",
+        occurred_at=OCCURRED_AT + timedelta(days=1),
+    )
+    rec2_state = apply_review_event(rec_state, rec2)
+    rec2_schedule = schedule_next_review(rec2_state, rec2, rec_schedule)
+    assert rec2_schedule.interval_days == 3.0
+    assert rec2_schedule.review_count == 2
+
+    prod_event = _event(
+        "item-1",
+        "correct",
+        exercise_type="ja_to_fr",
+        occurred_at=OCCURRED_AT + timedelta(days=2),
+    )
+    mixed_state = apply_review_event(rec2_state, prod_event)
+    prod_schedule = schedule_next_review(mixed_state, prod_event)
+    assert prod_schedule.skill_direction == "production"
+    assert prod_schedule.interval_days == 1.0
+    assert prod_schedule.review_count == 1
+    assert prod_schedule.lapse_count == 0
+    assert rec2_schedule.interval_days == 3.0
+    assert rec2_schedule.review_count == 2
+
+
+def test_production_incorrect_does_not_increase_recognition_lapse():
+    rec_event = _event("item-1", "correct", exercise_type="fr_to_ja")
+    rec_state = apply_review_event(None, rec_event)
+    rec_schedule = schedule_next_review(rec_state, rec_event)
+    assert rec_schedule.lapse_count == 0
+    assert rec_schedule.interval_days == 1.0
+
+    prod_event = _event(
+        "item-1",
+        "incorrect",
+        exercise_type="ja_to_fr",
+        occurred_at=OCCURRED_AT + timedelta(days=1),
+    )
+    mixed_state = apply_review_event(rec_state, prod_event)
+    prod_schedule = schedule_next_review(mixed_state, prod_event)
+
+    assert prod_schedule.skill_direction == "production"
+    assert prod_schedule.lapse_count == 1
+    assert prod_schedule.interval_days == 1.0
+    assert rec_schedule.lapse_count == 0
+    assert rec_schedule.review_count == 1
+    assert mixed_state.by_direction["recognition"].consecutive_correct == 1
+
+
+def test_same_item_keeps_independent_direction_schedules():
+    rec_event = _event("item-1", "correct", exercise_type="fr_to_ja")
+    prod_event = _event(
+        "item-1",
+        "incorrect",
+        exercise_type="cloze",
+        occurred_at=OCCURRED_AT + timedelta(hours=1),
+    )
+    rec_state = apply_review_event(None, rec_event)
+    rec_schedule = schedule_next_review(rec_state, rec_event)
+    mixed_state = apply_review_event(rec_state, prod_event)
+    prod_schedule = schedule_next_review(mixed_state, prod_event)
+
+    assert rec_schedule.skill_direction == "recognition"
+    assert prod_schedule.skill_direction == "production"
+    assert rec_schedule.review_count == 1
+    assert prod_schedule.review_count == 1
+    assert rec_schedule.lapse_count == 0
+    assert prod_schedule.lapse_count == 1
+
+
+def test_rebuild_directional_schedules_is_deterministic():
+    events = (
+        _event("item-1", "correct", exercise_type="fr_to_ja"),
+        _event(
+            "item-1",
+            "correct",
+            exercise_type="fr_to_ja",
+            occurred_at=OCCURRED_AT + timedelta(days=1),
+        ),
+        _event(
+            "item-1",
+            "incorrect",
+            exercise_type="ja_to_fr",
+            occurred_at=OCCURRED_AT + timedelta(days=2),
+        ),
+        _event(
+            "item-1",
+            "correct",
+            exercise_type="ja_to_fr",
+            occurred_at=OCCURRED_AT + timedelta(days=3),
+        ),
+    )
+    first = rebuild_directional_schedules(events)
+    second = rebuild_directional_schedules(events)
+    assert first == second
+    assert set(first) == {"recognition", "production"}
+    assert first["recognition"].interval_days == 3.0
+    assert first["recognition"].review_count == 2
+    assert first["recognition"].lapse_count == 0
+    assert first["production"].interval_days == 1.0
+    assert first["production"].review_count == 2
+    assert first["production"].lapse_count == 1
+    assert first["recognition"].scheduler_version == SCHEDULER_VERSION
+    assert first["production"].scheduler_version == SCHEDULER_VERSION
+
+
+def test_rebuild_skips_legacy_events_without_guessing_direction():
+    legacy = LearningEvent.model_construct(
+        id="evt-legacy",
+        learning_item_id="item-1",
+        event_type="review",
+        exercise_type="legacy_unknown",
+        result="correct",
+        occurred_at=OCCURRED_AT,
+        response_time_ms=None,
+        metadata={"skill_direction": "production"},
+    )
+    mapped = _event(
+        "item-1",
+        "correct",
+        exercise_type="meaning_recognition",
+        occurred_at=OCCURRED_AT + timedelta(days=1),
+    )
+    rebuilt = rebuild_directional_schedules((legacy, mapped))
+    assert set(rebuilt) == {"recognition"}
+    assert rebuilt["recognition"].review_count == 1
+    assert "production" not in rebuilt
+
+
+def test_rebuild_does_not_use_old_schedule_rows():
+    events = (_event("item-1", "correct", exercise_type="fr_to_ja"),)
+    rebuilt = rebuild_directional_schedules(events)
+    assert rebuilt["recognition"].interval_days == 1.0
+    assert rebuilt["recognition"].review_count == 1
+
+
+def test_schedule_next_review_rejects_unknown_direction():
+    event = LearningEvent.model_construct(
+        id="evt-legacy",
+        learning_item_id="item-1",
+        event_type="review",
+        exercise_type="legacy_unknown",
+        result="correct",
+        occurred_at=OCCURRED_AT,
+        response_time_ms=None,
+        metadata={},
+    )
+    state = apply_review_event(None, event)
+    with pytest.raises(ValueError, match="SkillDirection を決定できない"):
+        schedule_next_review(state, event)

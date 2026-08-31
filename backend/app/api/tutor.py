@@ -140,6 +140,7 @@ class LearningItemDetailResponse(BaseModel):
     item: LearningItem
     learner_state: LearnerState | None = None
     review_schedule: ReviewSchedule | None = None
+    review_schedules: list[ReviewSchedule] = Field(default_factory=list)
 
 
 class ReviewResponse(BaseModel):
@@ -424,6 +425,7 @@ def create_item(
         item=detail.item,
         learner_state=detail.learner_state,
         review_schedule=detail.review_schedule,
+        review_schedules=detail.review_schedules,
     )
 
 
@@ -450,6 +452,7 @@ def get_item(item_id: str, service: TutorServiceDep) -> LearningItemDetailRespon
         item=detail.item,
         learner_state=detail.learner_state,
         review_schedule=detail.review_schedule,
+        review_schedules=detail.review_schedules,
     )
 
 

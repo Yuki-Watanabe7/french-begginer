@@ -69,7 +69,7 @@ def test_schedule_after_review_sets_next_due_for_first_review(
     assert schedule.review_count == 1
     assert schedule.lapse_count == 0
     assert schedule.scheduler_version == SCHEDULER_VERSION
-    assert store.review_schedules.get(item.id) == schedule
+    assert store.review_schedules.get(item.id, "recognition") == schedule
 
 
 def test_schedule_after_review_updates_counts_across_reviews(
@@ -93,7 +93,7 @@ def test_schedule_after_review_updates_counts_across_reviews(
     assert second.review_count == 2
     assert second.lapse_count == 1
     assert second.interval_days == 1.0
-    assert store.review_schedules.get(item.id) == second
+    assert store.review_schedules.get(item.id, "recognition") == second
 
 
 def test_list_due_returns_only_due_items_in_stable_order(
@@ -153,8 +153,8 @@ def test_list_due_excludes_suspended_and_mastered(
 
     due = service.list_due(NOW)
     assert [schedule.learning_item_id for schedule in due] == [active.id]
-    assert store.review_schedules.get(suspended.id) is not None
-    assert store.review_schedules.get(mastered.id) is not None
+    assert store.review_schedules.get(suspended.id, "recognition") is not None
+    assert store.review_schedules.get(mastered.id, "recognition") is not None
 
 
 def test_list_due_with_fixed_now_is_deterministic(
@@ -180,3 +180,80 @@ def test_schedule_after_review_requires_existing_learning_item(service: ReviewSe
 def test_list_due_rejects_naive_datetime(service: ReviewService):
     with pytest.raises(ValueError, match="timezone-aware"):
         service.list_due(datetime(2026, 1, 1, 12, 0))
+
+
+def test_schedule_after_review_updates_only_matching_direction(
+    store: TutorSqliteStore, service: ReviewService
+):
+    item = _item()
+    store.learning_items.create(item)
+
+    rec_event = _event(
+        item.id,
+        result="correct",
+        exercise_type="fr_to_ja",
+        occurred_at=NOW - timedelta(days=4),
+    )
+    rec_state = apply_review_event(None, rec_event)
+    service.schedule_after_review(rec_state, rec_event)
+    rec2_event = _event(
+        item.id,
+        result="correct",
+        exercise_type="meaning_recognition",
+        occurred_at=NOW - timedelta(days=3),
+    )
+    rec2_state = apply_review_event(rec_state, rec2_event)
+    rec2 = service.schedule_after_review(rec2_state, rec2_event)
+    assert rec2.interval_days == 3.0
+    assert rec2.review_count == 2
+    assert rec2.skill_direction == "recognition"
+
+    prod_event = _event(
+        item.id,
+        result="incorrect",
+        exercise_type="ja_to_fr",
+        occurred_at=NOW - timedelta(days=2),
+    )
+    mixed_state = apply_review_event(rec2_state, prod_event)
+    prod = service.schedule_after_review(mixed_state, prod_event)
+
+    assert prod.skill_direction == "production"
+    assert prod.lapse_count == 1
+    assert prod.review_count == 1
+    assert prod.interval_days == 1.0
+    loaded_rec = store.review_schedules.get(item.id, "recognition")
+    assert loaded_rec == rec2
+    assert loaded_rec is not None
+    assert loaded_rec.lapse_count == 0
+    assert loaded_rec.interval_days == 3.0
+    assert loaded_rec.review_count == 2
+    listed = store.review_schedules.list_for_item(item.id)
+    assert [row.skill_direction for row in listed] == ["recognition", "production"]
+
+
+def test_list_due_can_filter_by_direction(
+    store: TutorSqliteStore, service: ReviewService
+):
+    item = _item()
+    store.learning_items.create(item)
+    rec_event = _event(
+        item.id,
+        occurred_at=NOW - timedelta(days=2),
+        exercise_type="fr_to_ja",
+    )
+    prod_event = _event(
+        item.id,
+        occurred_at=NOW - timedelta(days=2),
+        exercise_type="ja_to_fr",
+        result="incorrect",
+    )
+    rec_state = apply_review_event(None, rec_event)
+    service.schedule_after_review(rec_state, rec_event)
+    service.schedule_after_review(apply_review_event(rec_state, prod_event), prod_event)
+
+    both = service.list_due(NOW)
+    assert [row.skill_direction for row in both] == ["production", "recognition"]
+    rec_only = service.list_due(NOW, "recognition")
+    assert [row.skill_direction for row in rec_only] == ["recognition"]
+    prod_only = service.list_due(NOW, "production")
+    assert [row.skill_direction for row in prod_only] == ["production"]

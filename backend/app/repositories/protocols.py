@@ -20,6 +20,7 @@ from app.domain.tutor import (
     LearningItem,
     LearningItemCandidate,
     ReviewSchedule,
+    SkillDirection,
     SourceDocument,
 )
 
@@ -96,12 +97,19 @@ class LearningProgressRepository(Protocol):
 
 
 class ReviewScheduleRepository(Protocol):
-    def get(self, item_id: str) -> ReviewSchedule | None: ...
+    def get(self, item_id: str, direction: SkillDirection) -> ReviewSchedule | None: ...
     def upsert(self, schedule: ReviewSchedule) -> ReviewSchedule: ...
-    def list_due(self, now: datetime) -> list[ReviewSchedule]:
+    def list_for_item(self, item_id: str) -> list[ReviewSchedule]:
+        """同一 LearningItem の direction 別予定。recognition → production 順。"""
+        ...
+
+    def list_due(
+        self, now: datetime, direction: SkillDirection | None = None
+    ) -> list[ReviewSchedule]:
         """due_at <= now かつ LearningItem.status == active の予定を返す。
 
-        返却順は due_at 昇順、同じ due_at なら learning_item_id 昇順。
+        direction を指定するとその方向だけ。未指定なら両方向。
+        返却順は due_at 昇順、同じ due_at なら learning_item_id、skill_direction 昇順。
         suspended / mastered は due でも含めない。
         """
         ...

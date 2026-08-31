@@ -43,7 +43,7 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/candidates/{candidate_id}/reject` | Candidate を却下する。LearningItem は作らない。再 reject は冪等。accepted からの reject は 409 |
 | POST | `/api/tutor/items` | 手入力の LearningItem を作成する |
 | GET | `/api/tutor/items` | active な LearningItem 一覧。管理検索はしない |
-| GET | `/api/tutor/items/{item_id}` | LearningItem と現在の LearnerState / ReviewSchedule を返す |
+| GET | `/api/tutor/items/{item_id}` | LearningItem と現在の LearnerState / ReviewSchedule（direction 別 `review_schedules` を含む）を返す |
 | GET | `/api/tutor/items/{item_id}/exercises/{exercise_type}` | Tutor Exercise を再構成して返す。正解は含めない |
 | POST | `/api/tutor/items/{item_id}/exercises/{exercise_type}/answer` | Exercise を server-side で採点し、LearningEvent / LearnerState / ReviewSchedule を更新する |
 | POST | `/api/tutor/practice/sessions` | active LearningItem から Practice Session を組み立てる。Session 自体は永続化しない |
