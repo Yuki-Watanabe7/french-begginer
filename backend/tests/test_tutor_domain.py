@@ -564,28 +564,60 @@ def test_learner_state_rejects_naive_last_reviewed_at():
 def test_review_schedule_minimal_fields_and_defaults():
     due_at = utcnow() + timedelta(days=1)
     schedule = ReviewSchedule(
-        learning_item_id="item-1", due_at=due_at, interval_days=1.0
+        learning_item_id="item-1",
+        skill_direction="recognition",
+        due_at=due_at,
+        interval_days=1.0,
     )
     assert schedule.review_count == 0
     assert schedule.lapse_count == 0
-    assert schedule.scheduler_version == "v0"
+    assert schedule.scheduler_version == "v1-directional"
     assert schedule.metadata == {}
 
 
 def test_review_schedule_requires_due_at_and_interval():
     with pytest.raises(ValidationError):
-        ReviewSchedule(learning_item_id="item-1", interval_days=1.0)
+        ReviewSchedule(
+            learning_item_id="item-1",
+            skill_direction="recognition",
+            interval_days=1.0,
+        )
     with pytest.raises(ValidationError):
-        ReviewSchedule(learning_item_id="item-1", due_at=utcnow())
+        ReviewSchedule(
+            learning_item_id="item-1",
+            skill_direction="recognition",
+            due_at=utcnow(),
+        )
+
+
+def test_review_schedule_requires_skill_direction():
+    with pytest.raises(ValidationError):
+        ReviewSchedule(learning_item_id="item-1", due_at=utcnow(), interval_days=1.0)
+
+
+def test_review_schedule_rejects_unknown_skill_direction():
+    with pytest.raises(ValidationError):
+        ReviewSchedule(
+            learning_item_id="item-1",
+            skill_direction="listening",
+            due_at=utcnow(),
+            interval_days=1.0,
+        )
 
 
 def test_review_schedule_rejects_negative_values():
     due_at = utcnow()
     with pytest.raises(ValidationError):
-        ReviewSchedule(learning_item_id="item-1", due_at=due_at, interval_days=-1.0)
+        ReviewSchedule(
+            learning_item_id="item-1",
+            skill_direction="recognition",
+            due_at=due_at,
+            interval_days=-1.0,
+        )
     with pytest.raises(ValidationError):
         ReviewSchedule(
             learning_item_id="item-1",
+            skill_direction="recognition",
             due_at=due_at,
             interval_days=1.0,
             review_count=-1,
@@ -593,6 +625,7 @@ def test_review_schedule_rejects_negative_values():
     with pytest.raises(ValidationError):
         ReviewSchedule(
             learning_item_id="item-1",
+            skill_direction="production",
             due_at=due_at,
             interval_days=1.0,
             lapse_count=-1,
@@ -603,6 +636,7 @@ def test_review_schedule_rejects_naive_due_at():
     with pytest.raises(ValidationError):
         ReviewSchedule(
             learning_item_id="item-1",
+            skill_direction="recognition",
             due_at=datetime(2026, 1, 1, 12, 0),
             interval_days=1.0,
         )
@@ -612,6 +646,7 @@ def test_review_schedule_normalizes_due_at_to_utc():
     jst = timezone(timedelta(hours=9))
     schedule = ReviewSchedule(
         learning_item_id="item-1",
+        skill_direction="recognition",
         due_at=datetime(2026, 1, 2, 9, 0, tzinfo=jst),
         interval_days=1.0,
     )
@@ -621,7 +656,10 @@ def test_review_schedule_normalizes_due_at_to_utc():
 def test_review_schedule_allows_sub_day_interval():
     """再学習ステップ（数分後の再出題）を表せるようintervalはfloat。"""
     schedule = ReviewSchedule(
-        learning_item_id="item-1", due_at=utcnow(), interval_days=0.0
+        learning_item_id="item-1",
+        skill_direction="production",
+        due_at=utcnow(),
+        interval_days=0.0,
     )
     assert schedule.interval_days == 0.0
 

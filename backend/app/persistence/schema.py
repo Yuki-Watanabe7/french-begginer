@@ -7,16 +7,25 @@ Phase 0 では Alembic を導入せず、`schema_migrations` テーブルで現�
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Callable
 
-from sqlalchemy import insert, select
+from pydantic import ValidationError
+from sqlalchemy import insert, select, text
 from sqlalchemy.engine import Connection, Engine
 
-from app.domain.tutor import utcnow
-from app.persistence.datetime_codec import dump_utc
-from app.persistence.models import Base, LearningItemCandidateRow, SchemaMigrationRow
+from app.domain.review_scheduler import rebuild_directional_schedules
+from app.domain.tutor import LearningEvent, utcnow
+from app.persistence.datetime_codec import dump_utc, load_utc
+from app.persistence.models import (
+    Base,
+    LearningEventRow,
+    LearningItemCandidateRow,
+    ReviewScheduleRow,
+    SchemaMigrationRow,
+)
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 UpgradeFn = Callable[[Connection], None]
 
@@ -81,8 +90,70 @@ def _upgrade_to_2(conn: Connection) -> None:
     LearningItemCandidateRow.__table__.create(conn)
 
 
+def _upgrade_to_3(conn: Connection) -> None:
+    """Phase 4: ReviewSchedule を (item, direction) 別に再構築する.
+
+    旧 schedule 行はコピーしない。LearningEvent 履歴を direction 別に
+    replay した結果だけを残す。direction を復元できない event は推測せず飛ばす。
+    """
+    conn.execute(text("ALTER TABLE review_schedules RENAME TO review_schedules_legacy"))
+    conn.execute(text("DROP INDEX IF EXISTS ix_review_schedules_due_at"))
+    ReviewScheduleRow.__table__.create(conn)
+    _rebuild_review_schedules_from_events(conn)
+    conn.execute(text("DROP TABLE review_schedules_legacy"))
+
+
+def _rebuild_review_schedules_from_events(conn: Connection) -> None:
+    event_table = LearningEventRow.__table__
+    rows = conn.execute(
+        select(event_table).order_by(
+            event_table.c.learning_item_id,
+            event_table.c.occurred_at,
+            event_table.c.id,
+        )
+    ).mappings()
+
+    by_item: dict[str, list[LearningEvent]] = defaultdict(list)
+    for row in rows:
+        by_item[row["learning_item_id"]].append(_learning_event_from_db_row(row))
+
+    schedule_table = ReviewScheduleRow.__table__
+    for events in by_item.values():
+        for schedule in rebuild_directional_schedules(events).values():
+            conn.execute(
+                schedule_table.insert().values(
+                    learning_item_id=schedule.learning_item_id,
+                    skill_direction=schedule.skill_direction,
+                    due_at=dump_utc(schedule.due_at),
+                    interval_days=schedule.interval_days,
+                    review_count=schedule.review_count,
+                    lapse_count=schedule.lapse_count,
+                    scheduler_version=schedule.scheduler_version,
+                    metadata_json=schedule.metadata,
+                )
+            )
+
+
+def _learning_event_from_db_row(row: dict[str, object]) -> LearningEvent:
+    payload = {
+        "id": row["id"],
+        "learning_item_id": row["learning_item_id"],
+        "event_type": row["event_type"],
+        "exercise_type": row["exercise_type"],
+        "result": row["result"],
+        "occurred_at": load_utc(str(row["occurred_at"])),
+        "response_time_ms": row["response_time_ms"],
+        "metadata": row["metadata_json"] or {},
+    }
+    try:
+        return LearningEvent.model_validate(payload)
+    except ValidationError:
+        return LearningEvent.model_construct(**payload)
+
+
 # (target_version, upgrade) 。初期スキーマは create_all で作るため、
-# 新規DBは version 2 として作成される。既存の version 1 DB は upgrade する。
+# 新規DBは version 3 として作成される。既存の version 1/2 DB は upgrade する。
 UPGRADE_STEPS: list[tuple[int, UpgradeFn]] = [
     (2, _upgrade_to_2),
+    (3, _upgrade_to_3),
 ]

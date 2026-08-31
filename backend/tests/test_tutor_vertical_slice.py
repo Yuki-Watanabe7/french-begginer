@@ -145,7 +145,7 @@ def test_vertical_slice_source_to_due_to_rereview(tmp_path: Path):
             assert len(events) == 1
             assert events[0].result == "correct"
             assert file_store.learner_states.get(item_id) is not None
-            schedule = file_store.review_schedules.get(item_id)
+            schedule = file_store.review_schedules.get(item_id, "recognition")
             assert schedule is not None
             assert schedule.due_at == NOW + timedelta(days=1)
 
@@ -188,7 +188,7 @@ def test_vertical_slice_source_to_due_to_rereview(tmp_path: Path):
     assert loaded_state is not None
     assert loaded_state.attempt_count == 2
     assert loaded_state.consecutive_correct == 2
-    loaded_schedule = reopened.review_schedules.get(item_id)
+    loaded_schedule = reopened.review_schedules.get(item_id, "recognition")
     assert loaded_schedule is not None
     assert loaded_schedule.interval_days == 3.0
     assert loaded_schedule.due_at == NOW + timedelta(days=4)
@@ -351,7 +351,7 @@ def test_schedule_write_failure_leaves_event_and_state(
     state = store.learner_states.get(item.id)
     assert state is not None
     assert state.attempt_count == 1
-    assert store.review_schedules.get(item.id) is None
+    assert store.review_schedules.get(item.id, "recognition") is None
 
 
 def test_existing_quiz_and_tts_contracts_are_unchanged(

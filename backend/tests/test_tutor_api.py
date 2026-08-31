@@ -153,6 +153,7 @@ def test_create_and_get_learning_item(client: TestClient):
     assert item["source_refs"][0]["source_document_id"] == source["id"]
     assert created["learner_state"] is None
     assert created["review_schedule"] is None
+    assert created["review_schedules"] == []
 
     res = client.get(f"/api/tutor/items/{item['id']}")
     assert res.status_code == 200
@@ -160,6 +161,7 @@ def test_create_and_get_learning_item(client: TestClient):
     assert body["item"]["id"] == item["id"]
     assert body["learner_state"] is None
     assert body["review_schedule"] is None
+    assert body["review_schedules"] == []
 
 
 def test_create_item_rejects_unknown_source_ref(client: TestClient):
@@ -206,6 +208,7 @@ def test_review_persists_event_and_updates_state_and_schedule(
     assert body["learner_state"]["mastery_score"] == 1.0
     assert body["review_schedule"]["interval_days"] == 1.0
     assert body["review_schedule"]["review_count"] == 1
+    assert body["review_schedule"]["skill_direction"] == "recognition"
 
     events = store.learning_events.list_by_item(item_id)
     assert len(events) == 1
@@ -213,13 +216,17 @@ def test_review_persists_event_and_updates_state_and_schedule(
     state = store.learner_states.get(item_id)
     assert state is not None
     assert state.attempt_count == 1
-    schedule = store.review_schedules.get(item_id)
+    schedule = store.review_schedules.get(item_id, "recognition")
     assert schedule is not None
     assert schedule.due_at == PAST + timedelta(days=1)
 
     detail = client.get(f"/api/tutor/items/{item_id}").json()
     assert detail["learner_state"]["attempt_count"] == 1
     assert detail["review_schedule"]["interval_days"] == 1.0
+    assert detail["review_schedule"]["skill_direction"] == "recognition"
+    assert [row["skill_direction"] for row in detail["review_schedules"]] == [
+        "recognition"
+    ]
 
 
 def test_review_missing_item_returns_404(client: TestClient):

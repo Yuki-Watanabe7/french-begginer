@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.domain.review_scheduler import DUE_ITEM_STATUS
+from app.domain.review_scheduler import DIRECTION_ORDER, DUE_ITEM_STATUS
 from app.domain.tutor import (
     CandidateStatus,
     LearnerState,
@@ -18,6 +18,7 @@ from app.domain.tutor import (
     LearningItem,
     LearningItemCandidate,
     ReviewSchedule,
+    SkillDirection,
     SourceDocument,
     apply_candidate_status,
 )
@@ -239,9 +240,9 @@ class SqliteReviewScheduleRepository:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
 
-    def get(self, item_id: str) -> ReviewSchedule | None:
+    def get(self, item_id: str, direction: SkillDirection) -> ReviewSchedule | None:
         with self._sessions() as session:
-            row = session.get(ReviewScheduleRow, item_id)
+            row = session.get(ReviewScheduleRow, (item_id, direction))
             return row.to_domain() if row is not None else None
 
     def upsert(self, schedule: ReviewSchedule) -> ReviewSchedule:
@@ -251,19 +252,37 @@ class SqliteReviewScheduleRepository:
             session.commit()
         return schedule
 
-    def list_due(self, now: datetime) -> list[ReviewSchedule]:
-        now_iso = dump_utc(require_aware(now))
+    def list_for_item(self, item_id: str) -> list[ReviewSchedule]:
         with self._sessions() as session:
             rows = session.scalars(
-                select(ReviewScheduleRow)
-                .join(
-                    LearningItemRow,
-                    ReviewScheduleRow.learning_item_id == LearningItemRow.id,
+                select(ReviewScheduleRow).where(
+                    ReviewScheduleRow.learning_item_id == item_id
                 )
-                .where(ReviewScheduleRow.due_at <= now_iso)
-                .where(LearningItemRow.status == DUE_ITEM_STATUS)
-                .order_by(ReviewScheduleRow.due_at, ReviewScheduleRow.learning_item_id)
             ).all()
+        return _sort_schedules_for_item([row.to_domain() for row in rows])
+
+    def list_due(
+        self, now: datetime, direction: SkillDirection | None = None
+    ) -> list[ReviewSchedule]:
+        now_iso = dump_utc(require_aware(now))
+        stmt = (
+            select(ReviewScheduleRow)
+            .join(
+                LearningItemRow,
+                ReviewScheduleRow.learning_item_id == LearningItemRow.id,
+            )
+            .where(ReviewScheduleRow.due_at <= now_iso)
+            .where(LearningItemRow.status == DUE_ITEM_STATUS)
+        )
+        if direction is not None:
+            stmt = stmt.where(ReviewScheduleRow.skill_direction == direction)
+        stmt = stmt.order_by(
+            ReviewScheduleRow.due_at,
+            ReviewScheduleRow.learning_item_id,
+            ReviewScheduleRow.skill_direction,
+        )
+        with self._sessions() as session:
+            rows = session.scalars(stmt).all()
             return [row.to_domain() for row in rows]
 
 
@@ -317,6 +336,11 @@ class TutorSqliteStore:
     @classmethod
     def in_memory(cls) -> TutorSqliteStore:
         return cls("sqlite:///:memory:")
+
+
+def _sort_schedules_for_item(schedules: list[ReviewSchedule]) -> list[ReviewSchedule]:
+    order = {direction: index for index, direction in enumerate(DIRECTION_ORDER)}
+    return sorted(schedules, key=lambda schedule: order[schedule.skill_direction])
 
 
 def _require_learning_item(session: Session, item_id: str) -> None:

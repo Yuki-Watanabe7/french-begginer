@@ -77,6 +77,7 @@ def test_create_item_without_source_refs(service: TutorService):
     assert detail.item == item
     assert detail.learner_state is None
     assert detail.review_schedule is None
+    assert detail.review_schedules == []
 
 
 def test_create_item_with_existing_source_ref(
@@ -154,11 +155,12 @@ def test_record_review_updates_event_state_and_schedule(
     assert record.review_schedule.interval_days == 1.0
     assert store.learning_events.list_by_item(item.id) == [record.event]
     assert store.learner_states.get(item.id) == record.learner_state
-    assert store.review_schedules.get(item.id) == record.review_schedule
+    assert store.review_schedules.get(item.id, "recognition") == record.review_schedule
 
     detail = service.get_item(item.id)
     assert detail.learner_state == record.learner_state
     assert detail.review_schedule == record.review_schedule
+    assert detail.review_schedules == [record.review_schedule]
 
 
 def test_record_review_omitted_occurred_at_uses_clock(service: TutorService):
@@ -173,6 +175,7 @@ def test_record_review_omitted_occurred_at_uses_clock(service: TutorService):
     assert record.event.occurred_at == NOW
     assert record.learner_state.last_reviewed_at == NOW
     assert record.review_schedule.due_at == NOW + timedelta(days=1)
+    assert record.review_schedule.skill_direction == "production"
 
 
 def test_record_review_missing_item_raises_not_found(service: TutorService):

@@ -24,6 +24,7 @@ from app.persistence.datetime_codec import dump_utc
 from app.persistence.db import create_db_engine
 from app.persistence.models import (
     Base,
+    LearningEventRow,
     LearningItemCandidateRow,
     LearningItemRow,
     SchemaMigrationRow,
@@ -62,6 +63,7 @@ def _event(item_id: str, **overrides) -> LearningEvent:
 def _schedule(item_id: str, due_at: datetime, **overrides) -> ReviewSchedule:
     values = {
         "learning_item_id": item_id,
+        "skill_direction": "recognition",
         "due_at": due_at,
         "interval_days": 1.0,
     }
@@ -394,7 +396,7 @@ def test_schema_upgrades_from_v1_and_preserves_existing_rows(tmp_path: Path):
     engine.dispose()
 
     store = TutorSqliteStore(url)
-    assert get_schema_version(store.engine) == 2
+    assert get_schema_version(store.engine) == CURRENT_SCHEMA_VERSION
     assert inspect(store.engine).has_table(LearningItemCandidateRow.__tablename__)
     assert store.source_documents.get(source.id) == source
     assert store.learning_items.get(item.id) == item
@@ -405,7 +407,104 @@ def test_schema_upgrades_from_v1_and_preserves_existing_rows(tmp_path: Path):
     store.engine.dispose()
 
 
-def test_duplicate_learning_item_id_is_rejected(store: TutorSqliteStore):
+_LEGACY_REVIEW_SCHEDULES_DDL = """
+CREATE TABLE review_schedules (
+    learning_item_id VARCHAR NOT NULL,
+    due_at VARCHAR NOT NULL,
+    interval_days FLOAT NOT NULL,
+    review_count INTEGER NOT NULL,
+    lapse_count INTEGER NOT NULL,
+    scheduler_version VARCHAR NOT NULL,
+    metadata_json TEXT NOT NULL,
+    PRIMARY KEY (learning_item_id),
+    FOREIGN KEY(learning_item_id) REFERENCES learning_items (id) ON DELETE RESTRICT
+)
+"""
+
+
+def test_schema_upgrades_from_v2_rebuilds_directional_schedules_from_events(
+    tmp_path: Path,
+):
+    """旧 schedule はコピーせず、event replay で direction 別に再構築する。"""
+    db_path = tmp_path / "v2.db"
+    url = f"sqlite:///{db_path}"
+    engine = create_db_engine(url)
+    v2_tables = [
+        table
+        for table in Base.metadata.sorted_tables
+        if table.name != "review_schedules"
+    ]
+    Base.metadata.create_all(engine, tables=v2_tables)
+    with engine.begin() as conn:
+        conn.execute(text(_LEGACY_REVIEW_SCHEDULES_DDL))
+        conn.execute(
+            text("CREATE INDEX ix_review_schedules_due_at ON review_schedules (due_at)")
+        )
+
+    item = _item()
+    orphan = _item(canonical_form="orphan", meaning_ja="履歴なし")
+    rec_at = datetime(2026, 3, 1, 9, 0, tzinfo=UTC)
+    prod_at = rec_at + timedelta(days=1)
+    rec_event = _event(
+        item.id,
+        occurred_at=rec_at,
+        result="correct",
+        exercise_type="fr_to_ja",
+    )
+    prod_event = _event(
+        item.id,
+        occurred_at=prod_at,
+        result="incorrect",
+        exercise_type="ja_to_fr",
+    )
+    bogus_due = dump_utc(datetime(2099, 1, 1, tzinfo=UTC))
+    with Session(engine) as session:
+        session.add(SchemaMigrationRow(version=2, applied_at=dump_utc(utcnow())))
+        session.add(LearningItemRow.from_domain(item))
+        session.add(LearningItemRow.from_domain(orphan))
+        session.flush()
+        session.add(LearningEventRow.from_domain(rec_event))
+        session.add(LearningEventRow.from_domain(prod_event))
+        session.flush()
+        session.execute(
+            text(
+                "INSERT INTO review_schedules "
+                "(learning_item_id, due_at, interval_days, review_count, "
+                "lapse_count, scheduler_version, metadata_json) "
+                "VALUES (:id, :due, 14.0, 99, 7, 'v0', '{}')"
+            ),
+            {"id": item.id, "due": bogus_due},
+        )
+        session.execute(
+            text(
+                "INSERT INTO review_schedules "
+                "(learning_item_id, due_at, interval_days, review_count, "
+                "lapse_count, scheduler_version, metadata_json) "
+                "VALUES (:id, :due, 14.0, 99, 7, 'v0', '{}')"
+            ),
+            {"id": orphan.id, "due": bogus_due},
+        )
+        session.commit()
+    assert get_schema_version(engine) == 2
+    engine.dispose()
+
+    store = TutorSqliteStore(url)
+    assert get_schema_version(store.engine) == CURRENT_SCHEMA_VERSION
+
+    rec = store.review_schedules.get(item.id, "recognition")
+    prod = store.review_schedules.get(item.id, "production")
+    assert rec is not None
+    assert prod is not None
+    assert rec.interval_days == 1.0
+    assert rec.review_count == 1
+    assert rec.lapse_count == 0
+    assert rec.scheduler_version == "v1-directional"
+    assert prod.interval_days == 1.0
+    assert prod.review_count == 1
+    assert prod.lapse_count == 1
+    assert rec.due_at != datetime(2099, 1, 1, tzinfo=UTC)
+    assert store.review_schedules.list_for_item(orphan.id) == []
+    store.engine.dispose()
     item = _item()
     store.learning_items.create(item)
     with pytest.raises(DuplicateEntityError):
@@ -511,7 +610,7 @@ def test_review_schedule_upsert_and_list_due(store: TutorSqliteStore):
 
     updated = _schedule(due_item.id, now + timedelta(days=3), interval_days=3.0)
     store.review_schedules.upsert(updated)
-    assert store.review_schedules.get(due_item.id) == updated
+    assert store.review_schedules.get(due_item.id, "recognition") == updated
     assert [
         schedule.learning_item_id for schedule in store.review_schedules.list_due(now)
     ] == [equal_item.id]
@@ -568,6 +667,72 @@ def test_list_due_excludes_suspended_and_mastered_items(store: TutorSqliteStore)
 
     due = store.review_schedules.list_due(now)
     assert [schedule.learning_item_id for schedule in due] == [active.id]
+
+
+def test_review_schedule_holds_both_directions_and_survives_reopen(tmp_path: Path):
+    now = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+    db_path = tmp_path / "schedules.db"
+    url = f"sqlite:///{db_path}"
+    store = TutorSqliteStore(url)
+    item = _item()
+    store.learning_items.create(item)
+    rec = _schedule(item.id, now, skill_direction="recognition", interval_days=3.0)
+    prod = _schedule(
+        item.id,
+        now + timedelta(days=1),
+        skill_direction="production",
+        interval_days=1.0,
+        lapse_count=1,
+    )
+    store.review_schedules.upsert(rec)
+    store.review_schedules.upsert(prod)
+    listed = store.review_schedules.list_for_item(item.id)
+    assert [row.skill_direction for row in listed] == ["recognition", "production"]
+    assert listed[0].interval_days == 3.0
+    assert listed[1].lapse_count == 1
+    store.engine.dispose()
+
+    reopened = TutorSqliteStore(url)
+    loaded = reopened.review_schedules.list_for_item(item.id)
+    assert loaded == [rec, prod]
+    assert reopened.review_schedules.get(item.id, "recognition") == rec
+    assert reopened.review_schedules.get(item.id, "production") == prod
+    reopened.engine.dispose()
+
+
+def test_list_due_timezone_boundary_uses_utc(store: TutorSqliteStore):
+    jst = timezone(timedelta(hours=9))
+    due_at_jst = datetime(2026, 1, 2, 9, 0, tzinfo=jst)
+    utc_midnight = datetime(2026, 1, 2, 0, 0, tzinfo=UTC)
+    item = _item()
+    store.learning_items.create(item)
+    store.review_schedules.upsert(_schedule(item.id, due_at_jst))
+
+    loaded = store.review_schedules.get(item.id, "recognition")
+    assert loaded is not None
+    assert loaded.due_at == utc_midnight
+    assert store.review_schedules.list_due(utc_midnight - timedelta(seconds=1)) == []
+    due = store.review_schedules.list_due(utc_midnight)
+    assert [row.learning_item_id for row in due] == [item.id]
+
+
+def test_review_schedule_rejects_duplicate_item_and_direction(store: TutorSqliteStore):
+    item = _item()
+    store.learning_items.create(item)
+    store.review_schedules.upsert(_schedule(item.id, utcnow()))
+    with store.engine.connect() as conn:
+        with pytest.raises(IntegrityError):
+            with conn.begin():
+                conn.execute(
+                    text(
+                        "INSERT INTO review_schedules "
+                        "(learning_item_id, skill_direction, due_at, interval_days, "
+                        "review_count, lapse_count, scheduler_version, metadata_json) "
+                        "VALUES (:id, 'recognition', :due, 1.0, 0, 0, "
+                        "'v1-directional', '{}')"
+                    ),
+                    {"id": item.id, "due": dump_utc(utcnow())},
+                )
 
 
 def test_temporary_file_db_is_isolated(tmp_path: Path):
@@ -635,6 +800,7 @@ def test_get_missing_entities_returns_none(store: TutorSqliteStore):
     assert store.learning_items.get("missing") is None
     assert store.learning_item_candidates.get("missing") is None
     assert store.learner_states.get("missing") is None
-    assert store.review_schedules.get("missing") is None
+    assert store.review_schedules.get("missing", "recognition") is None
+    assert store.review_schedules.list_for_item("missing") == []
     assert store.learning_events.list_by_item("missing") == []
     assert store.learning_item_candidates.list_by_source("missing") == []
