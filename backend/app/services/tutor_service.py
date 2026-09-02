@@ -1,4 +1,4 @@
-"""Tutor 最小 API のユースケース（Issue #112）。
+"""Tutor 最小 API のユースケース（Issue #112 / #163）。
 
 Source / LearningItem の登録と、review 1回で LearningEvent・
 LearnerState・ReviewSchedule を更新する。router は HTTP 変換だけ行い、
@@ -13,6 +13,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
+from app.domain.review_queue import (
+    DEFAULT_QUEUE_LIMIT,
+    MissingReviewQueueItemError,
+    ReviewQueue,
+    build_review_queue,
+)
 from app.domain.tutor import (
     AnswerOutcome,
     CefrLevel,
@@ -39,6 +45,7 @@ from app.repositories.protocols import (
 from app.services.exceptions import (
     InvalidSourceRefError,
     TutorConflictError,
+    TutorInconsistentStateError,
     TutorNotFoundError,
 )
 from app.services.learning_state_service import LearningStateService
@@ -255,6 +262,49 @@ class TutorService:
                 )
             )
         return due
+
+    def list_review_queue(
+        self,
+        now: datetime | None = None,
+        *,
+        limit: int = DEFAULT_QUEUE_LIMIT,
+    ) -> ReviewQueue:
+        """direction-aware な due review queue を返す。
+
+        `now` 未指定時は `clock()`。HTTP から任意時刻を受け取らない。
+        recognition / production は別 entry。未スケジュール Item は含めない。
+        """
+        when = now if now is not None else self._clock()
+        schedules = self._reviews.list_due(when)
+        items_by_id: dict[str, LearningItem] = {}
+        states_by_id: dict[str, LearnerState | None] = {}
+        for schedule in schedules:
+            item_id = schedule.learning_item_id
+            if item_id in items_by_id:
+                continue
+            item = self._items.get(item_id)
+            if item is None:
+                raise TutorInconsistentStateError(
+                    "LearningItem",
+                    item_id,
+                    "ReviewSchedule に対応する LearningItem が存在しない",
+                )
+            items_by_id[item_id] = item
+            states_by_id[item_id] = self._states.get(item_id)
+        try:
+            return build_review_queue(
+                schedules,
+                items_by_id=items_by_id,
+                states_by_id=states_by_id,
+                now=when,
+                limit=limit,
+            )
+        except MissingReviewQueueItemError as exc:
+            raise TutorInconsistentStateError(
+                "LearningItem",
+                exc.item_id,
+                "ReviewSchedule に対応する LearningItem が存在しない",
+            ) from exc
 
     def _require_existing_sources(self, source_refs: list[SourceRef]) -> None:
         for ref in source_refs:

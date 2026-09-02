@@ -25,7 +25,8 @@ accepted LearningItem からの Practice Session 組み立て（Issue #150）、
 Tutor Practice Session の Frontend UI と TTS/feedback（Issue #151）、
 Phase 3 vertical slice と Exit Criteria（Issue #152）、
 および Phase 4 の recognition / production 別 LearnerState 集計（Issue #161）、
-ReviewSchedule の direction 分離（Issue #162）
+ReviewSchedule の direction 分離（Issue #162）、
+direction-aware な due review queue（Issue #163）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -38,7 +39,10 @@ ReviewSchedule の direction 分離（Issue #162）
   / `backend/app/services/review_service.py`
   / `backend/tests/test_review_scheduler.py`
   / `backend/tests/test_review_service.py`
-  （direction 別 schedule は Issue #162）`
+  （direction 別 schedule は Issue #162）
+- due review queue: `backend/app/domain/review_queue.py`
+  / `backend/tests/test_review_queue.py`
+  （Issue #163）
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -547,6 +551,8 @@ baseline** にする。同じ (state, event, previous_schedule) からは
 - 返却順は `due_at` 昇順、同じ due_at なら `learning_item_id`、
   `skill_direction` 昇順
 - 同一 Item の recognition と production が両方 due なら 2 件返す
+- HTTP の direction-aware queue は `GET /api/tutor/reviews/queue`
+  （Issue #163）。Phase 0 の `GET /api/tutor/reviews/due` は維持する
 
 ### 将来拡張への備え
 
@@ -585,10 +591,13 @@ POST /api/tutor/items/{item_id}/reviews
 | GET | `/api/tutor/items/{item_id}` | item と現在の LearnerState / ReviewSchedule |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録（201） |
 | GET | `/api/tutor/reviews/due` | 現在 due の active LearningItem |
+| GET | `/api/tutor/reviews/queue` | direction-aware な due review queue（Issue #163） |
 
 `GET /api/tutor/reviews/due` は任意時刻を HTTP query から受け取らない。
 due 判定の基準はサーバー時刻（`utcnow`）。テストでは `TutorService` の
 `clock` 注入、または過去の `occurred_at` で due を作る。
+`GET /api/tutor/reviews/queue` も任意時刻 query は持たない。Phase 0 の
+due 一覧契約は維持し、queue は別 endpoint とする。
 
 ### Source 一覧（Issue #121）
 
@@ -1832,7 +1841,8 @@ LearningEvent を使い、以下を実ユーザー体験へ接続する。
 
 `LearnerState.by_direction` の recognition / production 別集計は
 Issue #161 で実装した。ReviewSchedule の direction 分離は Issue #162。
-due queue UI、Frontend mastery 表示は後続 Issue。
+due review queue API は Issue #163。due queue UI、Frontend mastery 表示は
+後続 Issue。
 
 Phase 3 の Practice Session は手動開始を基本とし、due / mastery による
 優先順位付けは Phase 4 へ残す。generic な `/api/tutor/reviews/today` や
@@ -1992,6 +2002,89 @@ service / domain は ORM へ直接依存しない。
 | suspended / mastered 除外 | `test_list_due_excludes_suspended_and_mastered` |
 | timezone 境界 | `test_list_due_timezone_boundary_uses_utc` |
 
+## Phase 4 — direction-aware な due review queue（Issue #163）
+
+recognition / production 別の ReviewSchedule から、**今この瞬間に復習期限が
+来ている項目**を安定した順序で返す queue を公開する。Phase 4 で初めて
+ReviewSchedule をユーザー体験の入口に使うため、単なる DB 検索ではなく、
+復習セッションへ渡せる説明可能な contract とする。
+
+```text
+ReviewSchedule（due_at <= now, active Item）
+  -> recognition / production を別 entry
+  -> due_at / learning_item_id / skill_direction で安定ソート
+  -> ReviewQueue（entries + summary）
+```
+
+実装は `domain.review_queue.build_review_queue` と
+`TutorService.list_review_queue`。HTTP は
+`GET /api/tutor/reviews/queue`。既存 `GET /api/tutor/reviews/due` の
+Phase 0 契約は維持する。
+
+### Queue entry
+
+| フィールド | 内容 |
+|------------|------|
+| `item` | active な LearningItem |
+| `skill_direction` | recognition / production。`review_schedule.skill_direction` と一致 |
+| `learner_state` | 当該 Item の現在状態。`by_direction` の該当 stats を含む。未学習なら null |
+| `review_schedule` | 当該 direction の予定 |
+| `overdue_seconds` / `overdue_days` | `now - due_at`。ちょうど due なら 0 |
+| `available_exercise_types` | 当該 direction で出せる ExerciseType。正解は含めない |
+
+### due 判定
+
+- `due_at <= now`
+- active LearningItem のみ。suspended / mastered は除外
+- recognition / production は別 entry
+- `now` は注入可能。HTTP から任意時刻は受け取らない
+- ReviewSchedule が無い active Item は due にしない（新規学習とは別概念）
+
+### 並び順
+
+1. `due_at` 昇順（最も overdue なものから）
+2. `learning_item_id`
+3. `skill_direction`
+
+Phase 5 の personalization score は混ぜない。
+
+### 件数と summary
+
+- `limit` は 1〜100。未指定時は 20。不正値は 422
+- 0件は 200 + empty entries / zero summary
+- offset / cursor pagination は持たない
+- `summary` は limit 適用前の件数（`total_due` / `recognition_due` /
+  `production_due` / `overdue_count`）
+- `overdue_count` は `due_at < now` の件数
+
+### 異常系
+
+- timezone-naive な `now` は拒否する
+- schedule に対応する LearningItem が無い不整合は silent に 200 へ丸めない
+
+### スコープ外
+
+- Practice Session 生成
+- 新規 LearningItem との混在
+- personalized ranking
+- FSRS / SM-2
+- Frontend
+
+| 観点 | 自動テスト |
+|------|------------|
+| due 前は出ない / due 時刻で出る | `test_due_before_now_is_excluded_and_due_at_now_is_included` / `test_list_review_queue_excludes_future_and_includes_due_at_now` |
+| overdue 順 | `test_most_overdue_comes_first_then_item_id_then_skill_direction` |
+| recognition / production が別 entry | `test_recognition_and_production_are_separate_entries` / `test_review_queue_returns_due_directions_without_now_query` |
+| 片方向だけ due | `test_only_due_direction_is_returned` |
+| suspended / mastered 除外 | `test_suspended_and_mastered_are_excluded` / `test_review_queue_excludes_suspended_and_mastered` |
+| 未スケジュールを due にしない | `test_unscheduled_active_item_is_not_treated_as_due` |
+| 0件 | `test_empty_queue_has_zero_summary` / `test_review_queue_empty_returns_zero_summary` |
+| limit | `test_limit_truncates_entries_but_summary_counts_all_due` / `test_review_queue_limit_and_invalid_limit` |
+| timezone 境界 | `test_timezone_boundary_compares_in_utc` / `test_list_review_queue_timezone_boundary_uses_utc` |
+| 安定順 | `test_stable_ordering_is_deterministic` |
+| 不整合を silent drop しない | `test_missing_item_for_schedule_is_not_silently_dropped` |
+| 既存 due API の回帰なし | `test_due_reviews_returns_overdue_items_without_now_query` / `test_existing_due_api_contract_is_unchanged` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -2020,3 +2113,5 @@ Phase 3 自体の完了条件と Phase 4 への引継ぎは、上記
 「Phase 4 — recognition / production 別 LearnerState 集計」を正とする。
 ReviewSchedule の direction 分離は上記
 「Phase 4 — ReviewSchedule の recognition / production 分離」を正とする。
+due review queue は上記
+「Phase 4 — direction-aware な due review queue」を正とする。

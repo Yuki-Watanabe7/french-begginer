@@ -83,6 +83,15 @@ class InvalidPracticeFilterError(TutorServiceError):
     """source_id と item_ids の同時指定など、Practice Session 入力が不正。"""
 
 
+class TutorInconsistentStateError(TutorServiceError):
+    """schedule と Item の不整合など、黙って空応答へ丸めてはいけない状態。"""
+
+    def __init__(self, entity_type: str, entity_id: str, detail: str) -> None:
+        self.entity_type = entity_type
+        self.entity_id = entity_id
+        super().__init__(f"{entity_type} の不整合: id={entity_id}: {detail}")
+
+
 class ExtractionError(TutorServiceError):
     """Source からの学習候補抽出に失敗した。
 

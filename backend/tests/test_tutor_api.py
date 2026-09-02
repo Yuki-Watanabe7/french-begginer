@@ -321,6 +321,172 @@ def test_due_reviews_returns_overdue_items_without_now_query(client: TestClient)
     assert future_item_id not in ignored_ids
 
 
+def test_review_queue_empty_returns_zero_summary(client: TestClient):
+    res = client.get("/api/tutor/reviews/queue")
+    assert res.status_code == 200
+    body = res.json()
+    assert body == {
+        "entries": [],
+        "summary": {
+            "total_due": 0,
+            "recognition_due": 0,
+            "production_due": 0,
+            "overdue_count": 0,
+        },
+    }
+
+
+def test_review_queue_returns_due_directions_without_now_query(client: TestClient):
+    due_item_id = _create_item(client, canonical_form="due", meaning_ja="期限到来")[
+        "item"
+    ]["id"]
+    future_item_id = _create_item(client, canonical_form="future", meaning_ja="未到来")[
+        "item"
+    ]["id"]
+    unscheduled_id = _create_item(
+        client, canonical_form="new", meaning_ja="未スケジュール"
+    )["item"]["id"]
+
+    overdue = client.post(
+        f"/api/tutor/items/{due_item_id}/reviews",
+        json={
+            "exercise_type": "fr_to_ja",
+            "result": "correct",
+            "occurred_at": PAST.isoformat(),
+        },
+    )
+    assert overdue.status_code == 201
+    production = client.post(
+        f"/api/tutor/items/{due_item_id}/reviews",
+        json={
+            "exercise_type": "ja_to_fr",
+            "result": "incorrect",
+            "occurred_at": PAST.isoformat(),
+        },
+    )
+    assert production.status_code == 201
+    future = client.post(
+        f"/api/tutor/items/{future_item_id}/reviews",
+        json={"exercise_type": "fr_to_ja", "result": "correct"},
+    )
+    assert future.status_code == 201
+
+    res = client.get("/api/tutor/reviews/queue")
+    assert res.status_code == 200
+    body = res.json()
+    ids = [row["item"]["id"] for row in body["entries"]]
+    assert due_item_id in ids
+    assert future_item_id not in ids
+    assert unscheduled_id not in ids
+    directions = [
+        row["skill_direction"]
+        for row in body["entries"]
+        if row["item"]["id"] == due_item_id
+    ]
+    assert directions == ["production", "recognition"]
+    assert body["summary"]["total_due"] >= 2
+    assert body["summary"]["recognition_due"] >= 1
+    assert body["summary"]["production_due"] >= 1
+    rec = next(
+        row
+        for row in body["entries"]
+        if row["item"]["id"] == due_item_id and row["skill_direction"] == "recognition"
+    )
+    assert rec["learner_state"]["by_direction"]["recognition"]["attempt_count"] >= 1
+    assert rec["available_exercise_types"]
+    assert "correct_answer" not in rec
+    assert "expected" not in rec
+
+    ignored = client.get("/api/tutor/reviews/queue?now=2099-01-01T00:00:00Z")
+    assert ignored.status_code == 200
+    ignored_ids = [row["item"]["id"] for row in ignored.json()["entries"]]
+    assert due_item_id in ignored_ids
+    assert future_item_id not in ignored_ids
+
+
+def test_review_queue_limit_and_invalid_limit(client: TestClient):
+    item_ids = []
+    for index in range(3):
+        item_id = _create_item(
+            client, canonical_form=f"mot-{index}", meaning_ja=f"語{index}"
+        )["item"]["id"]
+        item_ids.append(item_id)
+        reviewed = client.post(
+            f"/api/tutor/items/{item_id}/reviews",
+            json={
+                "exercise_type": "fr_to_ja",
+                "result": "correct",
+                "occurred_at": PAST.isoformat(),
+            },
+        )
+        assert reviewed.status_code == 201
+
+    limited = client.get("/api/tutor/reviews/queue?limit=1")
+    assert limited.status_code == 200
+    body = limited.json()
+    assert len(body["entries"]) == 1
+    assert body["summary"]["total_due"] == 3
+    assert client.get("/api/tutor/reviews/queue?limit=0").status_code == 422
+    assert client.get("/api/tutor/reviews/queue?limit=-1").status_code == 422
+    assert client.get("/api/tutor/reviews/queue?limit=101").status_code == 422
+    assert client.get("/api/tutor/reviews/queue?limit=abc").status_code == 422
+
+
+def test_review_queue_excludes_suspended_and_mastered(client: TestClient):
+    active_id = _create_item(client, canonical_form="active", meaning_ja="学習中")[
+        "item"
+    ]["id"]
+    suspended_id = _create_item(
+        client,
+        canonical_form="suspended",
+        meaning_ja="停止",
+        status="suspended",
+    )["item"]["id"]
+    mastered_id = _create_item(
+        client,
+        canonical_form="mastered",
+        meaning_ja="定着",
+        status="mastered",
+    )["item"]["id"]
+    for item_id in (active_id, suspended_id, mastered_id):
+        res = client.post(
+            f"/api/tutor/items/{item_id}/reviews",
+            json={
+                "exercise_type": "fr_to_ja",
+                "result": "correct",
+                "occurred_at": PAST.isoformat(),
+            },
+        )
+        assert res.status_code == 201, res.text
+
+    body = client.get("/api/tutor/reviews/queue").json()
+    ids = [row["item"]["id"] for row in body["entries"]]
+    assert active_id in ids
+    assert suspended_id not in ids
+    assert mastered_id not in ids
+
+
+def test_existing_due_api_contract_is_unchanged(client: TestClient):
+    item_id = _create_item(client, canonical_form="due", meaning_ja="期限到来")["item"][
+        "id"
+    ]
+    reviewed = client.post(
+        f"/api/tutor/items/{item_id}/reviews",
+        json={
+            "exercise_type": "fr_to_ja",
+            "result": "correct",
+            "occurred_at": PAST.isoformat(),
+        },
+    )
+    assert reviewed.status_code == 201
+    res = client.get("/api/tutor/reviews/due")
+    assert res.status_code == 200
+    assert isinstance(res.json(), list)
+    assert res.json()[0]["item"]["id"] == item_id
+    assert "entries" not in res.json()[0]
+    assert "summary" not in res.json()[0]
+
+
 def test_openapi_declares_tutor_request_and_response_schemas():
     with TestClient(app) as client:
         res = client.get("/openapi.json")
@@ -334,6 +500,7 @@ def test_openapi_declares_tutor_request_and_response_schemas():
     assert "/api/tutor/items/{item_id}" in paths
     assert "/api/tutor/items/{item_id}/reviews" in paths
     assert "/api/tutor/reviews/due" in paths
+    assert "/api/tutor/reviews/queue" in paths
     assert "/api/tutor/sources/{source_id}/candidates/extract" in paths
     assert "/api/tutor/sources/{source_id}/candidates" in paths
     assert "/api/tutor/candidates/{candidate_id}/accept" in paths
@@ -341,6 +508,9 @@ def test_openapi_declares_tutor_request_and_response_schemas():
 
     due_params = paths["/api/tutor/reviews/due"]["get"].get("parameters") or []
     assert not any(param.get("name") == "now" for param in due_params)
+    queue_params = paths["/api/tutor/reviews/queue"]["get"].get("parameters") or []
+    assert not any(param.get("name") == "now" for param in queue_params)
+    assert any(param.get("name") == "limit" for param in queue_params)
 
     schemas = spec["components"]["schemas"]
     for name in (
@@ -350,6 +520,9 @@ def test_openapi_declares_tutor_request_and_response_schemas():
         "LearningItemDetailResponse",
         "ReviewResponse",
         "DueReviewResponse",
+        "ReviewQueue",
+        "ReviewQueueEntry",
+        "ReviewQueueSummary",
         "SourceDocument",
         "SourceSummary",
         "CandidateResponse",
@@ -388,6 +561,7 @@ def test_tutor_router_has_no_sql_or_domain_rules():
     assert "select(" not in source
     assert "apply_review_event" not in source
     assert "schedule_next_review" not in source
+    assert "build_review_queue" not in source
     assert "apply_candidate_status" not in source
     assert "item_normalization_key" not in source
     assert "normalize_candidates" not in source
