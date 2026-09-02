@@ -49,6 +49,7 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/practice/sessions` | active LearningItem から Practice Session を組み立てる。Session 自体は永続化しない |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録し、LearnerState と ReviewSchedule を更新する |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem を返す。任意時刻の query は持たない |
+| GET | `/api/tutor/reviews/queue` | direction-aware な due review queue。`limit` 付き。任意時刻の query は持たない |
 
 ### GET /api/tutor/sources クエリパラメータ
 
@@ -65,6 +66,27 @@ SQLite (初期) → PostgreSQL (将来)
 | `limit` | 1〜100 の整数 | `50` | 取得件数。`created_at` 昇順（同一時刻は `id` 昇順）。active のみ。不正値は 422 |
 
 0件でも 200 + `[]`。suspended / mastered は含めない。
+
+### GET /api/tutor/reviews/queue
+
+recognition / production 別の due review queue。既存 `GET /api/tutor/reviews/due` の Phase 0 契約は維持する。
+
+| パラメータ | 型 | デフォルト | 説明 |
+|------------|-----|------------|------|
+| `limit` | 1〜100 の整数 | `20` | 返す entry 数の上限。不正値は 422 |
+
+任意時刻の query は持たない。due 判定はサーバー時刻。0件でも 200。
+
+レスポンス:
+
+| フィールド | 説明 |
+|------------|------|
+| `entries` | `ReviewQueueEntry`。`due_at` 昇順、同一時刻は `learning_item_id`、`skill_direction` |
+| `summary.total_due` | limit 適用前の due 件数 |
+| `summary.recognition_due` / `production_due` | 方向別件数 |
+| `summary.overdue_count` | `due_at < now` の件数 |
+
+各 entry は `item` / `skill_direction` / `learner_state` / `review_schedule` / overdue 派生値 / `available_exercise_types` を持つ。正解は含めない。未スケジュールの active Item は due にしない。
 
 ### POST /api/tutor/practice/sessions
 

@@ -1,6 +1,6 @@
 """Tutor 最小 API（Issue #112）と Source 一覧（Issue #121）、
 Candidate 抽出・採否（Issue #134）、Exercise 取得・回答判定（Issue #149）、
-Practice Session 組み立て（Issue #150）。
+Practice Session 組み立て（Issue #150）、due review queue（Issue #163）。
 
 business rule は TutorService / CandidateService / ExerciseService /
 PracticeSessionService に任せ、このモジュールは request/response schema と
@@ -24,6 +24,12 @@ from app.domain.practice_session import (
     MAX_QUESTION_COUNT,
     MIN_QUESTION_COUNT,
     SkippedPracticeItem,
+)
+from app.domain.review_queue import (
+    DEFAULT_QUEUE_LIMIT,
+    MAX_QUEUE_LIMIT,
+    MIN_QUEUE_LIMIT,
+    ReviewQueue,
 )
 from app.domain.tutor import (
     AnswerOutcome,
@@ -51,6 +57,7 @@ from app.services.exceptions import (
     InvalidPracticeFilterError,
     InvalidSourceRefError,
     TutorConflictError,
+    TutorInconsistentStateError,
     TutorInvalidCandidateError,
     TutorMalformedAnswerError,
     TutorNotFoundError,
@@ -281,6 +288,10 @@ def _to_http(exc: TutorServiceError) -> HTTPException:
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, InvalidPracticeFilterError):
         return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, TutorInconsistentStateError):
+        return HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        )
     if isinstance(exc, ExtractionConfigError):
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
@@ -570,3 +581,19 @@ def list_due_reviews(service: TutorServiceDep) -> list[DueReviewResponse]:
         )
         for row in due
     ]
+
+
+@router.get("/reviews/queue", response_model=ReviewQueue)
+def list_review_queue(
+    service: TutorServiceDep,
+    limit: int = Query(
+        default=DEFAULT_QUEUE_LIMIT,
+        ge=MIN_QUEUE_LIMIT,
+        le=MAX_QUEUE_LIMIT,
+    ),
+) -> ReviewQueue:
+    """direction-aware な due review queue。任意時刻の query は持たない。"""
+    try:
+        return service.list_review_queue(limit=limit)
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc

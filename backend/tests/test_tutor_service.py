@@ -1,6 +1,6 @@
 """TutorService（Issue #112）のユースケーステスト。"""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -246,3 +246,217 @@ def test_list_due_without_now_uses_clock(service: TutorService):
     )
     due = service.list_due()
     assert [row.item.id for row in due] == [item.id]
+
+
+def test_list_review_queue_excludes_future_and_includes_due_at_now(
+    service: TutorService,
+):
+    due_item = service.create_item(
+        item_type="vocabulary",
+        canonical_form="due",
+        meaning_ja="期限到来",
+    )
+    future_item = service.create_item(
+        item_type="vocabulary",
+        canonical_form="future",
+        meaning_ja="未到来",
+    )
+    service.record_review(
+        due_item.id,
+        exercise_type="fr_to_ja",
+        result="correct",
+        occurred_at=NOW - timedelta(days=1),
+    )
+    service.record_review(
+        future_item.id,
+        exercise_type="fr_to_ja",
+        result="correct",
+        occurred_at=NOW,
+    )
+
+    queue = service.list_review_queue(NOW)
+    assert [row.item.id for row in queue.entries] == [due_item.id]
+    assert queue.entries[0].skill_direction == "recognition"
+    assert queue.entries[0].overdue_seconds == 0
+    assert queue.summary.total_due == 1
+    assert queue.summary.overdue_count == 0
+    assert service.list_review_queue(NOW - timedelta(seconds=1)).entries == ()
+
+
+def test_list_review_queue_without_now_uses_clock(service: TutorService):
+    item = service.create_item(
+        item_type="vocabulary",
+        canonical_form="bonjour",
+        meaning_ja="こんにちは",
+    )
+    service.record_review(
+        item.id,
+        exercise_type="fr_to_ja",
+        result="correct",
+        occurred_at=NOW - timedelta(days=1),
+    )
+    queue = service.list_review_queue()
+    assert [row.item.id for row in queue.entries] == [item.id]
+
+
+def test_list_review_queue_keeps_recognition_and_production_separate(
+    service: TutorService,
+):
+    item = service.create_item(
+        item_type="vocabulary",
+        canonical_form="livre",
+        meaning_ja="本",
+    )
+    service.record_review(
+        item.id,
+        exercise_type="fr_to_ja",
+        result="correct",
+        occurred_at=NOW - timedelta(days=2),
+    )
+    service.record_review(
+        item.id,
+        exercise_type="ja_to_fr",
+        result="incorrect",
+        occurred_at=NOW - timedelta(days=1),
+    )
+    queue = service.list_review_queue(NOW)
+    assert [row.skill_direction for row in queue.entries] == [
+        "recognition",
+        "production",
+    ]
+    assert queue.summary.recognition_due == 1
+    assert queue.summary.production_due == 1
+    assert queue.entries[0].learner_state is not None
+    assert "recognition" in queue.entries[0].learner_state.by_direction
+    assert "production" in queue.entries[1].learner_state.by_direction
+    assert all(row.available_exercise_types for row in queue.entries)
+
+
+def test_list_review_queue_returns_only_due_direction(service: TutorService):
+    item = service.create_item(
+        item_type="vocabulary",
+        canonical_form="chat",
+        meaning_ja="猫",
+    )
+    service.record_review(
+        item.id,
+        exercise_type="fr_to_ja",
+        result="correct",
+        occurred_at=NOW - timedelta(days=1),
+    )
+    service.record_review(
+        item.id,
+        exercise_type="ja_to_fr",
+        result="correct",
+        occurred_at=NOW,
+    )
+    queue = service.list_review_queue(NOW)
+    assert [row.skill_direction for row in queue.entries] == ["recognition"]
+    assert queue.summary.production_due == 0
+
+
+def test_list_review_queue_excludes_suspended_mastered_and_unscheduled(
+    service: TutorService,
+):
+    active = service.create_item(
+        item_type="vocabulary",
+        canonical_form="active",
+        meaning_ja="学習中",
+    )
+    suspended = service.create_item(
+        item_type="vocabulary",
+        canonical_form="suspended",
+        meaning_ja="停止",
+        status="suspended",
+    )
+    mastered = service.create_item(
+        item_type="vocabulary",
+        canonical_form="mastered",
+        meaning_ja="定着",
+        status="mastered",
+    )
+    unscheduled = service.create_item(
+        item_type="vocabulary",
+        canonical_form="new",
+        meaning_ja="未学習",
+    )
+    for item in (active, suspended, mastered):
+        service.record_review(
+            item.id,
+            exercise_type="fr_to_ja",
+            result="correct",
+            occurred_at=NOW - timedelta(days=1),
+        )
+    queue = service.list_review_queue(NOW)
+    assert [row.item.id for row in queue.entries] == [active.id]
+    assert unscheduled.id not in [row.item.id for row in queue.entries]
+
+
+def test_list_review_queue_limit_does_not_shrink_summary(service: TutorService):
+    items = [
+        service.create_item(
+            item_type="vocabulary",
+            canonical_form=f"mot-{index}",
+            meaning_ja=f"語{index}",
+        )
+        for index in range(3)
+    ]
+    for index, item in enumerate(items):
+        service.record_review(
+            item.id,
+            exercise_type="fr_to_ja",
+            result="correct",
+            occurred_at=NOW - timedelta(days=index + 1),
+        )
+    queue = service.list_review_queue(NOW, limit=1)
+    assert len(queue.entries) == 1
+    assert queue.summary.total_due == 3
+    assert queue.entries[0].item.id == items[-1].id
+
+
+def test_list_review_queue_empty(service: TutorService):
+    queue = service.list_review_queue(NOW)
+    assert queue.entries == ()
+    assert queue.summary.total_due == 0
+
+
+def test_list_review_queue_rejects_naive_datetime(service: TutorService):
+    with pytest.raises(ValueError, match="timezone-aware"):
+        service.list_review_queue(datetime(2026, 1, 1, 12, 0))
+
+
+def test_list_due_phase0_contract_still_returns_due_items(service: TutorService):
+    item = service.create_item(
+        item_type="vocabulary",
+        canonical_form="bonjour",
+        meaning_ja="こんにちは",
+    )
+    service.record_review(
+        item.id,
+        exercise_type="fr_to_ja",
+        result="correct",
+        occurred_at=NOW - timedelta(days=1),
+    )
+    due = service.list_due(NOW)
+    assert [row.item.id for row in due] == [item.id]
+    assert due[0].review_schedule.skill_direction == "recognition"
+
+
+def test_list_review_queue_timezone_boundary_uses_utc(service: TutorService):
+    utc_midnight = datetime(2026, 1, 1, tzinfo=UTC)
+    jst = timezone(timedelta(hours=9))
+    item = service.create_item(
+        item_type="vocabulary",
+        canonical_form="minuit",
+        meaning_ja="真夜中",
+    )
+    service.record_review(
+        item.id,
+        exercise_type="fr_to_ja",
+        result="correct",
+        occurred_at=utc_midnight - timedelta(days=1),
+    )
+    at_jst = service.list_review_queue(datetime(2026, 1, 1, 9, 0, tzinfo=jst))
+    assert [row.item.id for row in at_jst.entries] == [item.id]
+    before_jst = service.list_review_queue(datetime(2026, 1, 1, 8, 59, 59, tzinfo=jst))
+    assert before_jst.entries == ()

@@ -44,6 +44,7 @@ backend/app/
 ├── domain/        # ビジネスルール。フレームワーク非依存
 │   ├── conjugation.py  # 活用データ辞書・Pydantic モデル・判定ロジック
 │   ├── review_scheduler.py  # 初期復習間隔の算出
+│   ├── review_queue.py  # direction-awareなdue review queue（Issue #163）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 │   ├── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
 │   ├── exercise_generation.py  # LearningItemからのdeterministic Exercise生成（vocab/expression/cloze/conjugation adapter）
@@ -118,6 +119,7 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 | POST | `/api/tutor/practice/sessions` | active LearningItem から Practice Session を組み立てる（永続化しない） |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベント記録（state / schedule も更新） |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem |
+| GET | `/api/tutor/reviews/queue` | direction-aware な due review queue（件数 summary 付き） |
 
 ### 現在の動詞データ（`conjugation.py`）
 
