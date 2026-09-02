@@ -1,8 +1,9 @@
 """Tutor 最小 API のユースケース（Issue #112 / #163）。
 
-Source / LearningItem の登録と、review 1回で LearningEvent・
-LearnerState・ReviewSchedule を更新する。router は HTTP 変換だけ行い、
-このサービスが repository / 既存 service を組み合わせる。
+TutorService.record_review は LearningEvent・LearnerState・
+該当 direction の ReviewSchedule を同一トランザクションで更新する
+（Issue #166）。router は HTTP 変換だけ行い、このサービスが
+repository / 既存 service を組み合わせる。
 
 `datetime.now()` は呼ばない。発生時刻の省略時と due 取得の基準は
 コンストラクタに渡す `clock`（デフォルトは `utcnow`）。
@@ -19,6 +20,7 @@ from app.domain.review_queue import (
     ReviewQueue,
     build_review_queue,
 )
+from app.domain.review_scheduler import schedule_next_review
 from app.domain.tutor import (
     AnswerOutcome,
     CefrLevel,
@@ -31,6 +33,8 @@ from app.domain.tutor import (
     ReviewSchedule,
     SourceDocument,
     SourceRef,
+    apply_review_event,
+    skill_direction_for_event,
     utcnow,
 )
 from app.repositories.exceptions import DuplicateEntityError
@@ -48,7 +52,6 @@ from app.services.exceptions import (
     TutorInconsistentStateError,
     TutorNotFoundError,
 )
-from app.services.learning_state_service import LearningStateService
 from app.services.review_service import ReviewService
 
 
@@ -94,12 +97,7 @@ def build_tutor_service(
         items=store.learning_items,
         states=store.learner_states,
         schedules=store.review_schedules,
-        learning_state=LearningStateService(
-            learning_items=store.learning_items,
-            learning_events=store.learning_events,
-            learner_states=store.learner_states,
-            progress=store.learning_progress,
-        ),
+        progress=store.learning_progress,
         reviews=ReviewService(
             learning_items=store.learning_items,
             review_schedules=store.review_schedules,
@@ -116,7 +114,7 @@ class TutorService:
         items: LearningItemRepository,
         states: LearnerStateRepository,
         schedules: ReviewScheduleRepository,
-        learning_state: LearningStateService,
+        progress: LearningProgressRepository,
         reviews: ReviewService,
         clock: Callable[[], datetime] = utcnow,
     ) -> None:
@@ -124,7 +122,7 @@ class TutorService:
         self._items = items
         self._states = states
         self._schedules = schedules
-        self._learning_state = learning_state
+        self._progress = progress
         self._reviews = reviews
         self._clock = clock
 
@@ -219,6 +217,8 @@ class TutorService:
         """LearningEvent を記録し、LearnerState と ReviewSchedule を更新する。
 
         `occurred_at` が未指定なら `clock()` を使う。
+        Event / State / 該当 direction の Schedule は同一トランザクションで
+        保存する。いずれかが失敗したら3者とも残らない。
         """
         if self._items.get(item_id) is None:
             raise TutorNotFoundError("LearningItem", item_id)
@@ -234,13 +234,22 @@ class TutorService:
         if event_id is not None:
             event_kwargs["id"] = event_id
         event = LearningEvent(**event_kwargs)
-
+        current = self._states.get(item_id)
+        state = apply_review_event(current, event)
+        direction = skill_direction_for_event(event)
+        if direction is None:
+            raise ValueError(
+                "SkillDirection を決定できない LearningEvent からは "
+                "ReviewSchedule を更新できない"
+            )
+        previous = self._schedules.get(item_id, direction)
+        schedule = schedule_next_review(state, event, previous)
         try:
-            state = self._learning_state.record_event(event)
+            self._progress.append_event_upsert_state_and_schedule(
+                event, state, schedule
+            )
         except DuplicateEntityError as exc:
             raise TutorConflictError(exc.entity_type, exc.entity_id) from exc
-
-        schedule = self._reviews.schedule_after_review(state, event)
         return ReviewRecord(event=event, learner_state=state, review_schedule=schedule)
 
     def list_due(self, now: datetime | None = None) -> list[DueReview]:

@@ -8,6 +8,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.domain.review_scheduler import schedule_next_review
 from app.domain.tutor import (
     EvidenceSpan,
     LearnerState,
@@ -18,6 +19,7 @@ from app.domain.tutor import (
     ReviewSchedule,
     SourceDocument,
     SourceRef,
+    apply_review_event,
     utcnow,
 )
 from app.persistence.datetime_codec import dump_utc
@@ -804,3 +806,75 @@ def test_get_missing_entities_returns_none(store: TutorSqliteStore):
     assert store.review_schedules.list_for_item("missing") == []
     assert store.learning_events.list_by_item("missing") == []
     assert store.learning_item_candidates.list_by_source("missing") == []
+
+
+def test_append_event_upsert_state_and_schedule_is_atomic(store: TutorSqliteStore):
+    item = _item()
+    store.learning_items.create(item)
+    event = _event(item.id)
+    state = apply_review_event(None, event)
+    schedule = schedule_next_review(state, event)
+
+    persisted_event, persisted_state, persisted_schedule = (
+        store.learning_progress.append_event_upsert_state_and_schedule(
+            event, state, schedule
+        )
+    )
+
+    assert persisted_event == event
+    assert persisted_state == state
+    assert persisted_schedule == schedule
+    assert store.learning_events.list_by_item(item.id) == [event]
+    assert store.learner_states.get(item.id) == state
+    assert store.review_schedules.get(item.id, "recognition") == schedule
+
+
+def test_append_event_upsert_state_and_schedule_rejects_duplicate(
+    store: TutorSqliteStore,
+):
+    item = _item()
+    store.learning_items.create(item)
+    event = _event(item.id)
+    state = apply_review_event(None, event)
+    schedule = schedule_next_review(state, event)
+    store.learning_progress.append_event_upsert_state_and_schedule(
+        event, state, schedule
+    )
+
+    with pytest.raises(DuplicateEntityError):
+        store.learning_progress.append_event_upsert_state_and_schedule(
+            event, state, schedule.model_copy(update={"review_count": 99})
+        )
+
+    assert store.learning_events.list_by_item(item.id) == [event]
+    assert store.learner_states.get(item.id) == state
+    assert store.review_schedules.get(item.id, "recognition") == schedule
+
+
+def test_replace_for_item_swaps_schedules_atomically(store: TutorSqliteStore):
+    item = _item()
+    store.learning_items.create(item)
+    now = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+    store.review_schedules.upsert(_schedule(item.id, now, review_count=1))
+    store.review_schedules.upsert(
+        _schedule(
+            item.id,
+            now,
+            skill_direction="production",
+            review_count=2,
+        )
+    )
+
+    replacement = _schedule(item.id, now + timedelta(days=3), review_count=4)
+    replaced = store.review_schedules.replace_for_item(item.id, [replacement])
+    assert replaced == [replacement]
+    assert store.review_schedules.get(item.id, "recognition") == replacement
+    assert store.review_schedules.get(item.id, "production") is None
+
+
+def test_replace_for_item_empty_deletes_schedules(store: TutorSqliteStore):
+    item = _item()
+    store.learning_items.create(item)
+    store.review_schedules.upsert(_schedule(item.id, utcnow(), review_count=1))
+    assert store.review_schedules.replace_for_item(item.id, []) == []
+    assert store.review_schedules.list_for_item(item.id) == []

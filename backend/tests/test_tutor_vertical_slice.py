@@ -321,10 +321,10 @@ def test_suspended_and_mastered_items_are_not_due(
     assert mastered_id not in due_ids
 
 
-def test_schedule_write_failure_leaves_event_and_state(
+def test_schedule_write_failure_rolls_back_event_and_state(
     store: TutorSqliteStore, monkeypatch: pytest.MonkeyPatch
 ):
-    """event/state は同一TX。schedule は別書き込みで、失敗しても履歴は残る。"""
+    """event / state / schedule は同一TX。schedule 失敗時は3者とも残らない。"""
     service = build_tutor_service(store, clock=lambda: NOW)
     item = service.create_item(
         item_type="expression",
@@ -346,11 +346,8 @@ def test_schedule_write_failure_leaves_event_and_state(
     with pytest.raises(RuntimeError, match="schedule write failed"):
         service.record_review(item.id, exercise_type="fr_to_ja", result="correct")
 
-    events = store.learning_events.list_by_item(item.id)
-    assert len(events) == 1
-    state = store.learner_states.get(item.id)
-    assert state is not None
-    assert state.attempt_count == 1
+    assert store.learning_events.list_by_item(item.id) == []
+    assert store.learner_states.get(item.id) is None
     assert store.review_schedules.get(item.id, "recognition") is None
 
 

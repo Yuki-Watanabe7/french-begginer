@@ -12,7 +12,8 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000  # 開発サー�
 uv run ruff check .          # lint
 uv run pytest                # 全テスト
 uv run pytest tests/test_api.py::test_health  # 単一テスト
-uv run python ../scripts/evaluate_tutor_extraction.py  # Tutor抽出の実LLM品質評価（任意。OPENAI_API_KEY が必要）
+    uv run python ../scripts/evaluate_tutor_extraction.py  # Tutor抽出の実LLM品質評価（任意。OPENAI_API_KEY が必要）
+    uv run python ../scripts/rebuild_review_schedules.py --check  # ReviewSchedule 不整合の検出（任意）
 ```
 
 ### Frontend (`cd frontend`)
@@ -59,6 +60,7 @@ backend/app/
     ├── question_service.py  # グループフィルタ付きランダム問題選択
     ├── learning_state_service.py  # LearningEvent から LearnerState を更新
     ├── review_service.py  # 復習予定の保存と due 取得
+    ├── review_schedule_rebuilder.py  # Event履歴からReviewSchedule再構築（Issue #166）
     ├── tutor_service.py  # Tutor最小APIのユースケース
     ├── extraction_service.py  # Source から LearningItemCandidate を抽出
     ├── candidate_service.py  # 抽出結果の保存と accept/reject

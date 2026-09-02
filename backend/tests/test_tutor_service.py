@@ -3,8 +3,10 @@
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy.orm import Session
 
 from app.domain.tutor import SourceDocument, SourceRef
+from app.persistence.models import LearnerStateRow, ReviewScheduleRow
 from app.repositories.sqlite import TutorSqliteStore
 from app.services.exceptions import (
     InvalidSourceRefError,
@@ -185,7 +187,9 @@ def test_record_review_missing_item_raises_not_found(service: TutorService):
         )
 
 
-def test_record_review_duplicate_event_id_raises_conflict(service: TutorService):
+def test_record_review_duplicate_event_id_raises_conflict(
+    store: TutorSqliteStore, service: TutorService
+):
     item = service.create_item(
         item_type="expression",
         canonical_form="merci",
@@ -208,6 +212,92 @@ def test_record_review_duplicate_event_id_raises_conflict(service: TutorService)
     assert detail.learner_state is not None
     assert detail.learner_state.attempt_count == 1
     assert detail.learner_state.correct_count == 1
+    assert detail.review_schedule is not None
+    assert detail.review_schedule.review_count == 1
+    assert len(store.learning_events.list_by_item(item.id)) == 1
+
+
+def test_record_review_state_failure_rolls_back_event_and_schedule(
+    store: TutorSqliteStore,
+    service: TutorService,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    item = service.create_item(
+        item_type="expression",
+        canonical_form="merci",
+        meaning_ja="ありがとう",
+    )
+    original_merge = Session.merge
+
+    def fail_state_merge(self: Session, instance: object, **kwargs: object) -> object:
+        if isinstance(instance, LearnerStateRow):
+            raise RuntimeError("state write failed")
+        return original_merge(self, instance, **kwargs)
+
+    monkeypatch.setattr(Session, "merge", fail_state_merge)
+
+    with pytest.raises(RuntimeError, match="state write failed"):
+        service.record_review(item.id, exercise_type="fr_to_ja", result="correct")
+
+    assert store.learning_events.list_by_item(item.id) == []
+    assert store.learner_states.get(item.id) is None
+    assert store.review_schedules.get(item.id, "recognition") is None
+
+
+def test_record_review_schedule_failure_rolls_back_event_and_state(
+    store: TutorSqliteStore,
+    service: TutorService,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    item = service.create_item(
+        item_type="expression",
+        canonical_form="merci",
+        meaning_ja="ありがとう",
+    )
+    original_merge = Session.merge
+
+    def fail_schedule_merge(
+        self: Session, instance: object, **kwargs: object
+    ) -> object:
+        if isinstance(instance, ReviewScheduleRow):
+            raise RuntimeError("schedule write failed")
+        return original_merge(self, instance, **kwargs)
+
+    monkeypatch.setattr(Session, "merge", fail_schedule_merge)
+
+    with pytest.raises(RuntimeError, match="schedule write failed"):
+        service.record_review(item.id, exercise_type="fr_to_ja", result="correct")
+
+    assert store.learning_events.list_by_item(item.id) == []
+    assert store.learner_states.get(item.id) is None
+    assert store.review_schedules.get(item.id, "recognition") is None
+
+
+def test_list_review_queue_uses_stored_schedule_without_replaying_history(
+    store: TutorSqliteStore,
+    service: TutorService,
+):
+    item = service.create_item(
+        item_type="expression",
+        canonical_form="bonjour",
+        meaning_ja="こんにちは",
+    )
+    record = service.record_review(
+        item.id,
+        exercise_type="fr_to_ja",
+        result="correct",
+        occurred_at=NOW - timedelta(days=2),
+    )
+    assert record.review_schedule.due_at < NOW
+    stored = record.review_schedule.model_copy(
+        update={"due_at": NOW + timedelta(days=30)}
+    )
+    store.review_schedules.upsert(stored)
+
+    queue = service.list_review_queue(NOW)
+    assert queue.summary.total_due == 0
+    assert queue.entries == ()
+    assert store.learning_events.list_by_item(item.id) == [record.event]
 
 
 def test_list_due_uses_injected_now_not_wall_clock(service: TutorService):
