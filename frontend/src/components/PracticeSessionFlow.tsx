@@ -1,14 +1,23 @@
+import { useEffect, useState } from 'react'
+import { fetchReviewQueue } from '../api/tutor'
 import { PracticeExerciseCard } from './PracticeExerciseCard'
 import { PracticeSessionResult } from './PracticeSessionResult'
 import { usePracticeSession } from '../hooks/usePracticeSession'
+import type { TutorSessionKind } from '../types'
 
 interface Props {
   sourceId?: string
   questionCount: number
+  kind?: TutorSessionKind
   onExit: () => void
 }
 
-export function PracticeSessionFlow({ sourceId, questionCount, onExit }: Props) {
+export function PracticeSessionFlow({
+  sourceId,
+  questionCount,
+  kind = 'practice',
+  onExit,
+}: Props) {
   const {
     state,
     current,
@@ -20,7 +29,26 @@ export function PracticeSessionFlow({ sourceId, questionCount, onExit }: Props) 
     setInput,
     setReconstruction,
     retry,
-  } = usePracticeSession(sourceId, questionCount)
+  } = usePracticeSession(sourceId, questionCount, kind)
+  const [remainingDue, setRemainingDue] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (kind !== 'review' || state.phase !== 'session-result') {
+      setRemainingDue(null)
+      return
+    }
+    let cancelled = false
+    void fetchReviewQueue()
+      .then(queue => {
+        if (!cancelled) setRemainingDue(queue.summary.total_due)
+      })
+      .catch(() => {
+        // 完了後の queue 再取得失敗は学習結果自体を失敗扱いしない。
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [kind, state.phase])
 
   if (state.phase === 'loading') {
     return (
@@ -45,11 +73,13 @@ export function PracticeSessionFlow({ sourceId, questionCount, onExit }: Props) 
   }
 
   if (state.phase === 'empty') {
+    const emptyText =
+      kind === 'review'
+        ? '今すぐ復習する項目はありません'
+        : '練習できる学習項目がありません。候補を採用してから学習してください'
     return (
       <div style={styles.errorBox} role="status">
-        <p style={styles.errorText}>
-          練習できる学習項目がありません。候補を採用してから学習してください
-        </p>
+        <p style={styles.errorText}>{emptyText}</p>
         <button type="button" style={styles.backBtn} onClick={onExit}>
           戻る
         </button>
@@ -60,9 +90,11 @@ export function PracticeSessionFlow({ sourceId, questionCount, onExit }: Props) 
   if (state.phase === 'session-result' && state.session) {
     return (
       <PracticeSessionResult
+        variant={kind}
         correctCount={state.correctCount}
         wrongAnswers={state.wrongAnswers}
         sessionTotal={state.session.generated_count}
+        remainingDue={kind === 'review' ? remainingDue : null}
         onRetry={() => {
           void retry()
         }}

@@ -5,10 +5,12 @@ import { TutorFlow } from '../components/TutorFlow'
 import {
   createTutorSource,
   fetchCandidates,
+  fetchReviewQueue,
   fetchTutorSource,
   fetchTutorSources,
 } from '../api/tutor'
 import type { SourceDocument, SourceSummary } from '../types'
+import { EMPTY_REVIEW_QUEUE } from './reviewQueueFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
   const actual = await importOriginal<typeof import('../api/tutor')>()
@@ -18,6 +20,7 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorSource: vi.fn(),
     createTutorSource: vi.fn(),
     fetchCandidates: vi.fn(),
+    fetchReviewQueue: vi.fn(),
   }
 })
 
@@ -25,6 +28,7 @@ const mockList = vi.mocked(fetchTutorSources)
 const mockGet = vi.mocked(fetchTutorSource)
 const mockCreate = vi.mocked(createTutorSource)
 const mockFetchCandidates = vi.mocked(fetchCandidates)
+const mockQueue = vi.mocked(fetchReviewQueue)
 
 const SUMMARY: SourceSummary = {
   id: 'src-1',
@@ -45,6 +49,7 @@ describe('TutorFlow', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockFetchCandidates.mockResolvedValue([])
+    mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
   })
 
   it('一覧から新規追加画面へ進み、一覧へ戻れる', async () => {
@@ -116,5 +121,25 @@ describe('TutorFlow', () => {
     await screen.findByRole('heading', { name: 'Le Monde' })
     await userEvent.click(screen.getByRole('button', { name: '学習する' }))
     expect(screen.getByText('出題数を選択')).toBeInTheDocument()
+  })
+
+  it('今日の復習から出題数選択へ進める', async () => {
+    mockList.mockResolvedValue([SUMMARY])
+    mockQueue.mockResolvedValue({
+      entries: [],
+      summary: {
+        total_due: 3,
+        recognition_due: 1,
+        production_due: 2,
+        overdue_count: 0,
+      },
+    })
+    render(<TutorFlow onBack={() => {}} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: '復習を始める' }))
+    expect(screen.getByText('出題数を選択')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '戻る' }))
+    await screen.findByRole('button', { name: '復習を始める' })
+    expect(screen.getByRole('button', { name: '学習する' })).toBeInTheDocument()
   })
 })

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createPracticeSession,
+  createReviewSession,
   fetchTutorItem,
   fetchTutorItems,
   submitExerciseAnswer,
@@ -9,13 +10,14 @@ import type {
   ExerciseFeedback,
   ExerciseView,
   LearningItem,
-  PracticeSession,
   PracticeWrongAnswer,
+  TutorSessionKind,
 } from '../types'
 import {
   formatPracticeGiven,
   tutorExerciseAnswerErrorMessage,
   tutorPracticeSessionErrorMessage,
+  tutorReviewSessionErrorMessage,
 } from '../utils/tutor'
 
 export type PracticePhase =
@@ -28,7 +30,12 @@ export type PracticePhase =
 
 export interface PracticeSessionState {
   phase: PracticePhase
-  session: PracticeSession | null
+  session: {
+    session_id: string
+    exercises: ExerciseView[]
+    requested_count: number
+    generated_count: number
+  } | null
   questionIndex: number
   feedback: ExerciseFeedback | null
   input: string
@@ -105,7 +112,11 @@ function enrichFeedback(
   }
 }
 
-export function usePracticeSession(sourceId: string | undefined, questionCount: number) {
+export function usePracticeSession(
+  sourceId: string | undefined,
+  questionCount: number,
+  kind: TutorSessionKind = 'practice',
+) {
   const [state, setState] = useState<PracticeSessionState>(initialState)
   const stateRef = useRef(state)
   stateRef.current = state
@@ -115,8 +126,10 @@ export function usePracticeSession(sourceId: string | undefined, questionCount: 
   const inputRef = useRef<HTMLInputElement>(null)
   const sourceIdRef = useRef(sourceId)
   const questionCountRef = useRef(questionCount)
+  const kindRef = useRef(kind)
   sourceIdRef.current = sourceId
   questionCountRef.current = questionCount
+  kindRef.current = kind
 
   const start = useCallback(async () => {
     submittingRef.current = false
@@ -128,10 +141,15 @@ export function usePracticeSession(sourceId: string | undefined, questionCount: 
     const generation = {}
     startGenerationRef.current = generation
     try {
-      const session = await createPracticeSession({
-        source_id: sourceIdRef.current,
-        question_count: questionCountRef.current,
-      })
+      const session =
+        kindRef.current === 'review'
+          ? await createReviewSession({
+              question_count: questionCountRef.current,
+            })
+          : await createPracticeSession({
+              source_id: sourceIdRef.current,
+              question_count: questionCountRef.current,
+            })
       if (startGenerationRef.current !== generation) return
       if (session.exercises.length === 0) {
         setState(s => ({ ...s, phase: 'empty', session }))
@@ -156,10 +174,14 @@ export function usePracticeSession(sourceId: string | undefined, questionCount: 
       setTimeout(() => inputRef.current?.focus(), 50)
     } catch (error) {
       if (startGenerationRef.current !== generation) return
+      const message =
+        kindRef.current === 'review'
+          ? tutorReviewSessionErrorMessage(error)
+          : tutorPracticeSessionErrorMessage(error)
       setState(s => ({
         ...s,
         phase: 'error',
-        error: tutorPracticeSessionErrorMessage(error),
+        error: message,
       }))
     }
   }, [])

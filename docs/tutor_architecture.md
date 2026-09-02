@@ -27,7 +27,8 @@ Phase 3 vertical slice と Exit Criteria（Issue #152）、
 および Phase 4 の recognition / production 別 LearnerState 集計（Issue #161）、
 ReviewSchedule の direction 分離（Issue #162）、
 direction-aware な due review queue（Issue #163）、
-due queue からの Review Practice Session（Issue #164）
+due queue からの Review Practice Session（Issue #164）、
+「今日の復習」Frontend 導線（Issue #165）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -50,6 +51,11 @@ due queue からの Review Practice Session（Issue #164）
   / `backend/tests/test_review_session_service.py`
   / `backend/tests/test_review_session_api.py`
   （Issue #164）
+- 「今日の復習」Frontend: `frontend/src/hooks/useReviewQueue.ts`
+  / `frontend/src/components/TutorTodayReviewCard.tsx`
+  / `frontend/src/test/TutorTodayReviewCard.test.tsx`
+  / `frontend/src/test/TutorPhase4Flow.test.tsx`
+  （Issue #165）
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -1850,7 +1856,7 @@ LearningEvent を使い、以下を実ユーザー体験へ接続する。
 `LearnerState.by_direction` の recognition / production 別集計は
 Issue #161 で実装した。ReviewSchedule の direction 分離は Issue #162。
 due review queue API は Issue #163。due queue からの Review Practice Session
-は Issue #164。due queue UI、Frontend mastery 表示は後続 Issue。
+は Issue #164。due queue UI は Issue #165。Frontend mastery 表示は後続 Issue。
 
 Phase 3 の Practice Session は手動開始を基本とし、due / mastery による
 優先順位付けは Phase 4 へ残す。generic な `/api/tutor/reviews/today` や
@@ -2179,6 +2185,53 @@ source of truth は LearningEvent と ReviewSchedule。
 | due 0件 | `test_empty_queue_returns_empty_session` / `test_review_session_empty_due_queue` |
 | Phase 5 を先取りしない | `test_mastery_does_not_reorder_overdue_entries` |
 
+## Phase 4 — 「今日の復習」導線・due件数・Review Session UI（Issue #165）
+
+due queue（Issue #163）と Review Practice Session（Issue #164）を、
+Tutor 画面からそのまま開始できる Frontend 体験にする。
+新規学習と復習は混ぜない。Phase 3 の Exercise renderer / feedback / TTS は
+複製せず再利用する。
+
+```text
+Tutor / Home
+  -> 今日の復習 N件
+  -> 復習を始める
+  -> due Exercise を解く
+  -> feedback
+  -> 次へ
+  -> 完了
+  -> due 件数を再取得
+```
+
+実装:
+
+- API client: `fetchReviewQueue` / `createReviewSession`
+- 件数カード: `TutorTodayReviewCard`（`useReviewQueue`）
+- Session: `PracticeSessionFlow` の `kind: 'review'`。renderer は
+  `PracticeExerciseCard` のまま
+- 完了後: `GET /api/tutor/reviews/queue` を再 fetch し、残件数を結果と
+  一覧の両方へ反映する。再 fetch 失敗は学習結果を失敗扱いにしない
+
+| 観点 | 自動テスト |
+|------|------------|
+| due 0件の empty state | `TutorTodayReviewCard.test.tsx` / `TutorPhase4Flow.test.tsx` |
+| due 件数 / overdue / direction 要約 | `TutorTodayReviewCard.test.tsx` |
+| Review Session 開始 | `TutorFlow.test.tsx` / `TutorPhase4Flow.test.tsx` |
+| Phase 3 renderer の再利用 | `PracticeSessionFlow.test.tsx` / `TutorPhase4Flow.test.tsx` |
+| 正誤回答と送信失敗時の問題保持 | `TutorPhase4Flow.test.tsx` |
+| 完了後 due 件数再 fetch | `TutorPhase4Flow.test.tsx` |
+| queue / session 失敗 | `TutorTodayReviewCard.test.tsx` / `PracticeSessionFlow.test.tsx` |
+| 通常 Practice / Source 導線の回帰なし | `TutorPhase4Flow.test.tsx` / `TutorPhase3Flow.test.tsx` |
+| mobile width | `TutorTodayReviewCard.test.tsx` / `TutorPhase4Flow.test.tsx` |
+
+### スコープ外
+
+- mastery dashboard
+- 学習時間予測
+- 新規学習と復習の自動 mix
+- Tutor recommendation
+- 通知 / reminder
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -2211,3 +2264,5 @@ due review queue は上記
 「Phase 4 — direction-aware な due review queue」を正とする。
 Review Practice Session は上記
 「Phase 4 — due queue から「今日の復習」Practice Session を生成する」を正とする。
+「今日の復習」Frontend は上記
+「Phase 4 — 「今日の復習」導線・due件数・Review Session UI」を正とする。

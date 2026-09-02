@@ -239,3 +239,76 @@ export interface PracticeWrongAnswer {
   correctAnswer: string
   userAnswer: string
 }
+
+export interface FetchReviewQueueOptions {
+  limit?: number
+}
+
+export interface ReviewQueueSummary {
+  total_due: number
+  recognition_due: number
+  production_due: number
+  overdue_count: number
+}
+
+export interface MasteryStats {
+  attempt_count: number
+  correct_count: number
+  incorrect_count: number
+  consecutive_correct: number
+  last_reviewed_at: string | null
+  mastery_score: number
+}
+
+export interface LearnerState extends MasteryStats {
+  learning_item_id: string
+  by_direction?: Partial<Record<SkillDirection, MasteryStats>>
+}
+
+export interface ReviewSchedule {
+  learning_item_id: string
+  skill_direction: SkillDirection
+  due_at: string
+  interval_days: number
+  review_count: number
+  lapse_count: number
+  scheduler_version: string
+  metadata?: Record<string, unknown>
+}
+
+export interface ReviewQueueEntry {
+  item: LearningItem
+  skill_direction: SkillDirection
+  learner_state: LearnerState | null
+  review_schedule: ReviewSchedule
+  overdue_seconds: number
+  overdue_days: number
+  available_exercise_types: ExerciseType[]
+}
+
+export interface ReviewQueue {
+  entries: ReviewQueueEntry[]
+  summary: ReviewQueueSummary
+}
+
+export interface CreateReviewSessionInput {
+  question_count?: number
+  seed?: string
+}
+
+export interface SkippedReviewEntry {
+  learning_item_id: string
+  skill_direction: SkillDirection
+  skip_reason: string
+  detail?: string | null
+}
+
+export interface ReviewPracticeSession {
+  session_id: string
+  exercises: ExerciseView[]
+  skipped_entries: SkippedReviewEntry[]
+  requested_count: number
+  generated_count: number
+}
+
+export type TutorSessionKind = 'practice' | 'review'

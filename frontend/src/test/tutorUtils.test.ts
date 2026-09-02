@@ -14,6 +14,8 @@ import {
   tutorNoteFromMetadata,
   tutorNoteMetadata,
   tutorPracticeSessionErrorMessage,
+  tutorReviewQueueErrorMessage,
+  tutorReviewSessionErrorMessage,
   tutorSaveErrorMessage,
 } from '../utils/tutor'
 
@@ -157,6 +159,28 @@ describe('tutorPracticeSessionErrorMessage', () => {
     )
     expect(tutorPracticeSessionErrorMessage(new Error('network'))).toBe(
       '練習の開始に失敗しました。通信環境を確認して再度お試しください',
+    )
+  })
+})
+
+describe('tutorReviewQueueErrorMessage', () => {
+  it('5xx / 通信失敗を日本語へ変換する', () => {
+    expect(tutorReviewQueueErrorMessage(new ApiError(500))).toBe(
+      'サーバーでエラーが発生しました。時間をおいて再度お試しください',
+    )
+    expect(tutorReviewQueueErrorMessage(new Error('network'))).toBe(
+      '復習一覧の取得に失敗しました。通信環境を確認して再度お試しください',
+    )
+  })
+})
+
+describe('tutorReviewSessionErrorMessage', () => {
+  it('422 / 通信失敗を日本語へ変換する', () => {
+    expect(tutorReviewSessionErrorMessage(new ApiError(422))).toBe(
+      '復習の条件を確認してください',
+    )
+    expect(tutorReviewSessionErrorMessage(new Error('network'))).toBe(
+      '復習の開始に失敗しました。通信環境を確認して再度お試しください',
     )
   })
 })

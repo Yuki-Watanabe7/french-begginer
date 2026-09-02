@@ -3,9 +3,11 @@ import {
   ApiError,
   acceptCandidate,
   createPracticeSession,
+  createReviewSession,
   createTutorSource,
   extractCandidates,
   fetchCandidates,
+  fetchReviewQueue,
   fetchTutorItem,
   fetchTutorItems,
   fetchTutorSource,
@@ -430,5 +432,101 @@ describe('fetchTutorItems / fetchTutorItem', () => {
       `/api/tutor/items/${encodeURIComponent(itemId)}`,
     )
     expect(item).toEqual(ITEM)
+  })
+})
+
+const QUEUE = {
+  entries: [
+    {
+      item: ITEM,
+      skill_direction: 'production',
+      learner_state: null,
+      review_schedule: {
+        learning_item_id: 'item-1',
+        skill_direction: 'production',
+        due_at: '2026-08-24T12:00:00+00:00',
+        interval_days: 1,
+        review_count: 1,
+        lapse_count: 0,
+        scheduler_version: 'v1-directional',
+      },
+      overdue_seconds: 3600,
+      overdue_days: 0.04,
+      available_exercise_types: ['ja_to_fr'],
+    },
+  ],
+  summary: {
+    total_due: 1,
+    recognition_due: 0,
+    production_due: 1,
+    overdue_count: 1,
+  },
+}
+
+const REVIEW_SESSION = {
+  session_id: 'rev-1',
+  exercises: [EXERCISE],
+  skipped_entries: [],
+  requested_count: 5,
+  generated_count: 1,
+}
+
+describe('fetchReviewQueue', () => {
+  it('GET /api/tutor/reviews/queue を呼ぶ', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(QUEUE))
+
+    const result = await fetchReviewQueue()
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith('/api/tutor/reviews/queue')
+    expect(result).toEqual(QUEUE)
+    expect(result.summary.total_due).toBe(1)
+  })
+
+  it('limit 指定時は query に載せる', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(QUEUE))
+
+    await fetchReviewQueue({ limit: 10 })
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      '/api/tutor/reviews/queue?limit=10',
+    )
+  })
+
+  it('non-2xx は成功値として返さない', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse({ detail: 'boom' }, 500),
+    )
+
+    await expect(fetchReviewQueue()).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 500,
+    })
+  })
+})
+
+describe('createReviewSession', () => {
+  it('POST /api/tutor/review/sessions に question_count を送る', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(REVIEW_SESSION))
+
+    const result = await createReviewSession({ question_count: 5, seed: 'fixed' })
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith('/api/tutor/review/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question_count: 5, seed: 'fixed' }),
+    })
+    expect(result).toEqual(REVIEW_SESSION)
+    expect(result.exercises[0]).not.toHaveProperty('correct_answer')
+  })
+
+  it('未指定フィールドは body に載せない', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(REVIEW_SESSION))
+
+    await createReviewSession()
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      '/api/tutor/review/sessions',
+      expect.objectContaining({ body: JSON.stringify({}) }),
+    )
   })
 })
