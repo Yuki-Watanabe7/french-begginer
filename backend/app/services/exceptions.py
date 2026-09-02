@@ -83,6 +83,10 @@ class InvalidPracticeFilterError(TutorServiceError):
     """source_id と item_ids の同時指定など、Practice Session 入力が不正。"""
 
 
+class InvalidReviewSessionError(TutorServiceError):
+    """question_count など、Review Practice Session 入力が不正。"""
+
+
 class TutorInconsistentStateError(TutorServiceError):
     """schedule と Item の不整合など、黙って空応答へ丸めてはいけない状態。"""
 

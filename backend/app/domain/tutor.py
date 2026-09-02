@@ -37,7 +37,8 @@ Practice Session の組み立ては `practice_session` が担う（Issue #150）
 recognition / production 別の LearnerState 集計は `apply_review_event` が担う
 （Issue #161）。ReviewSchedule の direction 分離は `review_scheduler` が担う
 （Issue #162）。direction-aware な due review queue は `review_queue` が担う
-（Issue #163）。due queue UI / Frontend mastery 表示は後続Issue。
+（Issue #163）。due queue からの Review Practice Session は `review_session`
+が担う（Issue #164）。due queue UI / Frontend mastery 表示は後続Issue。
 """
 
 import uuid

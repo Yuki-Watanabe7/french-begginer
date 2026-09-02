@@ -501,6 +501,7 @@ def test_openapi_declares_tutor_request_and_response_schemas():
     assert "/api/tutor/items/{item_id}/reviews" in paths
     assert "/api/tutor/reviews/due" in paths
     assert "/api/tutor/reviews/queue" in paths
+    assert "/api/tutor/review/sessions" in paths
     assert "/api/tutor/sources/{source_id}/candidates/extract" in paths
     assert "/api/tutor/sources/{source_id}/candidates" in paths
     assert "/api/tutor/candidates/{candidate_id}/accept" in paths
@@ -523,6 +524,8 @@ def test_openapi_declares_tutor_request_and_response_schemas():
         "ReviewQueue",
         "ReviewQueueEntry",
         "ReviewQueueSummary",
+        "CreateReviewSessionRequest",
+        "ReviewPracticeSessionResponse",
         "SourceDocument",
         "SourceSummary",
         "CandidateResponse",
@@ -562,6 +565,7 @@ def test_tutor_router_has_no_sql_or_domain_rules():
     assert "apply_review_event" not in source
     assert "schedule_next_review" not in source
     assert "build_review_queue" not in source
+    assert "build_review_practice_session" not in source
     assert "apply_candidate_status" not in source
     assert "item_normalization_key" not in source
     assert "normalize_candidates" not in source

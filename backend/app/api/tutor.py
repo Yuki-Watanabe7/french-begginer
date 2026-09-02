@@ -1,10 +1,11 @@
 """Tutor 最小 API（Issue #112）と Source 一覧（Issue #121）、
 Candidate 抽出・採否（Issue #134）、Exercise 取得・回答判定（Issue #149）、
-Practice Session 組み立て（Issue #150）、due review queue（Issue #163）。
+Practice Session 組み立て（Issue #150）、due review queue（Issue #163）、
+Review Practice Session（Issue #164）。
 
 business rule は TutorService / CandidateService / ExerciseService /
-PracticeSessionService に任せ、このモジュールは request/response schema と
-HTTP status 変換だけを持つ。
+PracticeSessionService / ReviewSessionService に任せ、このモジュールは
+request/response schema と HTTP status 変換だけを持つ。
 """
 
 from typing import Annotated, Any
@@ -16,6 +17,7 @@ from app.api.deps import (
     get_candidate_service,
     get_exercise_service,
     get_practice_session_service,
+    get_review_session_service,
     get_tutor_service,
 )
 from app.domain.exercise import PublicExercise, to_public_exercise
@@ -31,6 +33,7 @@ from app.domain.review_queue import (
     MIN_QUEUE_LIMIT,
     ReviewQueue,
 )
+from app.domain.review_session import SkippedReviewEntry
 from app.domain.tutor import (
     AnswerOutcome,
     CandidateStatus,
@@ -55,6 +58,7 @@ from app.services.exceptions import (
     ExtractionTransientError,
     InvalidCandidateTransitionError,
     InvalidPracticeFilterError,
+    InvalidReviewSessionError,
     InvalidSourceRefError,
     TutorConflictError,
     TutorInconsistentStateError,
@@ -66,6 +70,7 @@ from app.services.exceptions import (
 )
 from app.services.exercise_service import ExerciseService
 from app.services.practice_session_service import PracticeSessionService
+from app.services.review_session_service import ReviewSessionService
 from app.services.tutor_service import TutorService
 
 router = APIRouter(prefix="/api/tutor", tags=["tutor"])
@@ -75,6 +80,9 @@ CandidateServiceDep = Annotated[CandidateService, Depends(get_candidate_service)
 ExerciseServiceDep = Annotated[ExerciseService, Depends(get_exercise_service)]
 PracticeSessionServiceDep = Annotated[
     PracticeSessionService, Depends(get_practice_session_service)
+]
+ReviewSessionServiceDep = Annotated[
+    ReviewSessionService, Depends(get_review_session_service)
 ]
 
 SOURCE_LIST_LIMIT_DEFAULT = 50
@@ -238,6 +246,29 @@ class PracticeSessionResponse(BaseModel):
     generated_count: int
 
 
+class CreateReviewSessionRequest(BaseModel):
+    """Review Practice Session の入力。due queue が source of truth。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question_count: int = Field(
+        default=DEFAULT_QUESTION_COUNT,
+        ge=MIN_QUESTION_COUNT,
+        le=MAX_QUESTION_COUNT,
+    )
+    seed: str | None = Field(default=None, min_length=1)
+
+
+class ReviewPracticeSessionResponse(BaseModel):
+    """due queue から組み立てた Session。正解は含めない。永続化しない。"""
+
+    session_id: str
+    exercises: list[PublicExercise]
+    skipped_entries: list[SkippedReviewEntry]
+    requested_count: int
+    generated_count: int
+
+
 def _to_source_summary(document: SourceDocument) -> SourceSummary:
     return SourceSummary(
         id=document.id,
@@ -287,6 +318,8 @@ def _to_http(exc: TutorServiceError) -> HTTPException:
     if isinstance(exc, TutorMalformedAnswerError):
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, InvalidPracticeFilterError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, InvalidReviewSessionError):
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, TutorInconsistentStateError):
         return HTTPException(
@@ -537,6 +570,28 @@ def create_practice_session(
         session_id=session.session_id,
         exercises=list(session.to_public_exercises()),
         skipped_items=list(session.skipped_items),
+        requested_count=session.requested_count,
+        generated_count=session.generated_count,
+    )
+
+
+@router.post("/review/sessions", response_model=ReviewPracticeSessionResponse)
+def create_review_session(
+    req: CreateReviewSessionRequest,
+    service: ReviewSessionServiceDep,
+) -> ReviewPracticeSessionResponse:
+    """due review queue から Review Practice Session を組み立てる。永続化しない。"""
+    try:
+        session = service.create_session(
+            question_count=req.question_count,
+            seed=req.seed,
+        )
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    return ReviewPracticeSessionResponse(
+        session_id=session.session_id,
+        exercises=list(session.to_public_exercises()),
+        skipped_entries=list(session.skipped_entries),
         requested_count=session.requested_count,
         generated_count=session.generated_count,
     )

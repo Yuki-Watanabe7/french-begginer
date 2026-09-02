@@ -1,8 +1,9 @@
 """direction-aware な due review queue（Issue #163 / Phase 4）。
 
 recognition / production 別の ReviewSchedule から、今この瞬間に
-復習期限が来ている項目を安定した順序で並べる。Practice Session 生成や
-personalized ranking はここでは行わない。
+復習期限が来ている項目を安定した順序で並べる。Review Practice Session
+生成は `review_session`（Issue #164）が担い、personalized ranking は
+ここでは行わない。
 
 このモジュールが依存してよいのは Python 標準ライブラリ、Pydantic、
 `domain.tutor`、`domain.exercise`、`domain.review_scheduler` のみ。
