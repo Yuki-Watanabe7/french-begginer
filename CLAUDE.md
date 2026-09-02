@@ -45,6 +45,7 @@ backend/app/
 │   ├── conjugation.py  # 活用データ辞書・Pydantic モデル・判定ロジック
 │   ├── review_scheduler.py  # 初期復習間隔の算出
 │   ├── review_queue.py  # direction-awareなdue review queue（Issue #163）
+│   ├── review_session.py  # due queueからReview Practice Sessionを組み立てる（Issue #164）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 │   ├── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
 │   ├── exercise_generation.py  # LearningItemからのdeterministic Exercise生成（vocab/expression/cloze/conjugation adapter）
@@ -62,7 +63,8 @@ backend/app/
     ├── extraction_service.py  # Source から LearningItemCandidate を抽出
     ├── candidate_service.py  # 抽出結果の保存と accept/reject
     ├── exercise_service.py  # Exercise 取得・採点・LearningEvent 記録
-    └── practice_session_service.py  # Practice Session 組み立て
+    ├── practice_session_service.py  # Practice Session 組み立て
+    └── review_session_service.py  # Review Practice Session 組み立て
 ```
 
 新しい動詞を追加する場合は `CONJUGATIONS` と `VERB_GROUPS` の両方を `conjugation.py` に追記する。`VerbGroup` は `Literal["all", "er", "ir", "irregular"]` で、`?group=` クエリパラメータで絞り込める。
@@ -117,6 +119,7 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 | GET | `/api/tutor/items/{item_id}/exercises/{exercise_type}` | Tutor Exercise 取得（正解は含めない） |
 | POST | `/api/tutor/items/{item_id}/exercises/{exercise_type}/answer` | Exercise を server-side で採点し LearningEvent を記録 |
 | POST | `/api/tutor/practice/sessions` | active LearningItem から Practice Session を組み立てる（永続化しない） |
+| POST | `/api/tutor/review/sessions` | due review queue から Review Practice Session を組み立てる（永続化しない） |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベント記録（state / schedule も更新） |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem |
 | GET | `/api/tutor/reviews/queue` | direction-aware な due review queue（件数 summary 付き） |

@@ -47,6 +47,7 @@ SQLite (初期) → PostgreSQL (将来)
 | GET | `/api/tutor/items/{item_id}/exercises/{exercise_type}` | Tutor Exercise を再構成して返す。正解は含めない |
 | POST | `/api/tutor/items/{item_id}/exercises/{exercise_type}/answer` | Exercise を server-side で採点し、LearningEvent / LearnerState / ReviewSchedule を更新する |
 | POST | `/api/tutor/practice/sessions` | active LearningItem から Practice Session を組み立てる。Session 自体は永続化しない |
+| POST | `/api/tutor/review/sessions` | due review queue から Review Practice Session を組み立てる。Session 自体は永続化しない |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録し、LearnerState と ReviewSchedule を更新する |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem を返す。任意時刻の query は持たない |
 | GET | `/api/tutor/reviews/queue` | direction-aware な due review queue。`limit` 付き。任意時刻の query は持たない |
@@ -111,7 +112,32 @@ active な LearningItem から連続練習用の Session を組み立てる。Se
 | `requested_count` | 要求した出題数 |
 | `generated_count` | 実際に入れた出題数（`<= requested_count`） |
 
-due / overdue / mastery による並び替えはしない（Phase 4）。
+due / overdue / mastery による並び替えはしない（Phase 4 の Review Session が担う）。
+
+### POST /api/tutor/review/sessions
+
+due review queue だけを入力として、「今復習すべきもの」だけの Session を組み立てる。
+Phase 3 の手動 Practice Session とは混ぜない。Session 自体は DB に保存せず、
+学習履歴は回答ごとの LearningEvent が source of truth。
+
+| フィールド | 型 | デフォルト | 説明 |
+|------------|-----|------------|------|
+| `question_count` | 1〜20 の整数 | `5` | 上限。due が少なければ水増しせず短く返す |
+| `seed` | string optional | サーバー既定 | 再現用。出題順は overdue 順が source of truth |
+
+任意時刻の `now` は受け取らない。due 判定はサーバー時刻。0件でも 200。
+
+レスポンス:
+
+| フィールド | 説明 |
+|------------|------|
+| `session_id` | エフェメラルな識別子。再取得 API は持たない |
+| `exercises` | `PublicExercise` の配列。正解・metadata は含めない |
+| `skipped_entries` | 生成できなかった due entry（`learning_item_id` / `skill_direction` / `skip_reason`） |
+| `requested_count` | 要求した出題数 |
+| `generated_count` | 実際に入れた出題数（`<= requested_count`） |
+
+queue entry の skill_direction に合う Exercise だけを出す。新規 / 未 due Item は混ぜない。
 
 ### GET /api/questions/next クエリパラメータ
 
@@ -165,7 +191,7 @@ backend/app/
 │   ├── questions.py
 │   ├── answers.py
 │   ├── nouns.py
-│       ├── tutor.py              # Tutor最小API（Issue #112）、Candidate 採否（Issue #134）、Exercise 回答（Issue #149）、Practice Session（Issue #150）
+│       ├── tutor.py              # Tutor最小API（Issue #112）、Candidate 採否（Issue #134）、Exercise 回答（Issue #149）、Practice Session（Issue #150）、Review Session（Issue #164）
 ├── domain/       # ビジネスルール（活用データ、モデル定義、判定ロジック）
 │   ├── conjugation.py
 │   ├── noun.py
@@ -176,6 +202,8 @@ backend/app/
 │   ├── exercise_generation.py
 │   ├── exercise_evaluation.py  # Tutor Exercise の server-side 採点（Issue #149）
 │   ├── practice_session.py   # active LearningItem から Practice Session を組み立てる（Issue #150）
+│   ├── review_queue.py       # direction-aware な due review queue（Issue #163）
+│   ├── review_session.py     # due queue から Review Practice Session を組み立てる（Issue #164）
 │   └── conjugation_adapter.py
 ├── evaluation/   # LLM抽出の固定fixtureと品質チェック（Issue #136）。HTTPからは使わない
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
@@ -189,7 +217,8 @@ backend/app/
     ├── extraction_service.py      # Source から Candidate を抽出し正規化する
     ├── candidate_service.py       # 抽出結果の保存と accept/reject（Issue #134）
     ├── exercise_service.py        # Exercise 取得・採点・LearningEvent 記録（Issue #149）
-    └── practice_session_service.py  # Practice Session 組み立て（Issue #150）
+    ├── practice_session_service.py  # Practice Session 組み立て（Issue #150）
+    └── review_session_service.py  # Review Practice Session 組み立て（Issue #164）
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。

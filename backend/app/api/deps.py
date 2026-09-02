@@ -19,6 +19,10 @@ from app.services.practice_session_service import (
     PracticeSessionService,
     build_practice_session_service,
 )
+from app.services.review_session_service import (
+    ReviewSessionService,
+    build_review_session_service,
+)
 from app.services.tutor_service import TutorService, build_tutor_service
 
 
@@ -61,3 +65,10 @@ def get_practice_session_service(
     store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
 ) -> PracticeSessionService:
     return build_practice_session_service(store)
+
+
+def get_review_session_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+    tutor: Annotated[TutorService, Depends(get_tutor_service)],
+) -> ReviewSessionService:
+    return build_review_session_service(store, tutor)

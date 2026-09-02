@@ -26,7 +26,8 @@ Tutor Practice Session の Frontend UI と TTS/feedback（Issue #151）、
 Phase 3 vertical slice と Exit Criteria（Issue #152）、
 および Phase 4 の recognition / production 別 LearnerState 集計（Issue #161）、
 ReviewSchedule の direction 分離（Issue #162）、
-direction-aware な due review queue（Issue #163）
+direction-aware な due review queue（Issue #163）、
+due queue からの Review Practice Session（Issue #164）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -43,6 +44,12 @@ direction-aware な due review queue（Issue #163）
 - due review queue: `backend/app/domain/review_queue.py`
   / `backend/tests/test_review_queue.py`
   （Issue #163）
+- Review Practice Session: `backend/app/domain/review_session.py`
+  / `backend/app/services/review_session_service.py`
+  / `backend/tests/test_review_session.py`
+  / `backend/tests/test_review_session_service.py`
+  / `backend/tests/test_review_session_api.py`
+  （Issue #164）
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -592,6 +599,7 @@ POST /api/tutor/items/{item_id}/reviews
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録（201） |
 | GET | `/api/tutor/reviews/due` | 現在 due の active LearningItem |
 | GET | `/api/tutor/reviews/queue` | direction-aware な due review queue（Issue #163） |
+| POST | `/api/tutor/review/sessions` | due queue から Review Practice Session を生成（Issue #164） |
 
 `GET /api/tutor/reviews/due` は任意時刻を HTTP query から受け取らない。
 due 判定の基準はサーバー時刻（`utcnow`）。テストでは `TutorService` の
@@ -1841,8 +1849,8 @@ LearningEvent を使い、以下を実ユーザー体験へ接続する。
 
 `LearnerState.by_direction` の recognition / production 別集計は
 Issue #161 で実装した。ReviewSchedule の direction 分離は Issue #162。
-due review queue API は Issue #163。due queue UI、Frontend mastery 表示は
-後続 Issue。
+due review queue API は Issue #163。due queue からの Review Practice Session
+は Issue #164。due queue UI、Frontend mastery 表示は後続 Issue。
 
 Phase 3 の Practice Session は手動開始を基本とし、due / mastery による
 優先順位付けは Phase 4 へ残す。generic な `/api/tutor/reviews/today` や
@@ -2064,7 +2072,7 @@ Phase 5 の personalization score は混ぜない。
 
 ### スコープ外
 
-- Practice Session 生成
+- Review Practice Session 生成（Issue #164）
 - 新規 LearningItem との混在
 - personalized ranking
 - FSRS / SM-2
@@ -2084,6 +2092,92 @@ Phase 5 の personalization score は混ぜない。
 | 安定順 | `test_stable_ordering_is_deterministic` |
 | 不整合を silent drop しない | `test_missing_item_for_schedule_is_not_silently_dropped` |
 | 既存 due API の回帰なし | `test_due_reviews_returns_overdue_items_without_now_query` / `test_existing_due_api_contract_is_unchanged` |
+
+## Phase 4 — due queue から「今日の復習」Practice Session を生成する（Issue #164）
+
+Phase 3 の手動 Practice Session とは別に、due review queue だけを入力として
+**今復習すべきものだけを解く Review Practice Session** を生成する。
+新規学習と復習は混ぜない。
+
+```text
+due review queue
+  -> directionごとのeligible Exercise選択
+  -> Review Practice Session
+  -> 回答（#149）
+  -> direction別state / schedule更新
+```
+
+実装は `domain.review_session.build_review_practice_session` と
+`ReviewSessionService.create_session`。HTTP は
+`POST /api/tutor/review/sessions`。既存の
+`POST /api/tutor/practice/sessions` は維持する。
+
+### 入力
+
+| フィールド | 意味 |
+|------------|------|
+| `question_count` | 上限（default 5 / max 20）。候補が少なければ水増ししない |
+| `seed` | 再現用。省略時は `tutor-review`。出題順は overdue 順 |
+
+Source 指定や任意 Item 指定は持たない。due queue が source of truth。
+`now` は HTTP から受け取らない。
+
+### Selection policy
+
+1. **due entry のみ** — `due_at <= now` かつ active。schedule の無い Item と
+   新規 Item は混ぜない
+2. **direction を守る** — recognition due なら recognition Exercise のみ、
+   production due なら production Exercise のみ
+3. **固定優先順** — personalization score は使わない
+   - recognition: `meaning_recognition`
+   - production: `cloze`（source evidence がある context 復習）→
+     `expression_reconstruction` → `verb_conjugation` → `ja_to_fr`
+4. **同一 Item の両方向** — 別 entry として扱い、question_count 上限内で
+   overdue 順に含める。同じ `(learning_item_id, exercise_type)` は重複させない
+5. **unsupported は skip** — 当該 direction の Exercise を生成できない場合、
+   Session 全体を失敗させず `skipped_entries` に理由を返す。
+   skip しただけでは ReviewSchedule を更新しない
+
+並びは queue の overdue 順（`due_at` / `learning_item_id` / `skill_direction`）。
+overdue 日数が大きくても interval は補正しない。
+
+### 回答後の schedule 更新
+
+Issue #149 の answer pipeline を再利用する。回答した direction だけの
+ReviewSchedule を更新する。
+
+- correct → interval 延長
+- incorrect → lapse 増加 / 短期化
+- 未回答 / skip → schedule 変更なし
+
+### Session 永続化
+
+Phase 3 と同様、Session オブジェクトの DB 永続化はしない。
+source of truth は LearningEvent と ReviewSchedule。
+
+### スコープ外
+
+- 新規学習との自動 mix
+- mastery / risk ベース ranking
+- overdue 補正式
+- FSRS / SM-2
+- Frontend
+
+| 観点 | 自動テスト |
+|------|------------|
+| due entry だけ Session へ入る | `test_due_entries_only_enter_the_session` / `test_create_review_session_from_due_queue_only` |
+| future / 未スケジュールは入らない | `test_future_entry_is_excluded` / `test_review_session_excludes_future_and_unscheduled` |
+| recognition due は recognition Exercise | `test_recognition_due_selects_recognition_exercise` / `test_review_session_keeps_direction` |
+| production due は production Exercise | `test_production_due_selects_production_exercise` |
+| 両方向 due を別々に扱える | `test_both_directions_are_separate_session_entries` / `test_review_session_handles_both_directions` |
+| question_count 上限 | `test_question_count_caps_without_padding` / `test_review_session_question_count_cap` |
+| overdue 順 | `test_overdue_order_is_respected` |
+| unsupported skip | `test_unsupported_entry_is_skipped_without_failing_session` / `test_review_session_skips_unsupported_entry` |
+| skip で schedule が進まない | `test_skip_does_not_advance_schedule` |
+| 回答した direction だけ更新 | `test_answering_updates_only_matching_direction` / `test_review_session_answer_updates_only_matching_direction` |
+| seed 固定 | `test_same_seed_is_deterministic` / `test_review_session_seed_is_deterministic` |
+| due 0件 | `test_empty_queue_returns_empty_session` / `test_review_session_empty_due_queue` |
+| Phase 5 を先取りしない | `test_mastery_does_not_reorder_overdue_entries` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
@@ -2115,3 +2209,5 @@ ReviewSchedule の direction 分離は上記
 「Phase 4 — ReviewSchedule の recognition / production 分離」を正とする。
 due review queue は上記
 「Phase 4 — direction-aware な due review queue」を正とする。
+Review Practice Session は上記
+「Phase 4 — due queue から「今日の復習」Practice Session を生成する」を正とする。
