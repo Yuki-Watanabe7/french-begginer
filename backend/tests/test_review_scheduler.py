@@ -6,6 +6,7 @@ import pytest
 
 from app.domain.review_scheduler import (
     SCHEDULER_VERSION,
+    detect_schedule_inconsistencies,
     interval_days_after_review,
     rebuild_directional_schedules,
     schedule_next_review,
@@ -399,3 +400,57 @@ def test_schedule_next_review_rejects_unknown_direction():
     state = apply_review_event(None, event)
     with pytest.raises(ValueError, match="SkillDirection を決定できない"):
         schedule_next_review(state, event)
+
+
+def test_detect_missing_schedule_for_one_direction():
+    rec = _event("item-1", "correct", exercise_type="fr_to_ja")
+    prod = _event(
+        "item-1",
+        "incorrect",
+        exercise_type="ja_to_fr",
+        occurred_at=OCCURRED_AT + timedelta(days=1),
+    )
+    rebuilt = rebuild_directional_schedules((rec, prod))
+    found = detect_schedule_inconsistencies((rec, prod), [rebuilt["production"]])
+    assert [item.kind for item in found] == ["missing_schedule"]
+    assert found[0].skill_direction == "recognition"
+    assert found[0].expected_review_count == 1
+
+
+def test_detect_review_count_mismatch_and_stale_version():
+    event = _event("item-1", "correct", exercise_type="fr_to_ja")
+    rebuilt = rebuild_directional_schedules((event,))
+    stale = rebuilt["recognition"].model_copy(
+        update={"review_count": 99, "scheduler_version": "v0-legacy"}
+    )
+    found = detect_schedule_inconsistencies((event,), [stale])
+    kinds = [item.kind for item in found]
+    assert kinds == ["review_count_mismatch", "stale_scheduler_version"]
+    assert found[0].expected_review_count == 1
+    assert found[0].actual_review_count == 99
+    assert found[1].expected_scheduler_version == SCHEDULER_VERSION
+    assert found[1].actual_scheduler_version == "v0-legacy"
+
+
+def test_detect_unexpected_schedule_without_matching_events():
+    event = _event("item-1", "correct", exercise_type="fr_to_ja")
+    rebuilt = rebuild_directional_schedules((event,))
+    extra = rebuilt["recognition"].model_copy(update={"skill_direction": "production"})
+    found = detect_schedule_inconsistencies((event,), [rebuilt["recognition"], extra])
+    assert [item.kind for item in found] == ["unexpected_schedule"]
+    assert found[0].skill_direction == "production"
+
+
+def test_detect_returns_empty_when_replay_matches():
+    events = (
+        _event("item-1", "correct", exercise_type="fr_to_ja"),
+        _event(
+            "item-1",
+            "incorrect",
+            exercise_type="ja_to_fr",
+            occurred_at=OCCURRED_AT + timedelta(days=1),
+        ),
+    )
+    rebuilt = rebuild_directional_schedules(events)
+    found = detect_schedule_inconsistencies(events, list(rebuilt.values()))
+    assert found == []

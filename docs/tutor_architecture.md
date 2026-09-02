@@ -28,7 +28,8 @@ Phase 3 vertical slice と Exit Criteria（Issue #152）、
 ReviewSchedule の direction 分離（Issue #162）、
 direction-aware な due review queue（Issue #163）、
 due queue からの Review Practice Session（Issue #164）、
-「今日の復習」Frontend 導線（Issue #165）
+「今日の復習」Frontend 導線（Issue #165）、
+LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築（Issue #166）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -56,6 +57,11 @@ due queue からの Review Practice Session（Issue #164）、
   / `frontend/src/test/TutorTodayReviewCard.test.tsx`
   / `frontend/src/test/TutorPhase4Flow.test.tsx`
   （Issue #165）
+- Event/State/Schedule 原子性と schedule rebuild:
+  `backend/app/services/review_schedule_rebuilder.py`
+  / `backend/tests/test_review_schedule_rebuilder.py`
+  / `scripts/rebuild_review_schedules.py`
+  （Issue #166）
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -378,8 +384,8 @@ service / domain は SQLite や ORM を直接 import しない。
 | `CandidatePromotionRepository` | persist_accept | Candidate accepted 化と LearningItem create/update を同一 TX |
 | `LearningEventRepository` | append / list_by_item | append-only。`occurred_at`, `id` 順 |
 | `LearnerStateRepository` | get / upsert | LearningItem につき1件（PK） |
-| `LearningProgressRepository` | append_event_and_upsert_state | event と state を同一トランザクション |
-| `ReviewScheduleRepository` | get(item_id, direction) / upsert / list_for_item / list_due | Item × direction につき1件（複合PK） |
+| `LearningProgressRepository` | append_event_and_upsert_state / append_event_upsert_state_and_schedule | 回答記録時は event / state / 該当 direction の schedule を同一トランザクション |
+| `ReviewScheduleRepository` | get(item_id, direction) / upsert / list_for_item / list_due / replace_for_item | Item × direction につき1件（複合PK）。rebuild は Item 単位で全置換 |
 
 SQLite 実装の入口は `TutorSqliteStore`。
 接続先は `TUTOR_DATABASE_URL`、未指定時は `backend/data/tutor.db`。
@@ -402,21 +408,30 @@ SQLite 実装の入口は `TutorSqliteStore`。
 
 ### トランザクションの保証範囲
 
-`TutorService.record_review` は次の2段階で書き込む。
+`TutorService.record_review` は回答1件について次を **同一トランザクション** で書き込む（Issue #166）。
 
-1. **LearningEvent と LearnerState** — `LearningProgressRepository.append_event_and_upsert_state`
-   が同一トランザクションで保存する。state 書き込み失敗時は event も残らない
-   （`test_state_upsert_failure_rolls_back_event`）。重複 event ID も
-   このトランザクションで拒否し、state を二重適用しない。
-2. **ReviewSchedule** — event/state 確定後に `ReviewService.schedule_after_review`
-   が別トランザクションで upsert する。schedule 書き込みが失敗しても
-   event/state は残る（`test_schedule_write_failure_leaves_event_and_state`）。
+```text
+LearningEvent append
+ + LearnerState upsert
+ + 該当 skill_direction の ReviewSchedule upsert
+```
 
-Phase 0 では event / state / schedule 三者の完全な原子性は保証しない。
-schedule が欠けた場合、LearnerState と LearningEvent 履歴から再計算できる。
-`review_count` は previous schedule に依存するため、欠けた状態で次の
-review を入れると 1 から再カウントされる。三者を1トランザクションに
-閉じるのは後続Issueの対象とする。
+- state 書き込み失敗 → event / schedule も残らない
+  （`test_record_review_state_failure_rolls_back_event_and_schedule`）
+- schedule 書き込み失敗 → event / state も commit されない
+  （`test_record_review_schedule_failure_rolls_back_event_and_state` /
+  `test_schedule_write_failure_rolls_back_event_and_state`）
+- duplicate event ID → 3者とも変更なし
+  （`test_record_review_duplicate_event_id_raises_conflict`）
+
+`LearningStateService.record_event` は従来どおり event / state だけの
+同一 TX を提供する（schedule を持たない履歴修復や direction 不明 event 用）。
+回答記録の正規経路は `record_review` である。
+
+Phase 0 では schedule を別 TX としており、失敗時に event/state だけが残る
+状態を許容していた。Phase 4 では due queue がユーザー体験の入口になるため、
+新規回答でこの不整合を新たに作らない。既存 / legacy DB の欠損は
+`ReviewScheduleRebuilder` が LearningEvent 履歴から再構築する。
 
 ### schema versioning
 
@@ -673,7 +688,7 @@ HTTP API + SQLite で通す。clock は `TutorService` に注入し、
 | duplicate event | `test_duplicate_event_is_rejected_without_double_apply` |
 | timezone 境界 | `test_due_query_uses_timezone_boundary` |
 | suspended / mastered の due 除外 | `test_suspended_and_mastered_items_are_not_due` |
-| schedule 書き込み失敗時の保証 | `test_schedule_write_failure_leaves_event_and_state` |
+| schedule 書き込み失敗時の保証 | `test_schedule_write_failure_rolls_back_event_and_state` |
 | 既存 quiz / TTS 契約の回帰 | `test_existing_quiz_and_tts_contracts_are_unchanged` |
 
 ## Phase 0 Exit Criteria（Issue #107）との対応
@@ -692,7 +707,7 @@ LearningItem作成
 | Exit Criteria | 満たした実装 | 自動テスト |
 |---------------|--------------|------------|
 | LearningItem 作成 | `TutorService.create_item` / `POST /api/tutor/items` | `test_vertical_slice_source_to_due_to_rereview` / `test_create_and_get_learning_item` |
-| 学習イベント記録 | `TutorService.record_review` → `LearningStateService.record_event` | `test_vertical_slice_source_to_due_to_rereview` / `test_review_persists_event_and_updates_state_and_schedule` |
+| 学習イベント記録 | `TutorService.record_review`（Event/State/Schedule 同一TX） | `test_vertical_slice_source_to_due_to_rereview` / `test_review_persists_event_and_updates_state_and_schedule` |
 | LearnerState 更新 | domain `apply_review_event` + 同一TX upsert | `test_record_event_updates_counters_for_correct_and_incorrect` |
 | ReviewSchedule 更新 | domain `schedule_next_review` + `ReviewService` | `test_schedule_after_review_sets_next_due_for_first_review` |
 | due review 取得 | `ReviewScheduleRepository.list_due` / `GET /api/tutor/reviews/due` | `test_vertical_slice_source_to_due_to_rereview` / `test_list_due_uses_injected_now_not_wall_clock` |
@@ -2232,6 +2247,100 @@ Tutor / Home
 - Tutor recommendation
 - 通知 / reminder
 
+## Phase 4 — LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築（Issue #166）
+
+Phase 0 では Event/State と ReviewSchedule を別トランザクションにしていた。
+schedule 書き込みだけ失敗すると「履歴は残っているのに due queue へ二度と
+現れない」状態が起こり得る。Phase 4 では ReviewSchedule が実ユーザー体験の
+入口になるため、**回答記録時の原子性** と **event 履歴からの schedule 再構築**
+でこの不整合を閉じる。
+
+```text
+回答1件
+  -> LearningEvent append
+  -> LearnerState upsert
+  -> 該当 direction の ReviewSchedule upsert
+  （同一トランザクション）
+
+maintenance
+  -> LearningEvent 履歴を occurred_at, id 順で replay
+  -> direction 別 ReviewSchedule を Item 単位で全置換
+```
+
+### 回答記録の原子性
+
+正規経路は `TutorService.record_review`。
+`LearningProgressRepository.append_event_upsert_state_and_schedule` が
+SQLite の同一 TX で3者を保存する。service は ORM に直接依存しない。
+
+duplicate event ID も同じ TX 内で拒否し、state / schedule を二重適用しない。
+
+### schedule rebuild
+
+履歴が source of truth。旧 schedule 行の interval / review_count は採用しない。
+domain の `rebuild_directional_schedules` を `ReviewScheduleRebuilder` が
+永続化する。
+
+- `rebuild_for_item(item_id)` — 当該 Item の schedule を同一 TX で全置換
+- `rebuild_all()` — Item 単位で順に再構築。1件の失敗が他 Item を中途半端にしない
+- direction を復元できない event は推測せず飛ばす
+
+`ReviewScheduleRepository.replace_for_item` が置換の TX 境界。
+途中失敗時は既存 schedule を残す。
+
+### 欠損・古い version の検出
+
+`detect_schedule_inconsistencies` / `ReviewScheduleRebuilder.detect_inconsistencies`:
+
+| kind | 意味 |
+|------|------|
+| `missing_schedule` | 当該 direction の review event があるのに schedule が無い |
+| `review_count_mismatch` | 保存済み `review_count` が replay 結果と一致しない |
+| `stale_scheduler_version` | `scheduler_version` が現行 `v1-directional` と異なる |
+| `unexpected_schedule` | replay 対象でない direction の schedule が残っている |
+
+### 自動修復と明示的 maintenance
+
+| 自動 | 明示的 maintenance に留める |
+|------|------------------------------|
+| 新規回答の Event/State/Schedule 同一 TX | 欠損 / 旧 version / replay 不一致の検出 |
+| duplicate 拒否による二重適用防止 | `rebuild_for_item` / `rebuild_all` |
+| | CLI `scripts/rebuild_review_schedules.py`（`--check` / `--item-id` / `--all`） |
+
+アプリ起動時や `GET /api/tutor/reviews/queue` では全履歴 replay しない。
+通常経路は保存済み ReviewSchedule を参照する。rebuild は不整合修復用。
+
+### scheduler version
+
+Phase 4 では FSRS へ変更しない。rebuild の対象は #162 の
+direction-aware baseline（`v1-directional`）への再計算だけ。
+将来アルゴリズムを差し替えるときも、同じ replay 経路で再計算できる。
+
+### スコープ外
+
+- 分散 DB transaction
+- event sourcing 基盤の全面刷新
+- FSRS / SM-2
+- scheduler 自動最適化
+- Frontend
+- due queue 取得時の replay
+- 起動時の自動 rebuild
+
+| 観点 | 自動テスト |
+|------|------------|
+| event/state/schedule 同一 TX 成功 | `test_record_review_updates_event_state_and_schedule` / `test_append_event_upsert_state_and_schedule_is_atomic` |
+| state 失敗で3者 rollback | `test_record_review_state_failure_rolls_back_event_and_schedule` |
+| schedule 失敗で3者 rollback | `test_record_review_schedule_failure_rolls_back_event_and_state` / `test_schedule_write_failure_rolls_back_event_and_state` |
+| duplicate で3者未変更 | `test_record_review_duplicate_event_id_raises_conflict` / `test_append_event_upsert_state_and_schedule_rejects_duplicate` |
+| 欠損 schedule から rebuild | `test_rebuild_from_missing_schedule` |
+| recognition だけ欠損 / production だけ欠損 | `test_rebuild_recognition_only_missing_leaves_production` / `test_rebuild_production_only_missing` |
+| replay で review_count / lapse / due_at 一致 | `test_rebuild_replay_matches_review_count_lapse_and_due_at` |
+| scheduler version 差異の rebuild | `test_rebuild_stale_scheduler_version` |
+| rebuild が idempotent | `test_rebuild_is_idempotent` |
+| DB 再 open 後の整合性 | `test_rebuild_survives_db_reopen` |
+| replace 失敗で中途半端を残さない | `test_replace_for_item_failure_leaves_previous_schedules` |
+| due queue が全履歴 replay しない | `test_list_review_queue_uses_stored_schedule_without_replaying_history` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -2266,3 +2375,5 @@ Review Practice Session は上記
 「Phase 4 — due queue から「今日の復習」Practice Session を生成する」を正とする。
 「今日の復習」Frontend は上記
 「Phase 4 — 「今日の復習」導線・due件数・Review Session UI」を正とする。
+Event / State / Schedule の原子性と schedule 再構築は上記
+「Phase 4 — LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築」を正とする。

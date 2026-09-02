@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -235,6 +235,34 @@ class SqliteLearningProgressRepository:
                 raise DuplicateEntityError("LearningEvent", event.id) from exc
         return event, state
 
+    def append_event_upsert_state_and_schedule(
+        self,
+        event: LearningEvent,
+        state: LearnerState,
+        schedule: ReviewSchedule,
+    ) -> tuple[LearningEvent, LearnerState, ReviewSchedule]:
+        if event.learning_item_id != state.learning_item_id:
+            raise ValueError(
+                "LearningEvent と LearnerState の learning_item_id が一致しない: "
+                f"event={event.learning_item_id}, state={state.learning_item_id}"
+            )
+        if event.learning_item_id != schedule.learning_item_id:
+            raise ValueError(
+                "LearningEvent と ReviewSchedule の learning_item_id が一致しない: "
+                f"event={event.learning_item_id}, schedule={schedule.learning_item_id}"
+            )
+        with self._sessions() as session:
+            _require_learning_item(session, event.learning_item_id)
+            try:
+                session.add(LearningEventRow.from_domain(event))
+                session.merge(LearnerStateRow.from_domain(state))
+                session.merge(ReviewScheduleRow.from_domain(schedule))
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                raise DuplicateEntityError("LearningEvent", event.id) from exc
+        return event, state, schedule
+
 
 class SqliteReviewScheduleRepository:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
@@ -284,6 +312,36 @@ class SqliteReviewScheduleRepository:
         with self._sessions() as session:
             rows = session.scalars(stmt).all()
             return [row.to_domain() for row in rows]
+
+    def replace_for_item(
+        self, item_id: str, schedules: Sequence[ReviewSchedule]
+    ) -> list[ReviewSchedule]:
+        schedule_list = list(schedules)
+        seen_directions: set[str] = set()
+        for schedule in schedule_list:
+            if schedule.learning_item_id != item_id:
+                raise ValueError(
+                    "replace_for_item の schedule が item_id と一致しない: "
+                    f"item_id={item_id}, schedule={schedule.learning_item_id}"
+                )
+            if schedule.skill_direction in seen_directions:
+                raise ValueError(
+                    "replace_for_item に同一 skill_direction が重複している: "
+                    f"item_id={item_id}, direction={schedule.skill_direction}"
+                )
+            seen_directions.add(schedule.skill_direction)
+        with self._sessions() as session:
+            _require_learning_item(session, item_id)
+            session.execute(
+                delete(ReviewScheduleRow).where(
+                    ReviewScheduleRow.learning_item_id == item_id
+                )
+            )
+            session.flush()
+            for schedule in schedule_list:
+                session.add(ReviewScheduleRow.from_domain(schedule))
+            session.commit()
+        return _sort_schedules_for_item(schedule_list)
 
 
 @dataclass(frozen=True)

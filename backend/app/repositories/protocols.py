@@ -89,11 +89,23 @@ class LearnerStateRepository(Protocol):
 
 
 class LearningProgressRepository(Protocol):
-    """event の append と state の upsert を同一トランザクションで行う。"""
+    """event / state / schedule を同一トランザクションで保存する。"""
 
     def append_event_and_upsert_state(
         self, event: LearningEvent, state: LearnerState
     ) -> tuple[LearningEvent, LearnerState]: ...
+
+    def append_event_upsert_state_and_schedule(
+        self,
+        event: LearningEvent,
+        state: LearnerState,
+        schedule: ReviewSchedule,
+    ) -> tuple[LearningEvent, LearnerState, ReviewSchedule]:
+        """回答1件の Event / State / 該当 direction の Schedule を同一 TX で保存する。
+
+        duplicate event ID は拒否し、3者とも変更しない。
+        """
+        ...
 
 
 class ReviewScheduleRepository(Protocol):
@@ -111,5 +123,15 @@ class ReviewScheduleRepository(Protocol):
         direction を指定するとその方向だけ。未指定なら両方向。
         返却順は due_at 昇順、同じ due_at なら learning_item_id、skill_direction 昇順。
         suspended / mastered は due でも含めない。
+        """
+        ...
+
+    def replace_for_item(
+        self, item_id: str, schedules: Sequence[ReviewSchedule]
+    ) -> list[ReviewSchedule]:
+        """当該 LearningItem の schedule を同一 TX で全置換する。
+
+        途中失敗時は既存 schedule を残し、中途半端な置換結果は残さない。
+        空なら当該 Item の schedule を削除する。
         """
         ...

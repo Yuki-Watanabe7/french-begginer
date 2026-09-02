@@ -38,7 +38,8 @@ recognition / production 別の LearnerState 集計は `apply_review_event` が�
 （Issue #161）。ReviewSchedule の direction 分離は `review_scheduler` が担う
 （Issue #162）。direction-aware な due review queue は `review_queue` が担う
 （Issue #163）。due queue からの Review Practice Session は `review_session`
-が担う（Issue #164）。due queue UI / Frontend mastery 表示は後続Issue。
+が担う（Issue #164）。Event / State / Schedule の同一 TX と schedule rebuild は
+Issue #166。due queue UI / Frontend mastery 表示は後続Issue。
 """
 
 import uuid

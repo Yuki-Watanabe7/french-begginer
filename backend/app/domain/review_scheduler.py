@@ -1,4 +1,4 @@
-"""説明可能な初期 Review Scheduler（Issue #111 / #162）。
+"""説明可能な初期 Review Scheduler（Issue #111 / #162 / #166）。
 
 LearnerState と直近 LearningEvent から次回復習予定を決める。
 Phase 0 では SM-2 / FSRS は導入せず、単純・deterministic な baseline にする。
@@ -8,12 +8,18 @@ Issue #162 では同じ baseline を recognition / production 別に適用する
 全体 LearnerState は維持するが、間隔・lapse の算出は
 `LearnerState.by_direction[direction]` を基準にする。
 
+Issue #166 の schedule rebuild は履歴 replay を source of truth にし、
+欠損や旧 scheduler_version を現行 `v1-directional` へ再計算する。
+FSRS への差し替えは対象外。
+
 このモジュールが依存してよいのは Python 標準ライブラリと domain.tutor のみ。
 datetime.now() は呼ばない。due_at は event.occurred_at を基準に算出する。
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import timedelta
+from typing import Literal
 
 from app.domain.tutor import (
     AnswerOutcome,
@@ -37,6 +43,34 @@ INTERVAL_DAYS_ON_LAPSE = 1.0
 
 DIRECTION_ORDER: tuple[SkillDirection, ...] = ("recognition", "production")
 """同一 Item の schedule を並べるときの安定順。"""
+
+ScheduleInconsistencyKind = Literal[
+    "missing_schedule",
+    "review_count_mismatch",
+    "stale_scheduler_version",
+    "unexpected_schedule",
+]
+
+_KIND_ORDER: dict[ScheduleInconsistencyKind, int] = {
+    "missing_schedule": 0,
+    "review_count_mismatch": 1,
+    "stale_scheduler_version": 2,
+    "unexpected_schedule": 3,
+}
+
+
+@dataclass(frozen=True)
+class ScheduleInconsistency:
+    """保存済み ReviewSchedule と event replay 結果の差。"""
+
+    learning_item_id: str
+    skill_direction: SkillDirection
+    kind: ScheduleInconsistencyKind
+    expected_review_count: int | None = None
+    actual_review_count: int | None = None
+    expected_scheduler_version: str | None = None
+    actual_scheduler_version: str | None = None
+
 
 # consecutive_correct 1, 2, 3, 4+ に対応する間隔（日）。
 # 4以上は 14 日で打ち切る。指数的な延長は Phase 0 では最適化しない。
@@ -166,3 +200,89 @@ def rebuild_directional_schedules(
             state, event, schedules.get(direction)
         )
     return schedules
+
+
+def detect_schedule_inconsistencies(
+    events: Sequence[LearningEvent],
+    schedules: Sequence[ReviewSchedule],
+    *,
+    current_version: str = SCHEDULER_VERSION,
+) -> list[ScheduleInconsistency]:
+    """保存済み schedule と event replay 結果を比較して不整合を返す。
+
+    検出対象:
+    - review event があるのに該当 direction の schedule が無い
+    - schedule.review_count が replay 結果と一致しない
+    - scheduler_version が現行版と異なる
+    - replay 対象でない direction の schedule が残っている
+
+    due queue はこの関数を呼ばない。maintenance / rebuild 前の点検用。
+    """
+    item_ids = {event.learning_item_id for event in events} | {
+        schedule.learning_item_id for schedule in schedules
+    }
+    if not item_ids:
+        return []
+    if len(item_ids) != 1:
+        raise ValueError(
+            "detect_schedule_inconsistencies は同一 LearningItem だけを受け取る: "
+            f"item_ids={sorted(item_ids)}"
+        )
+    item_id = next(iter(item_ids))
+    rebuilt = rebuild_directional_schedules(events)
+    existing = {schedule.skill_direction: schedule for schedule in schedules}
+
+    found: list[ScheduleInconsistency] = []
+    for direction in DIRECTION_ORDER:
+        expected = rebuilt.get(direction)
+        actual = existing.get(direction)
+        if expected is not None and actual is None:
+            found.append(
+                ScheduleInconsistency(
+                    learning_item_id=item_id,
+                    skill_direction=direction,
+                    kind="missing_schedule",
+                    expected_review_count=expected.review_count,
+                )
+            )
+            continue
+        if expected is None and actual is not None:
+            found.append(
+                ScheduleInconsistency(
+                    learning_item_id=item_id,
+                    skill_direction=direction,
+                    kind="unexpected_schedule",
+                    actual_review_count=actual.review_count,
+                    actual_scheduler_version=actual.scheduler_version,
+                )
+            )
+            continue
+        if expected is None or actual is None:
+            continue
+        if actual.review_count != expected.review_count:
+            found.append(
+                ScheduleInconsistency(
+                    learning_item_id=item_id,
+                    skill_direction=direction,
+                    kind="review_count_mismatch",
+                    expected_review_count=expected.review_count,
+                    actual_review_count=actual.review_count,
+                )
+            )
+        if actual.scheduler_version != current_version:
+            found.append(
+                ScheduleInconsistency(
+                    learning_item_id=item_id,
+                    skill_direction=direction,
+                    kind="stale_scheduler_version",
+                    expected_scheduler_version=current_version,
+                    actual_scheduler_version=actual.scheduler_version,
+                )
+            )
+    return sorted(
+        found,
+        key=lambda item: (
+            _KIND_ORDER[item.kind],
+            DIRECTION_ORDER.index(item.skill_direction),
+        ),
+    )
