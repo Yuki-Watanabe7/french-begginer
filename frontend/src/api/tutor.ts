@@ -1,15 +1,19 @@
 import type {
   AcceptCandidateResponse,
   CreatePracticeSessionInput,
+  CreateReviewSessionInput,
   CreateTutorSourceInput,
   ExerciseFeedback,
   ExerciseType,
   ExtractCandidatesResponse,
+  FetchReviewQueueOptions,
   FetchTutorItemsOptions,
   FetchTutorSourcesOptions,
   LearningItem,
   LearningItemCandidate,
   PracticeSession,
+  ReviewPracticeSession,
+  ReviewQueue,
   SourceDocument,
   SourceSummary,
 } from '../types'
@@ -142,6 +146,32 @@ export async function fetchTutorItem(itemId: string): Promise<LearningItem> {
     await fetch(`${BASE}/api/tutor/items/${encodeURIComponent(itemId)}`),
   )
   return detail.item
+}
+
+export async function fetchReviewQueue(
+  options: FetchReviewQueueOptions = {},
+): Promise<ReviewQueue> {
+  const params = new URLSearchParams()
+  if (options.limit !== undefined) {
+    params.set('limit', String(options.limit))
+  }
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  return parseJson(await fetch(`${BASE}/api/tutor/reviews/queue${query}`))
+}
+
+export async function createReviewSession(
+  input: CreateReviewSessionInput = {},
+): Promise<ReviewPracticeSession> {
+  const body: Record<string, unknown> = {}
+  if (input.question_count !== undefined) body.question_count = input.question_count
+  if (input.seed !== undefined) body.seed = input.seed
+  return parseJson(
+    await fetch(`${BASE}/api/tutor/review/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
 }
 
 export async function createPracticeSession(

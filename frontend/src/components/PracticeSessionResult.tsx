@@ -1,10 +1,12 @@
-import type { PracticeWrongAnswer } from '../types'
+import type { PracticeWrongAnswer, TutorSessionKind } from '../types'
 import { EXERCISE_TYPE_LABELS } from '../utils/tutor'
 
 interface Props {
   correctCount: number
   wrongAnswers: PracticeWrongAnswer[]
   sessionTotal: number
+  variant?: TutorSessionKind
+  remainingDue?: number | null
   onRetry: () => void
   onBack: () => void
 }
@@ -13,6 +15,8 @@ export function PracticeSessionResult({
   correctCount,
   wrongAnswers,
   sessionTotal,
+  variant = 'practice',
+  remainingDue = null,
   onRetry,
   onBack,
 }: Props) {
@@ -20,10 +24,15 @@ export function PracticeSessionResult({
   const accuracy =
     sessionTotal > 0 ? Math.round((correctCount / sessionTotal) * 100) : 0
   const accuracyColor = accuracy >= 80 ? '#059669' : accuracy >= 50 ? '#d97706' : '#dc2626'
+  const isReview = variant === 'review'
+  const showRetry = !isReview || remainingDue === null || remainingDue > 0
 
   return (
     <div style={styles.card}>
-      <h2 style={styles.heading}>セッション結果</h2>
+      <h2 style={styles.heading}>{isReview ? '復習完了' : 'セッション結果'}</h2>
+      {isReview && (
+        <p style={styles.completeMsg}>今日の復習を終えました</p>
+      )}
       <div style={styles.accuracyBox}>
         <span style={{ ...styles.accuracyNum, color: accuracyColor }}>{accuracy}%</span>
         <span style={styles.accuracyLabel}>正答率</span>
@@ -44,12 +53,17 @@ export function PracticeSessionResult({
           <span style={styles.statLabel}>合計</span>
         </div>
       </div>
+      {isReview && remainingDue != null && remainingDue > 0 && (
+        <p style={styles.remaining}>まだ残っている復習は {remainingDue}件です</p>
+      )}
       <div style={styles.btnGroup}>
-        <button type="button" style={styles.primaryBtn} onClick={onRetry}>
-          もう一度挑戦
-        </button>
+        {showRetry && (
+          <button type="button" style={styles.primaryBtn} onClick={onRetry}>
+            {isReview ? 'もう一度復習する' : 'もう一度挑戦'}
+          </button>
+        )}
         <button type="button" style={styles.backBtn} onClick={onBack}>
-          戻る
+          {isReview ? '教材一覧へ戻る' : '戻る'}
         </button>
       </div>
       {wrongAnswers.length > 0 && (
@@ -106,6 +120,20 @@ const styles: Record<string, React.CSSProperties> = {
   accuracyLabel: {
     fontSize: 16,
     color: '#666',
+  },
+  completeMsg: {
+    margin: 0,
+    textAlign: 'center',
+    fontSize: 15,
+    color: '#444',
+    lineHeight: 1.5,
+  },
+  remaining: {
+    margin: 0,
+    textAlign: 'center',
+    fontSize: 15,
+    color: '#1a1a2e',
+    lineHeight: 1.5,
   },
   stats: {
     display: 'flex',

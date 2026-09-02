@@ -5,6 +5,8 @@ import { PracticeSessionFlow } from '../components/PracticeSessionFlow'
 import {
   ApiError,
   createPracticeSession,
+  createReviewSession,
+  fetchReviewQueue,
   fetchTutorItem,
   fetchTutorItems,
   submitExerciseAnswer,
@@ -16,9 +18,11 @@ vi.mock('../api/tutor', async importOriginal => {
   return {
     ...actual,
     createPracticeSession: vi.fn(),
+    createReviewSession: vi.fn(),
     fetchTutorItems: vi.fn(),
     fetchTutorItem: vi.fn(),
     submitExerciseAnswer: vi.fn(),
+    fetchReviewQueue: vi.fn(),
   }
 })
 
@@ -32,9 +36,11 @@ vi.mock('../hooks/useTTS', () => ({
 }))
 
 const mockCreate = vi.mocked(createPracticeSession)
+const mockReviewCreate = vi.mocked(createReviewSession)
 const mockItems = vi.mocked(fetchTutorItems)
 const mockItem = vi.mocked(fetchTutorItem)
 const mockSubmit = vi.mocked(submitExerciseAnswer)
+const mockQueue = vi.mocked(fetchReviewQueue)
 
 const VOCAB: LearningItem = {
   id: 'item-vocab',
@@ -291,5 +297,89 @@ describe('PracticeSessionFlow', () => {
     await screen.findByText('サーバーでエラーが発生しました。時間をおいて再度お試しください')
     await userEvent.click(screen.getByRole('button', { name: '再試行' }))
     await screen.findByText('意味')
+  })
+
+  it('review kind は due session を使い、Phase 3 renderer で解ける', async () => {
+    mockReviewCreate.mockResolvedValue({
+      session_id: 'rev-1',
+      exercises: [CHOICE],
+      skipped_entries: [],
+      requested_count: 5,
+      generated_count: 1,
+    })
+    mockQueue.mockResolvedValue({
+      entries: [],
+      summary: {
+        total_due: 0,
+        recognition_due: 0,
+        production_due: 0,
+        overdue_count: 0,
+      },
+    })
+    mockSubmit.mockResolvedValue(
+      okFeedback('本', '本', { explanation_ja: '読むもの', source_context: null }),
+    )
+    render(<PracticeSessionFlow kind="review" questionCount={5} onExit={() => {}} />)
+
+    await screen.findByText('意味')
+    expect(mockReviewCreate).toHaveBeenCalledWith({ question_count: 5 })
+    expect(mockCreate).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '本' }))
+    await screen.findByText('✓ 正解')
+    await userEvent.click(screen.getByRole('button', { name: '結果を見る →' }))
+    await screen.findByText('復習完了')
+    expect(screen.getByText('今日の復習を終えました')).toBeInTheDocument()
+    expect(screen.getByText('正解')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '教材一覧へ戻る' })).toBeInTheDocument()
+  })
+
+  it('review 0件なら復習対象がないと案内する', async () => {
+    mockReviewCreate.mockResolvedValue({
+      session_id: 'rev-empty',
+      exercises: [],
+      skipped_entries: [],
+      requested_count: 5,
+      generated_count: 0,
+    })
+    render(<PracticeSessionFlow kind="review" questionCount={5} onExit={() => {}} />)
+
+    await screen.findByText('今すぐ復習する項目はありません')
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it('review 開始失敗時は現在の due 表示を壊さず再試行できる', async () => {
+    mockReviewCreate
+      .mockRejectedValueOnce(new ApiError(500))
+      .mockResolvedValueOnce({
+        session_id: 'rev-1',
+        exercises: [CHOICE],
+        skipped_entries: [],
+        requested_count: 5,
+        generated_count: 1,
+      })
+    render(<PracticeSessionFlow kind="review" questionCount={5} onExit={() => {}} />)
+
+    await screen.findByText('サーバーでエラーが発生しました。時間をおいて再度お試しください')
+    await userEvent.click(screen.getByRole('button', { name: '再試行' }))
+    await screen.findByText('意味')
+  })
+
+  it('完了後の queue 再取得失敗でも学習結果は残る', async () => {
+    mockReviewCreate.mockResolvedValue({
+      session_id: 'rev-1',
+      exercises: [CHOICE],
+      skipped_entries: [],
+      requested_count: 1,
+      generated_count: 1,
+    })
+    mockQueue.mockRejectedValue(new ApiError(500))
+    mockSubmit.mockResolvedValue(okFeedback('本', '本'))
+    render(<PracticeSessionFlow kind="review" questionCount={1} onExit={() => {}} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: '本' }))
+    await userEvent.click(await screen.findByRole('button', { name: '結果を見る →' }))
+    await screen.findByText('復習完了')
+    expect(screen.getByText('今日の復習を終えました')).toBeInTheDocument()
+    expect(screen.queryByText(/まだ残っている復習/)).not.toBeInTheDocument()
   })
 })

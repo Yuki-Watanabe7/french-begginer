@@ -90,13 +90,15 @@ setup → quiz-settings → loading → answering ⇄ result
 | フェーズ | コンポーネント |
 |----------|---------------|
 | モード選択 | `ModeSelector` — 動詞 / 名詞 / 冠詞 / 自分の教材 |
-| `tutor` | `TutorFlow` — Source 一覧 / 追加 / 詳細（Candidate 抽出・採否） / Practice Session |
+| `tutor` | `TutorFlow` — Source 一覧 / 「今日の復習」 / 追加 / 詳細（Candidate 抽出・採否） / Practice Session / Review Session |
 | `setup` | `VerbGroupSelector` — 動詞グループ選択 |
 | `quiz-settings` | `QuizSettings` — 出題数選択（5/10/20問） |
 | `answering` / `result` | `QuizCard` — 問題表示・入力・正誤フィードバック |
 | `session-result` | `SessionResult` — 初回正答率・復習結果・誤答一覧 |
 
 Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessionFlow` へ進む。`usePracticeSession` が出題・採点・結果を駆動し、choice / text / reconstruction を `PracticeExerciseCard` が描画する。
+
+「今日の復習」は Tutor 一覧の `TutorTodayReviewCard` が due 件数を表示し、due > 0 なら同じ `PracticeSessionFlow`（`kind: 'review'`）で Review Session を開始する。新規学習と復習は混ぜない。
 
 スタイルはすべてインライン CSS（`Record<string, React.CSSProperties>`）。外部 CSS フレームワークは使わない。
 

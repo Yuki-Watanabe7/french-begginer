@@ -201,6 +201,25 @@ export function tutorPracticeSessionErrorMessage(error: unknown): string {
   return '練習の開始に失敗しました。通信環境を確認して再度お試しください'
 }
 
+export function tutorReviewQueueErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status >= 500) {
+    return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+  }
+  return '復習一覧の取得に失敗しました。通信環境を確認して再度お試しください'
+}
+
+export function tutorReviewSessionErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 422) {
+      return '復習の条件を確認してください'
+    }
+    if (error.status >= 500) {
+      return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+    }
+  }
+  return '復習の開始に失敗しました。通信環境を確認して再度お試しください'
+}
+
 export function tutorExerciseAnswerErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 404) {

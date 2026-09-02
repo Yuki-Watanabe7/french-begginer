@@ -1,10 +1,10 @@
 import { useState } from 'react'
+import type { SourceDocument, TutorSessionKind } from '../types'
 import { PracticeSessionFlow } from './PracticeSessionFlow'
 import { QuizSettings } from './QuizSettings'
 import { TutorSourceDetail } from './TutorSourceDetail'
 import { TutorSourceForm } from './TutorSourceForm'
 import { TutorSourceList } from './TutorSourceList'
-import type { SourceDocument } from '../types'
 
 type TutorView = 'list' | 'form' | 'detail' | 'practice-settings' | 'practice'
 
@@ -18,6 +18,7 @@ export function TutorFlow({ onBack }: Props) {
   const [savedSource, setSavedSource] = useState<SourceDocument | null>(null)
   const [justSaved, setJustSaved] = useState(false)
   const [practiceSourceId, setPracticeSourceId] = useState<string | undefined>(undefined)
+  const [sessionKind, setSessionKind] = useState<TutorSessionKind>('practice')
   const [questionCount, setQuestionCount] = useState(5)
 
   const openList = () => {
@@ -41,11 +42,22 @@ export function TutorFlow({ onBack }: Props) {
   }
 
   const openPracticeSettings = (sourceId?: string) => {
+    setSessionKind('practice')
     setPracticeSourceId(sourceId)
     setView('practice-settings')
   }
 
+  const openReviewSettings = () => {
+    setSessionKind('review')
+    setPracticeSourceId(undefined)
+    setView('practice-settings')
+  }
+
   const backFromPractice = () => {
+    if (sessionKind === 'review') {
+      setView('list')
+      return
+    }
     if (practiceSourceId && selectedId) {
       setView('detail')
       return
@@ -90,8 +102,9 @@ export function TutorFlow({ onBack }: Props) {
   if (view === 'practice') {
     return (
       <PracticeSessionFlow
-        sourceId={practiceSourceId}
+        sourceId={sessionKind === 'review' ? undefined : practiceSourceId}
         questionCount={questionCount}
+        kind={sessionKind}
         onExit={backFromPractice}
       />
     )
@@ -103,6 +116,7 @@ export function TutorFlow({ onBack }: Props) {
       onAdd={openForm}
       onBack={onBack}
       onStartPractice={() => openPracticeSettings()}
+      onStartReview={openReviewSettings}
     />
   )
 }

@@ -3,8 +3,9 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '../App'
 import * as client from '../api/client'
-import { fetchTutorSources } from '../api/tutor'
+import { fetchTutorSources, fetchReviewQueue } from '../api/tutor'
 import type { Question, AnswerResult } from '../types'
+import { EMPTY_REVIEW_QUEUE } from './reviewQueueFixtures'
 
 vi.mock('../api/client')
 vi.mock('../api/tutor', async importOriginal => {
@@ -14,12 +15,14 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorSources: vi.fn(),
     fetchTutorSource: vi.fn(),
     createTutorSource: vi.fn(),
+    fetchReviewQueue: vi.fn(),
   }
 })
 
 const mockFetch = vi.mocked(client.fetchSessionQuestions)
 const mockCheck = vi.mocked(client.checkAnswer)
 const mockListSources = vi.mocked(fetchTutorSources)
+const mockReviewQueue = vi.mocked(fetchReviewQueue)
 
 const Q: Question = { verb: 'parler', tense: 'présent', pronoun: 'je' }
 const Q2: Question = { verb: 'aimer', tense: 'présent', pronoun: 'tu' }
@@ -47,6 +50,7 @@ describe('App — モード選択', () => {
 
   it('自分の教材からSource一覧へ進み、モード選択に戻れる', async () => {
     mockListSources.mockResolvedValueOnce([])
+    mockReviewQueue.mockResolvedValueOnce(EMPTY_REVIEW_QUEUE)
     render(<App />)
     await userEvent.click(screen.getByText('自分の教材'))
     await screen.findByText('まだ保存したテキストがありません')

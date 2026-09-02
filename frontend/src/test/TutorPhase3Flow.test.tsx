@@ -15,6 +15,7 @@ import {
   fetchTutorSources,
   rejectCandidate,
   submitExerciseAnswer,
+  fetchReviewQueue,
 } from '../api/tutor'
 import type {
   AcceptCandidateResponse,
@@ -29,6 +30,7 @@ import type {
   SourceDocument,
   SourceSummary,
 } from '../types'
+import { EMPTY_REVIEW_QUEUE } from './reviewQueueFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
   const actual = await importOriginal<typeof import('../api/tutor')>()
@@ -45,6 +47,7 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorItems: vi.fn(),
     fetchTutorItem: vi.fn(),
     submitExerciseAnswer: vi.fn(),
+    fetchReviewQueue: vi.fn(),
   }
 })
 
@@ -70,6 +73,7 @@ const mockPractice = vi.mocked(createPracticeSession)
 const mockItems = vi.mocked(fetchTutorItems)
 const mockItem = vi.mocked(fetchTutorItem)
 const mockSubmit = vi.mocked(submitExerciseAnswer)
+const mockQueue = vi.mocked(fetchReviewQueue)
 
 const SOURCE_TITLE = 'Article test'
 const SOURCE_CONTENT = "Je me suis rendu compte qu'il fallait changer de stratégie."
@@ -377,6 +381,7 @@ function bindMemoryApi(store: MemoryStore) {
     if (!found) throw new ApiError(404)
     return found
   })
+  mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
 }
 
 async function saveFixtureSource() {
@@ -393,6 +398,7 @@ describe('Tutor Phase 3 vertical slice', () => {
     vi.resetAllMocks()
     ttsState.error = null
     ttsState.play = vi.fn()
+    mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
   })
 
   it('採用した LearningItem から練習し、全形式を解いて結果まで一本でつながる', async () => {
