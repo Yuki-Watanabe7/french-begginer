@@ -340,6 +340,33 @@ describe('Tutor Phase 4 review flow', () => {
     expect(screen.getByText('不正解')).toBeInTheDocument()
   })
 
+  it('TTS失敗でも Review Session を続けられ、判定ボタンは隠れすぎない', async () => {
+    mockQueue
+      .mockResolvedValueOnce(reviewQueueFixture({ total_due: 1, recognition_due: 1 }))
+      .mockResolvedValue(EMPTY_REVIEW_QUEUE)
+    mockReview.mockResolvedValue(reviewSession([CHOICE]))
+    mockSubmit.mockResolvedValue(okFeedback('本', '本'))
+    ttsState.error = '音声を読み込めませんでした'
+
+    render(<App />)
+    await userEvent.click(screen.getByText('自分の教材'))
+    await userEvent.click(await screen.findByRole('button', { name: '復習を始める' }))
+    await userEvent.click(screen.getByRole('button', { name: /5問/ }))
+    const choice = await screen.findByRole('button', { name: '本' })
+    expect(choice).toHaveStyle({ minHeight: '48px', width: '100%' })
+    await userEvent.click(choice)
+    await screen.findByText('✓ 正解')
+    expect(screen.getByText('音声を読み込めませんでした')).toBeInTheDocument()
+    const next = screen.getByRole('button', { name: '結果を見る →' })
+    expect(next).toHaveStyle({ minHeight: '48px', width: '100%' })
+    await userEvent.click(next)
+    await screen.findByText('復習完了')
+    expect(screen.getByRole('button', { name: '教材一覧へ戻る' })).toHaveStyle({
+      minHeight: '44px',
+      width: '100%',
+    })
+  })
+
   it('回答送信失敗時は現在問題を失わない', async () => {
     mockQueue.mockResolvedValue(reviewQueueFixture({ total_due: 1, production_due: 1 }))
     mockReview.mockResolvedValue(reviewSession([TEXT]))
