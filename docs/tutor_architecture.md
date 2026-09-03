@@ -30,7 +30,8 @@ direction-aware な due review queue（Issue #163）、
 due queue からの Review Practice Session（Issue #164）、
 「今日の復習」Frontend 導線（Issue #165）、
 LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築（Issue #166）、
-Phase 4 vertical slice と Exit Criteria（Issue #167）
+Phase 4 vertical slice と Exit Criteria（Issue #167）、
+および Phase 5 の推薦入力 signal snapshot（Issue #175）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -63,6 +64,17 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）
   / `backend/tests/test_review_schedule_rebuilder.py`
   / `scripts/rebuild_review_schedules.py`
   （Issue #166）
+- 推薦 signal snapshot（Phase 5）:
+  `backend/app/domain/recommendation_signal.py`
+  / `backend/tests/test_recommendation_signal.py`
+  （Issue #175）
+  - 入力: LearningItem / LearnerState / ReviewSchedule / LearningEvent / SourceDocument
+  - 出力: `RecommendationSignalSnapshot`（ranking ロジックは含まない）
+  - signal 種別: review urgency / mastery / lapse / recent error /
+    direction imbalance / CEFR level fit / Source recency / interest / importance
+  - missing data は neutral とし、unseen と low mastery を区別する
+  - `now` を注入可能にし、wall clock を呼ばない（deterministic）
+  - `feature_version` で snapshot スキーマ版を追跡する
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
