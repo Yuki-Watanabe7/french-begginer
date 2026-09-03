@@ -29,7 +29,8 @@ ReviewSchedule の direction 分離（Issue #162）、
 direction-aware な due review queue（Issue #163）、
 due queue からの Review Practice Session（Issue #164）、
 「今日の復習」Frontend 導線（Issue #165）、
-LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築（Issue #166）
+LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築（Issue #166）、
+Phase 4 vertical slice と Exit Criteria（Issue #167）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -83,6 +84,8 @@ LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築
   / `frontend/src/test/TutorPhase2Flow.test.tsx`
 - Phase 3 vertical slice: `backend/tests/test_tutor_phase3_vertical_slice.py`
   / `frontend/src/test/TutorPhase3Flow.test.tsx`
+- Phase 4 vertical slice: `backend/tests/test_tutor_phase4_vertical_slice.py`
+  / `frontend/src/test/TutorPhase4Flow.test.tsx`
 - Exercise 契約: `backend/app/domain/exercise.py`
   / `backend/tests/test_exercise.py`
 - Exercise 生成: `backend/app/domain/exercise_generation.py`
@@ -2341,6 +2344,145 @@ direction-aware baseline（`v1-directional`）への再計算だけ。
 | replace 失敗で中途半端を残さない | `test_replace_for_item_failure_leaves_previous_schedules` |
 | due queue が全履歴 replay しない | `test_list_review_queue_uses_stored_schedule_without_replaying_history` |
 
+## Phase 4 vertical slice（Issue #167）
+
+Issue #161〜#166 で追加した direction 別習熟度・direction 別 ReviewSchedule・
+due queue・Review Session・Frontend・原子性 / rebuild を、ユーザー操作として
+一本につながった vertical slice として検証する。
+
+Phase 4 のゴールは、ユーザーが手動で復習対象を探すのではなく、
+**時間経過によって due になった項目が「今日の復習」に現れ、回答後に
+次回予定へ進むこと**である。
+
+必須フロー:
+
+```text
+1. accepted LearningItemを通常Practiceで学習
+2. recognition Exerciseへ回答
+3. production Exerciseへ回答
+4. LearningEvent / direction別LearnerState / direction別ReviewScheduleが保存される
+5. due_atより前は「今日の復習」0件
+6. clockを進める
+7. recognitionだけdueならrecognition entryだけqueueへ出る
+8. productionもdueになれば別entryとして出る
+9. Review Sessionを開始
+10. due directionに対応するExerciseへ回答
+11. correct / incorrectに応じて該当directionのscheduleだけ更新
+12. 回答済みentryがqueueから外れる
+13. もう片方向のdueは影響を受けない
+14. DB再open後もEvent / State / direction Scheduleが残る
+```
+
+推奨 fixture は Phase 0〜3 と同じ原文:
+
+```text
+Je me suis rendu compte qu'il fallait changer de stratégie.
+```
+
+LearningItem 例: `se rendre compte de` / expression / 〜に気づく。
+recognition / production の両方を発生させ、別々の schedule で動くことを確認する。
+production 側で誤答し、production だけ interval が短縮 / lapse 増加する一方、
+recognition schedule は維持される。
+
+clock は注入し、実時間待ちは使わない。due 判定は `due_at <= now`
+（timezone-aware UTC）。Frontend の「今日」はユーザー向けラベルであり、
+Backend の判定基準ではない。overdue 日数による interval 補正は行わない。
+
+### 品質境界
+
+Phase 4 完了時点で以下が明確であること。
+
+#### deterministic layer が保証すること
+
+- recognition / production 別の LearnerState と ReviewSchedule
+- 同じ Item でも片方向だけ due にできる
+- `due_at <= now` の active Item だけ due queue へ現れる
+- overdue は `due_at` / `learning_item_id` / `skill_direction` の安定順
+- suspended / mastered と未スケジュール Item は due にしない
+- Review Session は due Item だけから生成し、due direction に合う Exercise だけを出す
+- 未回答 / skip では schedule を進めない
+- correct / incorrect は該当 direction の schedule だけ更新する
+- Event / State / 該当 direction の Schedule は同一トランザクション
+- 欠損 / 旧 version の schedule は event 履歴から再構築できる
+- duplicate answer で二重更新しない
+
+#### Phase 4 ではまだ行わないこと
+
+- FSRS / SM-2 への移行
+- personalized ranking
+- 新規学習と復習の自動 mix
+- 自動 mastered 判定
+- reminder / push notification
+- URL / PDF / YouTube ingestion
+- source interest / CEFR / mastery / lapse risk を queue 順へ混ぜること
+
+| 観点 | 自動テスト |
+|------|------------|
+| 学習 → due 前後 → Review Session → 再schedule → DB 再 open | `test_phase4_practice_to_due_review_to_reschedule_vertical_slice` |
+| 片方向だけ due / 両方向は別 entry | 同上 |
+| production 誤答で recognition を維持 | 同上 |
+| clock / timezone / 日付跨ぎ / overdue 古い順 | `test_phase4_clock_timezone_overdue_and_date_boundary` |
+| schedule 失敗の rollback と rebuild 後の queue 復帰 | `test_phase4_schedule_write_failure_and_rebuild_returns_to_queue` |
+| suspended / mastered / 未schedule / skip / duplicate | `test_phase4_excludes_inactive_unscheduled_duplicate_and_skip` |
+| 既存 quiz / TTS / 通常 Practice の回帰 | `test_phase4_existing_quiz_and_tts_contracts_are_unchanged` |
+| ranking / today API を先取りしない | `test_phase4_does_not_expose_ranking_or_today_endpoints` |
+| Frontend due 件数 / empty / Review Session / 残件 refresh | `TutorPhase4Flow.test.tsx` |
+| queue / session 失敗時の状態保持 | 同上 / `PracticeSessionFlow.test.tsx` / `TutorTodayReviewCard.test.tsx` |
+| TTS 失敗でも復習を続けられる | `TutorPhase4Flow.test.tsx` / `PracticeExerciseCard.test.tsx` |
+| スマホ相当幅 | `TutorPhase4Flow.test.tsx` / `TutorTodayReviewCard.test.tsx` |
+
+## Phase 4 Exit Criteria（Issue #107）との対応
+
+Issue #107 の Phase 4 は、期限が来た項目だけを「今日の復習」として解き、
+回答結果が direction 別の学習状態と次回予定へ一貫して残ることである。
+
+| Exit Criteria | 満たした実装 | 自動テスト |
+|---------------|--------------|------------|
+| recognition / production 別に LearnerState を集計できる | `apply_review_event` の `by_direction` | `test_phase4_practice_to_due_review_to_reschedule_vertical_slice` / `test_apply_review_event_updates_recognition_only_on_recognition_correct` |
+| recognition / production 別に ReviewSchedule を保持・更新できる | `(item, direction)` 複合 PK | 同上 / `test_same_item_keeps_independent_direction_schedules` |
+| 同じ Item でも片方向だけ due にできる | due queue が direction 別 entry | 同上 / `test_only_due_direction_is_returned` |
+| `due_at <= now` の項目だけ due queue へ現れる | `GET /api/tutor/reviews/queue` | 同上 / `test_due_before_now_is_excluded_and_due_at_now_is_included` |
+| overdue な項目が deterministic な順で並ぶ | `due_at` / item id / direction | `test_phase4_clock_timezone_overdue_and_date_boundary` |
+| suspended / mastered Item は due queue に含まれない | `list_due` が active のみ | `test_phase4_excludes_inactive_unscheduled_duplicate_and_skip` |
+| 「今日の復習」Session は due Item だけから生成される | `POST /api/tutor/review/sessions` | `test_phase4_practice_to_due_review_to_reschedule_vertical_slice` |
+| due direction に対応した Exercise だけを出す | `REVIEW_EXERCISE_PRIORITY` | 同上 |
+| 未回答 / skip では schedule を進めない | Session 組み立ては schedule を書かない | `test_phase4_excludes_inactive_unscheduled_duplicate_and_skip` |
+| correct / incorrect で該当 direction の次回 schedule が更新される | `record_review` | `test_phase4_practice_to_due_review_to_reschedule_vertical_slice` |
+| もう片方向の state / schedule を誤って更新しない | direction 別 previous schedule | 同上 |
+| 回答後に LearningEvent / LearnerState / ReviewSchedule が一貫して保存される | 同一 TX | 同上 / `test_phase4_schedule_write_failure_and_rebuild_returns_to_queue` |
+| schedule 欠損・旧 version を event 履歴から再構築できる | `ReviewScheduleRebuilder` | 同上 |
+| DB 再 open 後も long-term review 状態が保持される | file SQLite | `test_phase4_practice_to_due_review_to_reschedule_vertical_slice` |
+| Tutor UI で due 件数を確認し Review Session を完了できる | `TutorTodayReviewCard` + `PracticeSessionFlow` | `TutorPhase4Flow.test.tsx` |
+| due 0件の自然な empty state がある | empty copy + 開始ボタン非表示 | 同上 / `TutorTodayReviewCard.test.tsx` |
+| 既存 Source / Candidate / 通常 Practice / 動詞 / 名詞 / TTS に回帰がない | 既存 API は独立 | `test_phase4_existing_quiz_and_tts_contracts_are_unchanged` / `TutorPhase4Flow.test.tsx` |
+| スマホ相当幅で主要操作が実用的である | 全幅ボタン、`minHeight` 44/48 | `TutorPhase4Flow.test.tsx` / `TutorTodayReviewCard.test.tsx` |
+| `bash scripts/quality-check.sh` が通る | ruff / pytest / lint / frontend test / build | 作業完了時に実行 |
+| Phase 4 境界と Phase 5 への引継ぎを記載する | 本セクション | 本ドキュメント |
+
+スマホ実機の使用感は自動 style test だけでは完全代替しない。
+実機未確認の場合は PR に残す。
+
+## Phase 5 への引き継ぎ
+
+Phase 4 で「期限が来たものを復習する」deterministic な loop を完成させる。
+
+Phase 5 ではこの土台の上で初めて、以下を使って **何を優先して学ぶか** を決める。
+
+- source interest / recency
+- CEFR level fit
+- mastery
+- lapse risk
+- recent error pattern
+- recognition / production imbalance
+- 新規学習と復習の配分
+
+Phase 4 ではこれらを ranking へ混ぜない。generic な
+`/api/tutor/reviews/today` や recommendation API は持たない。
+due queue の並びは overdue 順のまま維持する。
+
+Phase 5 へ進む前提は、Phase 0〜4 が `bash scripts/quality-check.sh` で
+継続して通ることである。
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -2377,3 +2519,5 @@ Review Practice Session は上記
 「Phase 4 — 「今日の復習」導線・due件数・Review Session UI」を正とする。
 Event / State / Schedule の原子性と schedule 再構築は上記
 「Phase 4 — LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築」を正とする。
+Phase 4 自体の完了条件と Phase 5 への引継ぎは、上記
+「Phase 4 Exit Criteria」と「Phase 5 への引き継ぎ」を正とする。
