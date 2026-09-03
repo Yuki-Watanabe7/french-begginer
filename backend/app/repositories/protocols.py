@@ -81,6 +81,21 @@ class CandidatePromotionRepository(Protocol):
 class LearningEventRepository(Protocol):
     def append(self, event: LearningEvent) -> LearningEvent: ...
     def list_by_item(self, item_id: str) -> list[LearningEvent]: ...
+    def list_by_item_and_direction(
+        self,
+        item_id: str,
+        direction: SkillDirection,
+        *,
+        limit: int | None = None,
+    ) -> list[LearningEvent]:
+        """指定 item × direction の LearningEvent を occurred_at 昇順で返す。
+
+        direction は SKILL_DIRECTION_BY_EXERCISE_TYPE で照合するため、
+        永続化実装が exercise_type を保持していれば direction でフィルタできる。
+        limit を指定すると直近 limit 件（occurred_at 降順で取得後に昇順返却）。
+        推薦 signal の recent error rate / last_incorrect_age に使う。
+        """
+        ...
 
 
 class LearnerStateRepository(Protocol):
