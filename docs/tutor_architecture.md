@@ -32,7 +32,8 @@ due queue からの Review Practice Session（Issue #164）、
 LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築（Issue #166）、
 Phase 4 vertical slice と Exit Criteria（Issue #167）、
 および Phase 5 の推薦入力 signal snapshot（Issue #175）、
-説明可能な ranking policy と score decomposition（Issue #176）
+説明可能な ranking policy と score decomposition（Issue #176）、
+新規学習と復習の配分を決める Daily Learning Plan policy（Issue #177）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -86,6 +87,16 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）、
   - ranking 単位: `learning_item_id + skill_direction + activity_kind`
   - OpenAI / LLM 非依存。`policy_version` で weights / 式を追跡する
   - 原則は「Phase 5 — 説明可能な ranking policy」を正とする
+- Daily Learning Plan policy（Phase 5）:
+  `backend/app/domain/daily_learning_plan.py`
+  / `backend/tests/test_daily_learning_plan.py`
+  （Issue #177）
+  - 入力: ranking 済み candidate + plan constraints
+  - 出力: `DailyLearningPlan`（復習/新規の件数、deferred due、説明）
+  - due review を capacity 内で優先し、new item 投入数を制限する
+  - unsupported は理由付き skip し、次順位で補充する
+  - OpenAI / LLM 非依存。`policy_version` で配分規則を追跡する
+  - 原則は「Phase 5 — Daily Learning Plan policy」を正とする
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -2508,6 +2519,7 @@ Phase 5 へ進む前提は、Phase 0〜4 が `bash scripts/quality-check.sh` で
 
 推薦の入力特徴量は Issue #175 の `RecommendationSignalSnapshot`、
 順位付けそのものは下記「Phase 5 — 説明可能な ranking policy」を正とする。
+新規と復習の件数配分は下記「Phase 5 — Daily Learning Plan policy」を正とする。
 
 ## Phase 5 — 説明可能な ranking policy（Issue #176）
 
@@ -2523,8 +2535,10 @@ RecommendationSignalSnapshot
 ```
 
 実装は `domain.recommendation_ranking.rank_recommendations` と
-`score_recommendation`。HTTP API / Frontend / 新規と復習の最終件数 mix は
-後続 Issue。LearningEvent には policy version を書かない。
+`score_recommendation`。HTTP API / Frontend は後続 Issue。
+新規と復習の最終件数 mix は下記
+「Phase 5 — Daily Learning Plan policy」を正とする。
+LearningEvent には policy version を書かない。
 
 ### ranking 単位
 
@@ -2599,7 +2613,7 @@ gap > 0 なら production を、gap < 0 なら recognition を上げる。
 
 ### スコープ外
 
-- 新規 / 復習の最終件数 mix
+- 新規 / 復習の最終件数 mix（Issue #177 の Daily Learning Plan）
 - HTTP API / Frontend
 - ML ranking / LLM による推薦順位決定
 - Phase 4 due queue の並び替え（overdue 順のまま）
@@ -2617,6 +2631,96 @@ gap > 0 なら production を、gap < 0 なら recognition を上げる。
 | component 合計と total の整合 | `test_components_sum_to_total` |
 | reason code が component と一致 | `test_reason_codes_match_positive_components` |
 | policy_version | `test_policy_version_is_set` |
+| OpenAI / LLM 非依存 | `test_module_does_not_import_llm` |
+
+## Phase 5 — Daily Learning Plan policy（Issue #177）
+
+ranking 済み candidate を入力に、1日の学習量の中で **復習と新規を何件ずつ入れるか**
+を deterministic に決める。Phase 5 の差分は単なる順位付けではなく、
+限られた問題数の中で Tutor 側が配分を決めることにある。
+
+```text
+ranked review candidates
++ ranked new candidates
++ plan constraints
+  -> DailyLearningPlan
+```
+
+実装は `domain.daily_learning_plan.build_daily_learning_plan`。
+HTTP API / Frontend / 学習時間の精密予測は後続 Issue。
+Phase 4 の純 Review Session（due だけを解く）は書き換えない。
+
+### plan contract
+
+| フィールド | 意味 |
+|------------|------|
+| `generated_at` | 呼び出し側が注入する時刻。wall clock は呼ばない |
+| `requested_count` | 要求した総件数（初期デフォルト 10） |
+| `review_count` / `new_count` | 採用した復習 / 新規の件数 |
+| `entries[]` | 採用した ranking 単位 |
+| `deferred_due_count` | capacity 不足や skip で入れられなかった due 件数 |
+| `skipped[]` | 理由付きで落とした candidate |
+| `policy_version` | 初期値 `plan-v1` |
+| `explanation_summary` | 内部 score を出さない短い配分説明 |
+
+各 entry は `learning_item_id` / `skill_direction` / `activity_kind`
+（`review` | `new_practice`）/ `selected_exercise_type` /
+`rank_score` / `reason_codes` / 任意の Source provenance を持つ。
+
+### 初期配分 policy
+
+1. **due review 優先**。due 件数が capacity 以下なら due をすべて入れ、残枠に new。
+   due が capacity を超えたら capacity を due だけで埋める。
+2. **new item 上限**。デフォルトは plan size 10、max new 3。定数化し後から調整する。
+3. **recognition / production の水増し抑止**。新規 Item は 1 plan に 1 件。
+   初めて学ぶ Item は recognition から開始する。recognition の Exercise が
+   出せない item_type（conjugation など）だけ production に落とす。
+   due の recognition と production は独立した復習なので、両方入れてよい。
+4. **deferred due**。入れられなかった due は隠さず `deferred_due_count` に残す。
+   「今日の学習を完了した = due がすべて解消した」と誤解させない。
+5. **unsupported Exercise**。高 rank でも生成不能な candidate で plan 全体を
+   失敗させない。理由付き skip し、次順位で補充する。skip した due も deferred に数える。
+6. **deterministic**。同じ ranked candidates + 同じ constraints + 同じ seed なら
+   同じ plan。配分自体は RNG を使わない。
+
+### new candidate の定義
+
+Phase 5 初期では次を新規とする。
+
+- active LearningItem
+- 当該 direction が unseen
+- due ではない
+
+seen なのに ReviewSchedule が欠けている不整合 Item は新規にしない。
+Phase 4 の rebuild / 履歴を source of truth とし、schedule 欠損を
+「まだ学んでいない」と誤認しない。
+
+### plan constraints
+
+初期は問題数ベース。`total_count` と `max_new_count`。
+将来 minutes 等を足せるが、Phase 5 初期の対象外。
+
+### スコープ外
+
+- HTTP API / Frontend
+- 学習時間の精密予測
+- reinforcement learning / FSRS 変更
+- notification
+- Phase 4 due queue や純 Review Session の置換
+
+| 観点 | 自動テスト |
+|------|------------|
+| due 3 / capacity 10 → due 3 + new 最大枠 | `test_due_three_capacity_ten_adds_max_new` |
+| due 12 / capacity 10 → review のみ 10 | `test_due_twelve_capacity_ten_is_review_only` |
+| new 上限を超えない | `test_new_count_does_not_exceed_max` |
+| deferred_due_count | `TestDeferredDue` |
+| due 順位が #176 ranking を尊重 | `test_review_order_follows_ranking_not_input_order` |
+| unsupported candidate 補充 | `test_unsupported_new_is_skipped_and_next_item_fills` |
+| unseen / new 判定 | `TestNewCandidateDefinition` |
+| 新規の recognition/production 水増し抑止 | `TestNoNewInflation` |
+| due 0 で new plan / candidate 0 で empty | `TestEmptyAndNewOnly` |
+| same input で deterministic | `test_same_input_same_plan` |
+| Phase 4 純 review session を壊さない | `TestPhase4Boundary` |
 | OpenAI / LLM 非依存 | `test_module_does_not_import_llm` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
@@ -2660,3 +2764,5 @@ Phase 4 自体の完了条件と Phase 5 への引継ぎは、上記
 推薦入力の signal snapshot は上記リスト先頭の Issue #175、
 説明可能な ranking policy は上記
 「Phase 5 — 説明可能な ranking policy」を正とする。
+新規と復習の配分は上記
+「Phase 5 — Daily Learning Plan policy」を正とする。
