@@ -7,6 +7,7 @@ import {
   createPracticeSession,
   createReviewSession,
   fetchReviewQueue,
+  fetchTodayPlan,
   fetchTutorItem,
   fetchTutorItems,
   fetchTutorSources,
@@ -20,6 +21,7 @@ import type {
   SourceSummary,
 } from '../types'
 import { EMPTY_REVIEW_QUEUE, reviewQueueFixture } from './reviewQueueFixtures'
+import { EMPTY_TODAY_PLAN } from './todayPlanFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
   const actual = await importOriginal<typeof import('../api/tutor')>()
@@ -35,6 +37,7 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorItem: vi.fn(),
     submitExerciseAnswer: vi.fn(),
     fetchReviewQueue: vi.fn(),
+    fetchTodayPlan: vi.fn(),
   }
 })
 
@@ -56,6 +59,7 @@ const mockItems = vi.mocked(fetchTutorItems)
 const mockItem = vi.mocked(fetchTutorItem)
 const mockSubmit = vi.mocked(submitExerciseAnswer)
 const mockQueue = vi.mocked(fetchReviewQueue)
+const mockPlan = vi.mocked(fetchTodayPlan)
 
 const SUMMARY: SourceSummary = {
   id: 'src-1',
@@ -184,6 +188,7 @@ describe('Tutor Phase 4 review flow', () => {
       if (!found) throw new ApiError(404)
       return found
     })
+    mockPlan.mockResolvedValue(EMPTY_TODAY_PLAN)
   })
 
   it('due件数から復習を開始し、renderer を再利用して完了後に件数を更新する', async () => {

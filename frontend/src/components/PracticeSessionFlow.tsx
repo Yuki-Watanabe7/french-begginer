@@ -4,6 +4,7 @@ import { PracticeExerciseCard } from './PracticeExerciseCard'
 import { PracticeSessionResult } from './PracticeSessionResult'
 import { usePracticeSession } from '../hooks/usePracticeSession'
 import type { TutorSessionKind } from '../types'
+import { todayActivityLabel, visibleReasonLabels } from '../utils/tutor'
 
 interface Props {
   sourceId?: string
@@ -22,6 +23,7 @@ export function PracticeSessionFlow({
     state,
     current,
     currentItem,
+    currentTodayEntry,
     inputRef,
     submit,
     submitChoice,
@@ -33,7 +35,10 @@ export function PracticeSessionFlow({
   const [remainingDue, setRemainingDue] = useState<number | null>(null)
 
   useEffect(() => {
-    if (kind !== 'review' || state.phase !== 'session-result') {
+    if (
+      (kind !== 'review' && kind !== 'today') ||
+      state.phase !== 'session-result'
+    ) {
       setRemainingDue(null)
       return
     }
@@ -76,7 +81,9 @@ export function PracticeSessionFlow({
     const emptyText =
       kind === 'review'
         ? '今すぐ復習する項目はありません'
-        : '練習できる学習項目がありません。候補を採用してから学習してください'
+        : kind === 'today'
+          ? '今日は学習できる項目がありません'
+          : '練習できる学習項目がありません。候補を採用してから学習してください'
     return (
       <div style={styles.errorBox} role="status">
         <p style={styles.errorText}>{emptyText}</p>
@@ -94,7 +101,9 @@ export function PracticeSessionFlow({
         correctCount={state.correctCount}
         wrongAnswers={state.wrongAnswers}
         sessionTotal={state.session.generated_count}
-        remainingDue={kind === 'review' ? remainingDue : null}
+        remainingDue={kind === 'review' || kind === 'today' ? remainingDue : null}
+        reviewCount={state.todayMeta?.reviewCount}
+        newCount={state.todayMeta?.newCount}
         onRetry={() => {
           void retry()
         }}
@@ -119,6 +128,10 @@ export function PracticeSessionFlow({
         inputRef={inputRef}
         questionNum={state.questionIndex + 1}
         sessionTotal={state.session?.generated_count ?? 0}
+        activityLabel={
+          currentTodayEntry ? todayActivityLabel(currentTodayEntry.activity_kind) : null
+        }
+        reasonLabels={visibleReasonLabels(currentTodayEntry?.reason_codes)}
         onInputChange={setInput}
         onReconstructionChange={setReconstruction}
         onSubmit={() => {

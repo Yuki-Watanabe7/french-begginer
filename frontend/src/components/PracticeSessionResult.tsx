@@ -7,6 +7,8 @@ interface Props {
   sessionTotal: number
   variant?: TutorSessionKind
   remainingDue?: number | null
+  reviewCount?: number
+  newCount?: number
   onRetry: () => void
   onBack: () => void
 }
@@ -17,6 +19,8 @@ export function PracticeSessionResult({
   sessionTotal,
   variant = 'practice',
   remainingDue = null,
+  reviewCount,
+  newCount,
   onRetry,
   onBack,
 }: Props) {
@@ -25,13 +29,24 @@ export function PracticeSessionResult({
     sessionTotal > 0 ? Math.round((correctCount / sessionTotal) * 100) : 0
   const accuracyColor = accuracy >= 80 ? '#059669' : accuracy >= 50 ? '#d97706' : '#dc2626'
   const isReview = variant === 'review'
+  const isToday = variant === 'today'
   const showRetry = !isReview || remainingDue === null || remainingDue > 0
+  const heading = isToday ? '今日の学習' : isReview ? '復習完了' : 'セッション結果'
+  const backLabel = isReview || isToday ? '教材一覧へ戻る' : '戻る'
+  const retryLabel = isToday
+    ? 'もう一度学習する'
+    : isReview
+      ? 'もう一度復習する'
+      : 'もう一度挑戦'
 
   return (
     <div style={styles.card}>
-      <h2 style={styles.heading}>{isReview ? '復習完了' : 'セッション結果'}</h2>
+      <h2 style={styles.heading}>{heading}</h2>
       {isReview && (
         <p style={styles.completeMsg}>今日の復習を終えました</p>
+      )}
+      {isToday && (
+        <p style={styles.completeMsg}>今日の学習を終えました</p>
       )}
       <div style={styles.accuracyBox}>
         <span style={{ ...styles.accuracyNum, color: accuracyColor }}>{accuracy}%</span>
@@ -53,17 +68,25 @@ export function PracticeSessionResult({
           <span style={styles.statLabel}>合計</span>
         </div>
       </div>
+      {isToday && reviewCount != null && newCount != null && (
+        <p style={styles.mixLine} data-testid="today-result-mix">
+          復習 {reviewCount}件 / 新規 {newCount}件
+        </p>
+      )}
       {isReview && remainingDue != null && remainingDue > 0 && (
         <p style={styles.remaining}>まだ残っている復習は {remainingDue}件です</p>
+      )}
+      {isToday && remainingDue != null && remainingDue > 0 && (
+        <p style={styles.remaining}>あとで復習できる項目が {remainingDue}件あります</p>
       )}
       <div style={styles.btnGroup}>
         {showRetry && (
           <button type="button" style={styles.primaryBtn} onClick={onRetry}>
-            {isReview ? 'もう一度復習する' : 'もう一度挑戦'}
+            {retryLabel}
           </button>
         )}
         <button type="button" style={styles.backBtn} onClick={onBack}>
-          {isReview ? '教材一覧へ戻る' : '戻る'}
+          {backLabel}
         </button>
       </div>
       {wrongAnswers.length > 0 && (
@@ -126,6 +149,13 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'center',
     fontSize: 15,
     color: '#444',
+    lineHeight: 1.5,
+  },
+  mixLine: {
+    margin: 0,
+    textAlign: 'center',
+    fontSize: 15,
+    color: '#1a1a2e',
     lineHeight: 1.5,
   },
   remaining: {

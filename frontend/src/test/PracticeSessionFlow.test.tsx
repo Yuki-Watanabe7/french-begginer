@@ -6,12 +6,14 @@ import {
   ApiError,
   createPracticeSession,
   createReviewSession,
+  createTodaySession,
   fetchReviewQueue,
   fetchTutorItem,
   fetchTutorItems,
   submitExerciseAnswer,
 } from '../api/tutor'
 import type { ExerciseView, LearningItem, PracticeSession } from '../types'
+import { todayPlanEntryFixture, todaySessionFixture } from './todayPlanFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
   const actual = await importOriginal<typeof import('../api/tutor')>()
@@ -19,6 +21,7 @@ vi.mock('../api/tutor', async importOriginal => {
     ...actual,
     createPracticeSession: vi.fn(),
     createReviewSession: vi.fn(),
+    createTodaySession: vi.fn(),
     fetchTutorItems: vi.fn(),
     fetchTutorItem: vi.fn(),
     submitExerciseAnswer: vi.fn(),
@@ -37,6 +40,7 @@ vi.mock('../hooks/useTTS', () => ({
 
 const mockCreate = vi.mocked(createPracticeSession)
 const mockReviewCreate = vi.mocked(createReviewSession)
+const mockTodayCreate = vi.mocked(createTodaySession)
 const mockItems = vi.mocked(fetchTutorItems)
 const mockItem = vi.mocked(fetchTutorItem)
 const mockSubmit = vi.mocked(submitExerciseAnswer)
@@ -381,5 +385,65 @@ describe('PracticeSessionFlow', () => {
     await screen.findByText('復習完了')
     expect(screen.getByText('今日の復習を終えました')).toBeInTheDocument()
     expect(screen.queryByText(/まだ残っている復習/)).not.toBeInTheDocument()
+  })
+
+  it('today kind は既存 renderer を再利用し、復習/新規バッジを出す', async () => {
+    mockTodayCreate.mockResolvedValue(
+      todaySessionFixture(
+        [CHOICE, TEXT],
+        [
+          todayPlanEntryFixture({
+            learning_item_id: 'item-vocab',
+            activity_kind: 'review',
+            reason_codes: ['OVERDUE_REVIEW'],
+          }),
+          todayPlanEntryFixture({
+            learning_item_id: 'item-vocab',
+            activity_kind: 'new_practice',
+            skill_direction: 'production',
+            selected_exercise_type: 'ja_to_fr',
+            reason_codes: ['RECENT_SOURCE'],
+          }),
+        ],
+      ),
+    )
+    mockQueue.mockResolvedValue({
+      entries: [],
+      summary: {
+        total_due: 0,
+        recognition_due: 0,
+        production_due: 0,
+        overdue_count: 0,
+      },
+    })
+    mockSubmit
+      .mockResolvedValueOnce(okFeedback('本', '本'))
+      .mockResolvedValueOnce(okFeedback('livre', 'livre'))
+    render(<PracticeSessionFlow kind="today" questionCount={10} onExit={() => {}} />)
+
+    await screen.findByText('意味')
+    expect(mockTodayCreate).toHaveBeenCalledWith({ question_count: 10 })
+    expect(mockCreate).not.toHaveBeenCalled()
+    expect(mockReviewCreate).not.toHaveBeenCalled()
+    expect(screen.getByText('復習')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '本' }))
+    await screen.findByText('✓ 正解')
+    await userEvent.click(screen.getByRole('button', { name: '次の問題 →' }))
+    await screen.findByPlaceholderText('回答を入力...')
+    expect(screen.getByText('新しい項目')).toBeInTheDocument()
+    await userEvent.type(screen.getByPlaceholderText('回答を入力...'), 'livre')
+    await userEvent.click(screen.getByRole('button', { name: '判定する' }))
+    await userEvent.click(await screen.findByRole('button', { name: '結果を見る →' }))
+    await screen.findByText('今日の学習を終えました')
+    expect(screen.getByTestId('today-result-mix')).toHaveTextContent('復習 1件 / 新規 1件')
+    expect(screen.queryByText(/完全習得|mastery/i)).not.toBeInTheDocument()
+  })
+
+  it('today 0件なら学習できる項目がないと案内する', async () => {
+    mockTodayCreate.mockResolvedValue(todaySessionFixture([]))
+    render(<PracticeSessionFlow kind="today" questionCount={10} onExit={() => {}} />)
+
+    await screen.findByText('今日は学習できる項目がありません')
+    expect(mockCreate).not.toHaveBeenCalled()
   })
 })

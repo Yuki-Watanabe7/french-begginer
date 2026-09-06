@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createPracticeSession,
   createReviewSession,
+  createTodaySession,
   fetchTutorItem,
   fetchTutorItems,
   submitExerciseAnswer,
@@ -11,6 +12,8 @@ import type {
   ExerciseView,
   LearningItem,
   PracticeWrongAnswer,
+  TodayLearningSession,
+  TodayPlanEntryView,
   TutorSessionKind,
 } from '../types'
 import {
@@ -18,6 +21,7 @@ import {
   tutorExerciseAnswerErrorMessage,
   tutorPracticeSessionErrorMessage,
   tutorReviewSessionErrorMessage,
+  tutorTodaySessionErrorMessage,
 } from '../utils/tutor'
 
 export type PracticePhase =
@@ -28,6 +32,13 @@ export type PracticePhase =
   | 'session-result'
   | 'error'
 
+export interface TodaySessionMeta {
+  reviewCount: number
+  newCount: number
+  deferredDueCount: number
+  entries: TodayPlanEntryView[]
+}
+
 export interface PracticeSessionState {
   phase: PracticePhase
   session: {
@@ -36,6 +47,7 @@ export interface PracticeSessionState {
     requested_count: number
     generated_count: number
   } | null
+  todayMeta: TodaySessionMeta | null
   questionIndex: number
   feedback: ExerciseFeedback | null
   input: string
@@ -60,6 +72,7 @@ function initialState(): PracticeSessionState {
   return {
     phase: 'loading',
     session: null,
+    todayMeta: null,
     questionIndex: 0,
     feedback: null,
     input: '',
@@ -112,6 +125,49 @@ function enrichFeedback(
   }
 }
 
+function sessionStartErrorMessage(kind: TutorSessionKind, error: unknown): string {
+  if (kind === 'today') return tutorTodaySessionErrorMessage(error)
+  if (kind === 'review') return tutorReviewSessionErrorMessage(error)
+  return tutorPracticeSessionErrorMessage(error)
+}
+
+async function startSession(kind: TutorSessionKind, sourceId: string | undefined, questionCount: number) {
+  if (kind === 'today') {
+    return createTodaySession({ question_count: questionCount })
+  }
+  if (kind === 'review') {
+    return createReviewSession({ question_count: questionCount })
+  }
+  return createPracticeSession({
+    source_id: sourceId,
+    question_count: questionCount,
+  })
+}
+
+function isTodaySession(
+  session: Awaited<ReturnType<typeof startSession>>,
+): session is TodayLearningSession {
+  return (
+    'entries' in session &&
+    'review_count' in session &&
+    'new_count' in session &&
+    'deferred_due_count' in session
+  )
+}
+
+function todayMetaFromSession(
+  kind: TutorSessionKind,
+  session: Awaited<ReturnType<typeof startSession>>,
+): TodaySessionMeta | null {
+  if (kind !== 'today' || !isTodaySession(session)) return null
+  return {
+    reviewCount: session.review_count,
+    newCount: session.new_count,
+    deferredDueCount: session.deferred_due_count,
+    entries: session.entries,
+  }
+}
+
 export function usePracticeSession(
   sourceId: string | undefined,
   questionCount: number,
@@ -141,18 +197,15 @@ export function usePracticeSession(
     const generation = {}
     startGenerationRef.current = generation
     try {
-      const session =
-        kindRef.current === 'review'
-          ? await createReviewSession({
-              question_count: questionCountRef.current,
-            })
-          : await createPracticeSession({
-              source_id: sourceIdRef.current,
-              question_count: questionCountRef.current,
-            })
+      const session = await startSession(
+        kindRef.current,
+        sourceIdRef.current,
+        questionCountRef.current,
+      )
       if (startGenerationRef.current !== generation) return
+      const todayMeta = todayMetaFromSession(kindRef.current, session)
       if (session.exercises.length === 0) {
-        setState(s => ({ ...s, phase: 'empty', session }))
+        setState(s => ({ ...s, phase: 'empty', session, todayMeta }))
         return
       }
       const items = await loadItemsById(session.exercises)
@@ -162,6 +215,7 @@ export function usePracticeSession(
         ...s,
         phase: 'answering',
         session,
+        todayMeta,
         questionIndex: 0,
         feedback: null,
         input: '',
@@ -174,10 +228,7 @@ export function usePracticeSession(
       setTimeout(() => inputRef.current?.focus(), 50)
     } catch (error) {
       if (startGenerationRef.current !== generation) return
-      const message =
-        kindRef.current === 'review'
-          ? tutorReviewSessionErrorMessage(error)
-          : tutorPracticeSessionErrorMessage(error)
+      const message = sessionStartErrorMessage(kindRef.current, error)
       setState(s => ({
         ...s,
         phase: 'error',
@@ -298,11 +349,13 @@ export function usePracticeSession(
   const currentItem = current
     ? itemsRef.current[current.learning_item_id]
     : undefined
+  const currentTodayEntry = state.todayMeta?.entries[state.questionIndex] ?? null
 
   return {
     state,
     current,
     currentItem,
+    currentTodayEntry,
     inputRef,
     submit,
     submitChoice,

@@ -9,6 +9,7 @@ import {
   extractCandidates,
   fetchCandidates,
   fetchReviewQueue,
+  fetchTodayPlan,
   fetchTutorSource,
   fetchTutorSources,
   rejectCandidate,
@@ -24,6 +25,7 @@ import type {
   SourceSummary,
 } from '../types'
 import { EMPTY_REVIEW_QUEUE } from './reviewQueueFixtures'
+import { EMPTY_TODAY_PLAN } from './todayPlanFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
   const actual = await importOriginal<typeof import('../api/tutor')>()
@@ -37,6 +39,7 @@ vi.mock('../api/tutor', async importOriginal => {
     acceptCandidate: vi.fn(),
     rejectCandidate: vi.fn(),
     fetchReviewQueue: vi.fn(),
+    fetchTodayPlan: vi.fn(),
   }
 })
 
@@ -48,6 +51,7 @@ const mockExtract = vi.mocked(extractCandidates)
 const mockAccept = vi.mocked(acceptCandidate)
 const mockReject = vi.mocked(rejectCandidate)
 const mockQueue = vi.mocked(fetchReviewQueue)
+const mockPlan = vi.mocked(fetchTodayPlan)
 
 const SOURCE_TITLE = 'Article test'
 const SOURCE_CONTENT = "Je me suis rendu compte qu'il fallait changer de stratégie."
@@ -231,6 +235,7 @@ function bindMemoryApi(store: MemoryStore) {
     throw new ApiError(404, { detail: `LearningItemCandidate not found: ${candidateId}` })
   })
   mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
+  mockPlan.mockResolvedValue(EMPTY_TODAY_PLAN)
 }
 
 function deferred<T>() {
@@ -256,6 +261,7 @@ describe('Tutor Phase 2 vertical slice', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
+    mockPlan.mockResolvedValue(EMPTY_TODAY_PLAN)
   })
 
   it('抽出から根拠確認・採用・却下・再表示まで一本でつながる', async () => {

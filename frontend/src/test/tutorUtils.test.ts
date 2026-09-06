@@ -17,6 +17,9 @@ import {
   tutorReviewQueueErrorMessage,
   tutorReviewSessionErrorMessage,
   tutorSaveErrorMessage,
+  tutorTodayPlanErrorMessage,
+  tutorTodaySessionErrorMessage,
+  visibleReasonLabels,
 } from '../utils/tutor'
 
 describe('formatTutorDateTime', () => {
@@ -181,6 +184,57 @@ describe('tutorReviewSessionErrorMessage', () => {
     )
     expect(tutorReviewSessionErrorMessage(new Error('network'))).toBe(
       '復習の開始に失敗しました。通信環境を確認して再度お試しください',
+    )
+  })
+})
+
+describe('visibleReasonLabels', () => {
+  it('reason code を短いユーザー文言へ変換する', () => {
+    expect(visibleReasonLabels(['OVERDUE_REVIEW'])).toEqual(['復習時期を迎えています'])
+    expect(visibleReasonLabels(['RECENT_ERROR'])).toEqual(['最近この表現で間違えています'])
+    expect(visibleReasonLabels(['PRODUCTION_WEAKER'])).toEqual([
+      '意味は分かっていますが、自分で言う練習を優先します',
+    ])
+    expect(visibleReasonLabels(['RECENT_SOURCE'])).toEqual([
+      '最近追加した教材に出てきた表現です',
+    ])
+    expect(visibleReasonLabels(['LEVEL_FIT'])).toEqual(['現在の学習レベルに近い項目です'])
+  })
+
+  it('未設定なら理由を捏造しない', () => {
+    expect(visibleReasonLabels([])).toEqual([])
+    expect(visibleReasonLabels(undefined)).toEqual([])
+    expect(visibleReasonLabels(['UNKNOWN_SCORE' as never])).toEqual([])
+    expect(visibleReasonLabels(['HIGH_INTEREST'])).toEqual([
+      '関心の高い教材に出てきた表現です',
+    ])
+  })
+
+  it('1 Item あたり上位2件までに絞る', () => {
+    expect(
+      visibleReasonLabels(['OVERDUE_REVIEW', 'RECENT_ERROR', 'LOW_MASTERY', 'LEVEL_FIT']),
+    ).toEqual(['復習時期を迎えています', '最近この表現で間違えています'])
+  })
+})
+
+describe('tutorTodayPlanErrorMessage', () => {
+  it('5xx / 通信失敗を日本語へ変換する', () => {
+    expect(tutorTodayPlanErrorMessage(new ApiError(500))).toBe(
+      'サーバーでエラーが発生しました。時間をおいて再度お試しください',
+    )
+    expect(tutorTodayPlanErrorMessage(new Error('network'))).toBe(
+      '今日の学習の取得に失敗しました。通信環境を確認して再度お試しください',
+    )
+  })
+})
+
+describe('tutorTodaySessionErrorMessage', () => {
+  it('422 / 通信失敗を日本語へ変換する', () => {
+    expect(tutorTodaySessionErrorMessage(new ApiError(422))).toBe(
+      '今日の学習の条件を確認してください',
+    )
+    expect(tutorTodaySessionErrorMessage(new Error('network'))).toBe(
+      '今日の学習の開始に失敗しました。通信環境を確認して再度お試しください',
     )
   })
 })

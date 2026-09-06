@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { SourceDocument, TutorSessionKind } from '../types'
+import { DEFAULT_TODAY_QUESTION_COUNT } from '../utils/tutor'
 import { PracticeSessionFlow } from './PracticeSessionFlow'
 import { QuizSettings } from './QuizSettings'
 import { TutorSourceDetail } from './TutorSourceDetail'
@@ -53,8 +54,15 @@ export function TutorFlow({ onBack }: Props) {
     setView('practice-settings')
   }
 
+  const openTodaySession = () => {
+    setSessionKind('today')
+    setPracticeSourceId(undefined)
+    setQuestionCount(DEFAULT_TODAY_QUESTION_COUNT)
+    setView('practice')
+  }
+
   const backFromPractice = () => {
-    if (sessionKind === 'review') {
+    if (sessionKind === 'review' || sessionKind === 'today') {
       setView('list')
       return
     }
@@ -102,7 +110,7 @@ export function TutorFlow({ onBack }: Props) {
   if (view === 'practice') {
     return (
       <PracticeSessionFlow
-        sourceId={sessionKind === 'review' ? undefined : practiceSourceId}
+        sourceId={sessionKind === 'practice' ? practiceSourceId : undefined}
         questionCount={questionCount}
         kind={sessionKind}
         onExit={backFromPractice}
@@ -117,6 +125,7 @@ export function TutorFlow({ onBack }: Props) {
       onBack={onBack}
       onStartPractice={() => openPracticeSettings()}
       onStartReview={openReviewSettings}
+      onStartToday={openTodaySession}
     />
   )
 }

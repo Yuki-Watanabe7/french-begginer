@@ -316,3 +316,24 @@ describe('PracticeExerciseCard — 送信失敗と TTS', () => {
     })
   })
 })
+
+describe('PracticeExerciseCard — today activity', () => {
+  it('任意の復習/新規バッジと理由を出せる', async () => {
+    renderCard({
+      activityLabel: '復習',
+      reasonLabels: ['復習時期を迎えています'],
+    })
+    expect(screen.getByText('復習')).toBeInTheDocument()
+    expect(screen.getByText('なぜ出たか')).toBeInTheDocument()
+    await userEvent.click(screen.getByText('なぜ出たか'))
+    expect(screen.getByText('復習時期を迎えています')).toBeInTheDocument()
+    expect(screen.queryByText(/rank_score|HIGH_INTEREST/)).not.toBeInTheDocument()
+  })
+
+  it('理由が無ければ捏造しない', () => {
+    renderCard({ activityLabel: '新しい項目', reasonLabels: [] })
+    expect(screen.getByText('新しい項目')).toBeInTheDocument()
+    expect(screen.queryByText('なぜ出たか')).not.toBeInTheDocument()
+    expect(screen.queryByText('関心の高い教材に出てきた表現です')).not.toBeInTheDocument()
+  })
+})

@@ -311,4 +311,80 @@ export interface ReviewPracticeSession {
   generated_count: number
 }
 
-export type TutorSessionKind = 'practice' | 'review'
+export type TutorSessionKind = 'practice' | 'review' | 'today'
+
+export type ActivityKind = 'review' | 'new_practice'
+
+export type ReasonCode =
+  | 'OVERDUE_REVIEW'
+  | 'RECENT_ERROR'
+  | 'PRODUCTION_WEAKER'
+  | 'RECOGNITION_WEAKER'
+  | 'LOW_MASTERY'
+  | 'LAPSE_RISK'
+  | 'RECENT_SOURCE'
+  | 'LEVEL_FIT'
+  | 'HIGH_INTEREST'
+  | 'HIGH_IMPORTANCE'
+
+export interface TodayPlanEntryView {
+  learning_item_id: string
+  canonical_form: string
+  meaning_ja: string
+  item_type: LearningItemType
+  activity_kind: ActivityKind
+  skill_direction: SkillDirection
+  selected_exercise_type: ExerciseType
+  reason_codes: ReasonCode[]
+  explanation: string
+  source_titles: string[]
+}
+
+export interface TodayLearningPlanView {
+  generated_at: string
+  requested_count: number
+  total_count: number
+  review_count: number
+  new_count: number
+  deferred_due_count: number
+  entries: TodayPlanEntryView[]
+  summary_reason_codes: ReasonCode[]
+  policy_version: string
+  explanation_summary: string
+}
+
+export interface FetchTodayPlanOptions {
+  question_count?: number
+  max_new_count?: number
+}
+
+export interface CreateTodaySessionInput {
+  question_count?: number
+  max_new_count?: number
+  seed?: string
+}
+
+export interface SkippedTodayEntry {
+  learning_item_id: string
+  skill_direction: SkillDirection
+  activity_kind: ActivityKind
+  skip_reason: string
+  detail?: string | null
+  exercise_skip_reason?: string | null
+}
+
+export interface TodayLearningSession {
+  session_id: string
+  exercises: ExerciseView[]
+  entries: TodayPlanEntryView[]
+  skipped_entries: SkippedTodayEntry[]
+  requested_count: number
+  generated_count: number
+  review_count: number
+  new_count: number
+  deferred_due_count: number
+  explanation_summary: string
+  policy_version: string
+  generated_at: string
+  summary_reason_codes: ReasonCode[]
+}

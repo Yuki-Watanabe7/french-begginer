@@ -1,6 +1,7 @@
 import { useTutorSourceList } from '../hooks/useTutorSourceList'
 import { formatTutorDateTime } from '../utils/tutor'
 import type { SourceSummary } from '../types'
+import { TutorTodayLearningCard } from './TutorTodayLearningCard'
 import { TutorTodayReviewCard } from './TutorTodayReviewCard'
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
   onBack: () => void
   onStartPractice?: () => void
   onStartReview?: () => void
+  onStartToday?: () => void
 }
 
 export function TutorSourceList({
@@ -17,6 +19,7 @@ export function TutorSourceList({
   onBack,
   onStartPractice,
   onStartReview,
+  onStartToday,
 }: Props) {
   const { status, sources, error, retry } = useTutorSourceList()
 
@@ -25,6 +28,7 @@ export function TutorSourceList({
       <h2 style={styles.heading}>自分の教材</h2>
       <p style={styles.sub}>保存したフランス語テキストを読み返せます</p>
 
+      {onStartToday && <TutorTodayLearningCard onStartToday={onStartToday} />}
       {onStartReview && <TutorTodayReviewCard onStartReview={onStartReview} />}
 
       {status === 'loading' && (

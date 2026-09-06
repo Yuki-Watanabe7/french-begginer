@@ -6,11 +6,14 @@ import {
   createTutorSource,
   fetchCandidates,
   fetchReviewQueue,
+  fetchTodayPlan,
+  createTodaySession,
   fetchTutorSource,
   fetchTutorSources,
 } from '../api/tutor'
 import type { SourceDocument, SourceSummary } from '../types'
 import { EMPTY_REVIEW_QUEUE } from './reviewQueueFixtures'
+import { EMPTY_TODAY_PLAN } from './todayPlanFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
   const actual = await importOriginal<typeof import('../api/tutor')>()
@@ -21,6 +24,8 @@ vi.mock('../api/tutor', async importOriginal => {
     createTutorSource: vi.fn(),
     fetchCandidates: vi.fn(),
     fetchReviewQueue: vi.fn(),
+    fetchTodayPlan: vi.fn(),
+    createTodaySession: vi.fn(),
   }
 })
 
@@ -29,6 +34,8 @@ const mockGet = vi.mocked(fetchTutorSource)
 const mockCreate = vi.mocked(createTutorSource)
 const mockFetchCandidates = vi.mocked(fetchCandidates)
 const mockQueue = vi.mocked(fetchReviewQueue)
+const mockPlan = vi.mocked(fetchTodayPlan)
+const mockTodaySession = vi.mocked(createTodaySession)
 
 const SUMMARY: SourceSummary = {
   id: 'src-1',
@@ -50,6 +57,7 @@ describe('TutorFlow', () => {
     vi.resetAllMocks()
     mockFetchCandidates.mockResolvedValue([])
     mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
+    mockPlan.mockResolvedValue(EMPTY_TODAY_PLAN)
   })
 
   it('一覧から新規追加画面へ進み、一覧へ戻れる', async () => {
@@ -141,5 +149,27 @@ describe('TutorFlow', () => {
     await userEvent.click(screen.getByRole('button', { name: '戻る' }))
     await screen.findByRole('button', { name: '復習を始める' })
     expect(screen.getByRole('button', { name: '学習する' })).toBeInTheDocument()
+  })
+
+  it('今日の学習から出題数選択を挟まず開始する', async () => {
+    mockList.mockResolvedValue([SUMMARY])
+    mockPlan.mockResolvedValue({
+      generated_at: '2026-09-06T00:00:00+00:00',
+      requested_count: 10,
+      total_count: 1,
+      review_count: 1,
+      new_count: 0,
+      deferred_due_count: 0,
+      entries: [],
+      summary_reason_codes: ['OVERDUE_REVIEW'],
+      policy_version: 'plan-v1',
+      explanation_summary: '復習 1 件を優先した。',
+    })
+    mockTodaySession.mockImplementation(() => new Promise(() => {}))
+    render(<TutorFlow onBack={() => {}} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: '学習を始める' }))
+    expect(screen.queryByText('出題数を選択')).not.toBeInTheDocument()
+    expect(screen.getByText('読み込み中...')).toBeInTheDocument()
   })
 })

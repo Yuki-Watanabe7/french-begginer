@@ -19,6 +19,8 @@ interface Props {
   inputRef: React.RefObject<HTMLInputElement>
   questionNum: number
   sessionTotal: number
+  activityLabel?: string | null
+  reasonLabels?: string[]
   onInputChange: (value: string) => void
   onReconstructionChange: (indices: number[]) => void
   onSubmit: () => void
@@ -55,6 +57,8 @@ export function PracticeExerciseCard({
   inputRef,
   questionNum,
   sessionTotal,
+  activityLabel = null,
+  reasonLabels = [],
   onInputChange,
   onReconstructionChange,
   onSubmit,
@@ -99,11 +103,28 @@ export function PracticeExerciseCard({
   return (
     <div style={styles.card}>
       <div style={styles.meta}>
-        <span style={styles.badge}>{EXERCISE_TYPE_LABELS[exercise.exercise_type]}</span>
+        <div style={styles.badgeRow}>
+          <span style={styles.badge}>{EXERCISE_TYPE_LABELS[exercise.exercise_type]}</span>
+          {activityLabel && (
+            <span style={styles.activityBadge}>{activityLabel}</span>
+          )}
+        </div>
         <span style={styles.progress}>
           {questionNum} / {sessionTotal}
         </span>
       </div>
+      {reasonLabels.length > 0 && (
+        <details style={styles.reasonDetails}>
+          <summary style={styles.reasonSummary}>なぜ出たか</summary>
+          <ul style={styles.reasonList}>
+            {reasonLabels.map(label => (
+              <li key={label} style={styles.reasonItem}>
+                {label}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       <p lang="fr" style={styles.prompt}>
         {exercise.prompt}
@@ -266,6 +287,13 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
+  },
+  badgeRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
   },
   badge: {
     background: '#e8f0fe',
@@ -274,6 +302,35 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '4px 12px',
     fontSize: 14,
     fontWeight: 600,
+  },
+  activityBadge: {
+    background: '#f1f5f9',
+    color: '#475569',
+    borderRadius: 99,
+    padding: '4px 10px',
+    fontSize: 12,
+    fontWeight: 600,
+  },
+  reasonDetails: {
+    margin: 0,
+    fontSize: 13,
+    color: '#555',
+  },
+  reasonSummary: {
+    cursor: 'pointer',
+    fontWeight: 600,
+    color: '#64748b',
+  },
+  reasonList: {
+    listStyle: 'none',
+    margin: '6px 0 0',
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  reasonItem: {
+    lineHeight: 1.4,
   },
   progress: {
     fontSize: 14,

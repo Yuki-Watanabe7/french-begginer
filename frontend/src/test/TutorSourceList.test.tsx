@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TutorSourceList } from '../components/TutorSourceList'
-import { ApiError, fetchReviewQueue, fetchTutorSources } from '../api/tutor'
+import { ApiError, fetchReviewQueue, fetchTodayPlan, fetchTutorSources } from '../api/tutor'
 import { formatTutorDateTime } from '../utils/tutor'
 import type { SourceSummary } from '../types'
 import { EMPTY_REVIEW_QUEUE } from './reviewQueueFixtures'
+import { EMPTY_TODAY_PLAN } from './todayPlanFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
   const actual = await importOriginal<typeof import('../api/tutor')>()
@@ -13,11 +14,13 @@ vi.mock('../api/tutor', async importOriginal => {
     ...actual,
     fetchTutorSources: vi.fn(),
     fetchReviewQueue: vi.fn(),
+    fetchTodayPlan: vi.fn(),
   }
 })
 
 const mockList = vi.mocked(fetchTutorSources)
 const mockQueue = vi.mocked(fetchReviewQueue)
+const mockPlan = vi.mocked(fetchTodayPlan)
 
 const NEWER: SourceSummary = {
   id: 'src-new',
@@ -50,6 +53,7 @@ describe('TutorSourceList', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
+    mockPlan.mockResolvedValue(EMPTY_TODAY_PLAN)
   })
 
   it('loading 表示をする', () => {
@@ -166,5 +170,21 @@ describe('TutorSourceList', () => {
 
     await screen.findByRole('heading', { name: '今日の復習' })
     expect(screen.getByText('今すぐ復習する項目はありません')).toBeInTheDocument()
+  })
+
+  it('onStartToday があるとき今日の学習カードを出す', async () => {
+    mockList.mockResolvedValueOnce([NEWER])
+    const onStartToday = vi.fn()
+    render(
+      <TutorSourceList
+        onSelect={() => {}}
+        onAdd={() => {}}
+        onBack={() => {}}
+        onStartToday={onStartToday}
+      />,
+    )
+
+    await screen.findByRole('heading', { name: '今日の学習' })
+    expect(screen.getByText('今日は学習できる項目がありません')).toBeInTheDocument()
   })
 })

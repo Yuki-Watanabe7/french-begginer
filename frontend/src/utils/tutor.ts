@@ -1,10 +1,12 @@
 import { ApiError, isNotFoundError } from '../api/tutor'
 import type {
+  ActivityKind,
   CandidateStatus,
   ExerciseType,
   ExerciseView,
   LearningItem,
   LearningItemType,
+  ReasonCode,
 } from '../types'
 
 const NOTE_KEY = 'note'
@@ -218,6 +220,70 @@ export function tutorReviewSessionErrorMessage(error: unknown): string {
     }
   }
   return '復習の開始に失敗しました。通信環境を確認して再度お試しください'
+}
+
+export const DEFAULT_TODAY_QUESTION_COUNT = 10
+export const DEFAULT_TODAY_MAX_NEW_COUNT = 3
+export const MAX_VISIBLE_REASON_COUNT = 2
+export const MAX_TODAY_PLAN_PREVIEW = 3
+
+/** reason code → 短いユーザー向け文言。内部 score は載せない。 */
+export const REASON_CODE_LABELS: Record<ReasonCode, string> = {
+  OVERDUE_REVIEW: '復習時期を迎えています',
+  RECENT_ERROR: '最近この表現で間違えています',
+  PRODUCTION_WEAKER: '意味は分かっていますが、自分で言う練習を優先します',
+  RECOGNITION_WEAKER: '自分では言えますが、意味を素早く捉える練習を優先します',
+  LOW_MASTERY: 'まだ定着が十分ではありません',
+  LAPSE_RISK: '以前つまずいた項目です',
+  RECENT_SOURCE: '最近追加した教材に出てきた表現です',
+  LEVEL_FIT: '現在の学習レベルに近い項目です',
+  HIGH_INTEREST: '関心の高い教材に出てきた表現です',
+  HIGH_IMPORTANCE: '優先して覚えたい項目です',
+}
+
+const KNOWN_REASON_CODES = new Set<string>(Object.keys(REASON_CODE_LABELS))
+
+export function isReasonCode(value: string): value is ReasonCode {
+  return KNOWN_REASON_CODES.has(value)
+}
+
+/** 上位 1〜2 件だけ返す。未知 code や空は捏造しない。 */
+export function visibleReasonLabels(
+  codes: readonly string[] | null | undefined,
+  limit = MAX_VISIBLE_REASON_COUNT,
+): string[] {
+  if (!codes || codes.length === 0) return []
+  const labels: string[] = []
+  for (const code of codes) {
+    if (!isReasonCode(code)) continue
+    const label = REASON_CODE_LABELS[code]
+    if (!labels.includes(label)) labels.push(label)
+    if (labels.length >= limit) break
+  }
+  return labels
+}
+
+export function todayActivityLabel(kind: ActivityKind): string {
+  return kind === 'review' ? '復習' : '新しい項目'
+}
+
+export function tutorTodayPlanErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status >= 500) {
+    return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+  }
+  return '今日の学習の取得に失敗しました。通信環境を確認して再度お試しください'
+}
+
+export function tutorTodaySessionErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 422) {
+      return '今日の学習の条件を確認してください'
+    }
+    if (error.status >= 500) {
+      return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+    }
+  }
+  return '今日の学習の開始に失敗しました。通信環境を確認して再度お試しください'
 }
 
 export function tutorExerciseAnswerErrorMessage(error: unknown): string {
