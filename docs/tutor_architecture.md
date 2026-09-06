@@ -112,6 +112,16 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）、
   - stale plan（inactive / 消化済み due / 生成不能）は skip し、Event は作らない
   - Phase 3 Practice / Phase 4 Review Session は置換しない
   - 原則は「Phase 5 — 今日の学習 Plan API と Tutor Session」を正とする
+- 「今日の学習」Frontend（Phase 5）:
+  `frontend/src/hooks/useTodayPlan.ts`
+  / `frontend/src/components/TutorTodayLearningCard.tsx`
+  / `frontend/src/test/TutorTodayLearningCard.test.tsx`
+  / `frontend/src/test/TutorPhase5Flow.test.tsx`
+  （Issue #179）
+  - Tutor top に Plan 要約（総問数 / 復習 / 新規 / due 残件 / 短い理由）
+  - Today Session は既存 `PracticeExerciseCard` を再利用（`kind: 'today'`）
+  - Phase 4「今日の復習」単独導線は維持する
+  - 内部 score は出さず、reason 未設定時は捏造しない
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -2832,6 +2842,58 @@ stale plan から誤った LearningEvent は作らない。
 | existing practice/review API 回帰なし | `test_existing_practice_and_review_apis_remain` |
 | API key 非依存 | `test_module_does_not_import_llm_or_frameworks` |
 
+## Phase 5 — 「今日の学習」Tutor UI と推薦理由の可視化（Issue #179）
+
+`GET /api/tutor/today` と `POST /api/tutor/today/sessions` を、Tutor 画面から
+そのまま理解・開始できる Frontend 体験にする。Phase 4 の「今日の復習」は壊さない。
+Phase 3 の Exercise renderer / feedback / TTS は複製せず再利用する。
+
+```text
+Tutor / Home
+  -> 今日の学習
+     復習 7 / 新規 3
+     なぜこの内容か
+  -> 学習を始める
+  -> 既存 Exercise UI
+  -> 完了
+  -> 次の状態を再取得
+```
+
+実装:
+
+- API client: `fetchTodayPlan` / `createTodaySession`
+- 件数カード: `TutorTodayLearningCard`（`useTodayPlan`）
+- Session: `PracticeSessionFlow` の `kind: 'today'`。renderer は
+  `PracticeExerciseCard` のまま。任意で「復習」「新しい項目」バッジ
+- 理由: `visibleReasonLabels` が reason code を短い日本語へ変換する。
+  内部 score は出さない。code が無ければ捏造しない。1 Item は上位 1〜2 件
+- 完了後: due queue を再 fetch し、一覧へ戻ると Plan / due を再取得する。
+  再 fetch 失敗は学習結果を失敗扱いにしない
+
+| 観点 | 自動テスト |
+|------|------------|
+| today plan loading/error/empty | `TutorTodayLearningCard.test.tsx` |
+| review/new/deferred 件数 | `TutorTodayLearningCard.test.tsx` / `TutorPhase5Flow.test.tsx` |
+| reason code のユーザー文言 | `tutorUtils.test.ts` / `TutorTodayLearningCard.test.tsx` |
+| reason 未設定時に捏造しない | 同上 |
+| Today Session 開始 | `TutorFlow.test.tsx` / `TutorPhase5Flow.test.tsx` |
+| review/new badge | `PracticeExerciseCard.test.tsx` / `PracticeSessionFlow.test.tsx` |
+| existing renderer reuse | `PracticeSessionFlow.test.tsx` / `TutorPhase5Flow.test.tsx` |
+| 完了結果 | `TutorPhase5Flow.test.tsx` |
+| 完了後 plan/due 再 fetch | `TutorPhase5Flow.test.tsx` |
+| Phase 4 純 review 導線が残る | `TutorPhase5Flow.test.tsx` / `TutorPhase4Flow.test.tsx` |
+| Source/Candidate/通常 Practice 回帰なし | `TutorPhase5Flow.test.tsx` / `TutorPhase3Flow.test.tsx` |
+| mobile width | `TutorTodayLearningCard.test.tsx` / `TutorPhase5Flow.test.tsx` |
+
+### スコープ外
+
+- chat 形式 Tutor
+- mastery dashboard
+- push notification
+- 長文 LLM 解説
+- gamification
+- 高度なプロフィール設定
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -2877,3 +2939,5 @@ Phase 4 自体の完了条件と Phase 5 への引継ぎは、上記
 「Phase 5 — Daily Learning Plan policy」を正とする。
 今日の学習 Plan / Session は上記
 「Phase 5 — 今日の学習 Plan API と Tutor Session」を正とする。
+「今日の学習」Frontend は上記
+「Phase 5 — 「今日の学習」Tutor UI と推薦理由の可視化」を正とする。

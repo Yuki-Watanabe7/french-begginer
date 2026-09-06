@@ -8,6 +8,8 @@ import {
   extractCandidates,
   fetchCandidates,
   fetchReviewQueue,
+  fetchTodayPlan,
+  createTodaySession,
   fetchTutorItem,
   fetchTutorItems,
   fetchTutorSource,
@@ -526,6 +528,108 @@ describe('createReviewSession', () => {
 
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
       '/api/tutor/review/sessions',
+      expect.objectContaining({ body: JSON.stringify({}) }),
+    )
+  })
+})
+
+const TODAY_PLAN = {
+  generated_at: '2026-09-06T00:00:00+00:00',
+  requested_count: 10,
+  total_count: 2,
+  review_count: 1,
+  new_count: 1,
+  deferred_due_count: 4,
+  entries: [
+    {
+      learning_item_id: 'item-1',
+      canonical_form: 'livre',
+      meaning_ja: '本',
+      item_type: 'vocabulary',
+      activity_kind: 'review',
+      skill_direction: 'recognition',
+      selected_exercise_type: 'meaning_recognition',
+      reason_codes: ['OVERDUE_REVIEW'],
+      explanation: '復習時期を迎えています。',
+      source_titles: ['Le Monde'],
+    },
+  ],
+  summary_reason_codes: ['OVERDUE_REVIEW'],
+  policy_version: 'plan-v1',
+  explanation_summary: '復習 1 件を優先した。新規 1 件を入れた。',
+}
+
+const TODAY_SESSION = {
+  session_id: 'today-1',
+  exercises: [EXERCISE],
+  entries: TODAY_PLAN.entries,
+  skipped_entries: [],
+  requested_count: 10,
+  generated_count: 1,
+  review_count: 1,
+  new_count: 0,
+  deferred_due_count: 4,
+  explanation_summary: TODAY_PLAN.explanation_summary,
+  policy_version: 'plan-v1',
+  generated_at: '2026-09-06T00:00:00+00:00',
+  summary_reason_codes: ['OVERDUE_REVIEW'],
+}
+
+describe('fetchTodayPlan', () => {
+  it('GET /api/tutor/today を呼ぶ', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(TODAY_PLAN))
+
+    const result = await fetchTodayPlan()
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith('/api/tutor/today')
+    expect(result).toEqual(TODAY_PLAN)
+    expect(result).not.toHaveProperty('rank_score')
+  })
+
+  it('question_count / max_new_count を query に載せる', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(TODAY_PLAN))
+
+    await fetchTodayPlan({ question_count: 10, max_new_count: 3 })
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      '/api/tutor/today?question_count=10&max_new_count=3',
+    )
+  })
+
+  it('non-2xx は成功値として返さない', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse({ detail: 'boom' }, 500),
+    )
+
+    await expect(fetchTodayPlan()).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 500,
+    })
+  })
+})
+
+describe('createTodaySession', () => {
+  it('POST /api/tutor/today/sessions に question_count を送る', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(TODAY_SESSION))
+
+    const result = await createTodaySession({ question_count: 10, seed: 'fixed' })
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith('/api/tutor/today/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question_count: 10, seed: 'fixed' }),
+    })
+    expect(result).toEqual(TODAY_SESSION)
+    expect(result.exercises[0]).not.toHaveProperty('correct_answer')
+  })
+
+  it('未指定フィールドは body に載せない', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(TODAY_SESSION))
+
+    await createTodaySession()
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      '/api/tutor/today/sessions',
       expect.objectContaining({ body: JSON.stringify({}) }),
     )
   })

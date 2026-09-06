@@ -2,11 +2,13 @@ import type {
   AcceptCandidateResponse,
   CreatePracticeSessionInput,
   CreateReviewSessionInput,
+  CreateTodaySessionInput,
   CreateTutorSourceInput,
   ExerciseFeedback,
   ExerciseType,
   ExtractCandidatesResponse,
   FetchReviewQueueOptions,
+  FetchTodayPlanOptions,
   FetchTutorItemsOptions,
   FetchTutorSourcesOptions,
   LearningItem,
@@ -16,6 +18,8 @@ import type {
   ReviewQueue,
   SourceDocument,
   SourceSummary,
+  TodayLearningPlanView,
+  TodayLearningSession,
 } from '../types'
 
 const BASE = import.meta.env.VITE_API_BASE ?? ''
@@ -167,6 +171,36 @@ export async function createReviewSession(
   if (input.seed !== undefined) body.seed = input.seed
   return parseJson(
     await fetch(`${BASE}/api/tutor/review/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+}
+
+export async function fetchTodayPlan(
+  options: FetchTodayPlanOptions = {},
+): Promise<TodayLearningPlanView> {
+  const params = new URLSearchParams()
+  if (options.question_count !== undefined) {
+    params.set('question_count', String(options.question_count))
+  }
+  if (options.max_new_count !== undefined) {
+    params.set('max_new_count', String(options.max_new_count))
+  }
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  return parseJson(await fetch(`${BASE}/api/tutor/today${query}`))
+}
+
+export async function createTodaySession(
+  input: CreateTodaySessionInput = {},
+): Promise<TodayLearningSession> {
+  const body: Record<string, unknown> = {}
+  if (input.question_count !== undefined) body.question_count = input.question_count
+  if (input.max_new_count !== undefined) body.max_new_count = input.max_new_count
+  if (input.seed !== undefined) body.seed = input.seed
+  return parseJson(
+    await fetch(`${BASE}/api/tutor/today/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
