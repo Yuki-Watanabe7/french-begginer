@@ -204,6 +204,8 @@ backend/app/
 │   ├── practice_session.py   # active LearningItem から Practice Session を組み立てる（Issue #150）
 │   ├── review_queue.py       # direction-aware な due review queue（Issue #163）
 │   ├── review_session.py     # due queue から Review Practice Session を組み立てる（Issue #164）
+│   ├── recommendation_signal.py  # 推薦入力の signal snapshot（Issue #175）
+│   ├── recommendation_ranking.py  # 説明可能な ranking policy（Issue #176）
 │   └── conjugation_adapter.py
 ├── evaluation/   # LLM抽出の固定fixtureと品質チェック（Issue #136）。HTTPからは使わない
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
