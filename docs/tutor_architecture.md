@@ -34,7 +34,9 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）、
 および Phase 5 の推薦入力 signal snapshot（Issue #175）、
 説明可能な ranking policy と score decomposition（Issue #176）、
 新規学習と復習の配分を決める Daily Learning Plan policy（Issue #177）、
-「今日の学習」Plan API と Tutor Session 生成（Issue #178）
+「今日の学習」Plan API と Tutor Session 生成（Issue #178）、
+「今日の学習」Tutor UI と推薦理由の可視化（Issue #179）、
+Tutor 推薦品質の固定 fixture・反実仮想テスト（Issue #180）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -122,6 +124,17 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）、
   - Today Session は既存 `PracticeExerciseCard` を再利用（`kind: 'today'`）
   - Phase 4「今日の復習」単独導線は維持する
   - 内部 score は出さず、reason 未設定時は捏造しない
+- 推薦品質（Phase 5）:
+  `backend/app/evaluation/recommendation_fixtures.py`
+  / `backend/app/evaluation/recommendation_quality.py`
+  / `backend/tests/test_tutor_recommendation_quality.py`
+  / `scripts/evaluate_tutor_recommendations.py`
+  / `docs/tutor_recommendation_quality.md`
+  （Issue #180）
+  - synthetic learner の固定 fixture と counterfactual で順位・reason・配分制約を検証する
+  - score の絶対値は golden 固定しない。LLM-as-judge を唯一の gate にしない
+  - 通常 CI は外部 API なしで通る
+  - 原則は「Phase 5 — 推薦品質の固定 fixture と反実仮想テスト」を正とする
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -2549,6 +2562,8 @@ Phase 5 へ進む前提は、Phase 0〜4 が `bash scripts/quality-check.sh` で
 新規と復習の件数配分は下記「Phase 5 — Daily Learning Plan policy」を正とする。
 今日の学習 Plan / Session は下記
 「Phase 5 — 今日の学習 Plan API と Tutor Session」を正とする。
+推薦品質の検証は下記
+「Phase 5 — 推薦品質の固定 fixture と反実仮想テスト」を正とする。
 
 ## Phase 5 — 説明可能な ranking policy（Issue #176）
 
@@ -2894,6 +2909,90 @@ Tutor / Home
 - gamification
 - 高度なプロフィール設定
 
+## Phase 5 — 推薦品質の固定 fixture と反実仮想テスト（Issue #180）
+
+Tutor ranking / Daily Learning Plan が「もっともらしく見える」だけでなく、
+入力 signal が変わったときに期待方向へ順位・配分が変わることを
+固定 fixture で継続検証する。Phase 5 では LLM-as-judge の感想に依存せず、
+**反実仮想（counterfactual）テスト** を中心にする。
+
+score の絶対値は golden 固定しない。見るのは順位・reason・制約の不変条件。
+詳細は `docs/tutor_recommendation_quality.md`。
+
+```text
+synthetic learner fixture
+  -> RecommendationSignalSnapshot
+  -> rank_recommendations / build_daily_learning_plan
+  -> policy snapshot（version + ranked IDs / reasons）
+  -> 不変条件 / counterfactual の方向チェック
+```
+
+実装は `evaluation.recommendation_fixtures` と
+`evaluation.recommendation_quality`。通常 CI は synthetic fixture のみ。
+任意レポートは `scripts/evaluate_tutor_recommendations.py`（LLM 不要）。
+
+### 固定 fixture
+
+| ID | 見るもの |
+|----|----------|
+| A | 3日 overdue vs 今日の高 interest 新規。due が勝つ |
+| B | 同一 Item の recognition 高 / production 低 + 直近誤答 |
+| C | 同条件 2 Item の一方だけ直近誤答 |
+| D | A1 learner の A1/A2/B2/unknown。B2 を排除しない |
+| E | due 15 / capacity 10 → review 10、new 0、deferred 5 |
+| F | due 4 / capacity 10 / max new 3 → due4 + new3。水増ししない |
+| INV | suspended / mastered / 生成不能は plan に入れず skip 理由付き |
+
+### counterfactual
+
+同じ baseline から signal を 1 つだけ変える。
+
+- interest neutral → high
+- 誤答なし → recent incorrect
+- due future → overdue
+- production mastery 0.8 → 0.3
+
+期待は「順位がどちらの方向へ動くか」。高 interest 新規でも overdue は押しのけない。
+
+### invariants
+
+- same input / same now で同順位
+- due review が new_practice より後ろに来ない
+- max_new_count / deferred_due_count
+- unseen を LOW_MASTERY にしない
+- reason code が実 signal と矛盾しない
+- neutral interest で HIGH_INTEREST を出さない
+- recognition の誤答で production の RECENT_ERROR を捏造しない
+- inactive / mastered を推薦しない
+- Exercise 生成不能は skip 理由付き
+
+### policy snapshot
+
+`feature_version` / ranking `policy_version` / plan `policy_version` /
+fixture name / ranked IDs / reasons を評価結果へ残す。
+
+### スコープ外
+
+- 大規模ユーザー実験 / online A/B
+- ML metric 最適化 / automatic weight tuning
+- FSRS 評価
+- 実利用データの offline evaluation（将来拡張可）
+
+| 観点 | 自動テスト |
+|------|------------|
+| lettered fixture が通る | `test_each_fixture_passes` |
+| overdue が high interest 新規より上位 | `test_overdue_beats_high_interest_new` |
+| production gap / recent error | `test_production_gap_and_recent_error_reasons` |
+| recent error が優先度を上げる | `test_recent_error_raises_priority` |
+| level fit が B2/unknown を排除しない | `test_level_fit_does_not_exclude_far_or_unknown` |
+| due overload の件数 | `test_due_overload_fills_with_reviews_only` |
+| due under capacity と水増し抑止 | `test_due_under_capacity_adds_new_without_inflation` |
+| inactive / mastered / unsupported | `test_inactive_mastered_and_unsupported_are_skipped` |
+| counterfactual の期待方向 | `test_each_counterfactual_moves_in_expected_direction` |
+| reason と signal の整合 | `test_neutral_interest_does_not_emit_high_interest` |
+| policy snapshot | `test_policy_snapshot_is_serializable` |
+| OpenAI / LLM 非依存 | `test_quality_modules_do_not_import_llm` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -2941,3 +3040,5 @@ Phase 4 自体の完了条件と Phase 5 への引継ぎは、上記
 「Phase 5 — 今日の学習 Plan API と Tutor Session」を正とする。
 「今日の学習」Frontend は上記
 「Phase 5 — 「今日の学習」Tutor UI と推薦理由の可視化」を正とする。
+推薦品質の検証は上記
+「Phase 5 — 推薦品質の固定 fixture と反実仮想テスト」を正とする。
