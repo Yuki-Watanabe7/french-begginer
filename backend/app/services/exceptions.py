@@ -87,6 +87,10 @@ class InvalidReviewSessionError(TutorServiceError):
     """question_count など、Review Practice Session 入力が不正。"""
 
 
+class InvalidTodayLearningError(TutorServiceError):
+    """question_count / max_new_count など、今日の学習 Plan / Session 入力が不正。"""
+
+
 class TutorInconsistentStateError(TutorServiceError):
     """schedule と Item の不整合など、黙って空応答へ丸めてはいけない状態。"""
 

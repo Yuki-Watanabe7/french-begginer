@@ -548,6 +548,41 @@ def test_list_by_item_does_not_include_other_items(store: TutorSqliteStore):
     assert events_a[0].learning_item_id == item_a.id
 
 
+def test_list_by_item_and_direction_filters_and_limit(store: TutorSqliteStore):
+    item = _item()
+    store.learning_items.create(item)
+    rec_old = _event(
+        item.id,
+        exercise_type="fr_to_ja",
+        occurred_at=datetime(2026, 1, 1, 10, 0, tzinfo=UTC),
+    )
+    rec_new = _event(
+        item.id,
+        exercise_type="meaning_recognition",
+        occurred_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+    )
+    prod = _event(
+        item.id,
+        exercise_type="ja_to_fr",
+        occurred_at=datetime(2026, 1, 1, 11, 0, tzinfo=UTC),
+    )
+    store.learning_events.append(rec_new)
+    store.learning_events.append(prod)
+    store.learning_events.append(rec_old)
+
+    recognition = store.learning_events.list_by_item_and_direction(
+        item.id, "recognition"
+    )
+    assert [event.id for event in recognition] == [rec_old.id, rec_new.id]
+    production = store.learning_events.list_by_item_and_direction(item.id, "production")
+    assert [event.id for event in production] == [prod.id]
+
+    limited = store.learning_events.list_by_item_and_direction(
+        item.id, "recognition", limit=1
+    )
+    assert [event.id for event in limited] == [rec_new.id]
+
+
 def test_append_event_requires_existing_learning_item(store: TutorSqliteStore):
     with pytest.raises(ReferentialIntegrityError):
         store.learning_events.append(_event("missing-item"))
