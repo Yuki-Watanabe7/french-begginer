@@ -48,6 +48,8 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/items/{item_id}/exercises/{exercise_type}/answer` | Exercise を server-side で採点し、LearningEvent / LearnerState / ReviewSchedule を更新する |
 | POST | `/api/tutor/practice/sessions` | active LearningItem から Practice Session を組み立てる。Session 自体は永続化しない |
 | POST | `/api/tutor/review/sessions` | due review queue から Review Practice Session を組み立てる。Session 自体は永続化しない |
+| GET | `/api/tutor/today` | 今日の学習 Plan。review/new 件数と deferred due、entry ごとの説明可能な reason を返す。Plan 自体は永続化しない |
+| POST | `/api/tutor/today/sessions` | 今日の学習 Plan から Tutor Today Session を組み立てる。Session 自体は永続化しない |
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録し、LearnerState と ReviewSchedule を更新する |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem を返す。任意時刻の query は持たない |
 | GET | `/api/tutor/reviews/queue` | direction-aware な due review queue。`limit` 付き。任意時刻の query は持たない |
@@ -138,6 +140,53 @@ Phase 3 の手動 Practice Session とは混ぜない。Session 自体は DB に
 | `generated_count` | 実際に入れた出題数（`<= requested_count`） |
 
 queue entry の skill_direction に合う Exercise だけを出す。新規 / 未 due Item は混ぜない。
+
+### GET /api/tutor/today
+
+説明可能な ranking と Daily Learning Plan から、今日の学習 Plan を返す。
+Plan 自体は DB に保存しない。Session は開始しない。
+
+| パラメータ | 型 | デフォルト | 説明 |
+|------------|-----|------------|------|
+| `question_count` | 1〜20 の整数 | `10` | 要求する総件数。候補が少なければ短く返す |
+| `max_new_count` | 0〜20 の整数 | `3` | 新規 LearningItem の上限 |
+
+任意時刻の `now` は受け取らない。due 判定はサーバー時刻。0件でも 200。
+
+レスポンス:
+
+| フィールド | 説明 |
+|------------|------|
+| `generated_at` | Plan 生成時刻 |
+| `requested_count` | 要求した総件数 |
+| `total_count` | 採用した entry 数 |
+| `review_count` / `new_count` | 復習 / 新規の件数 |
+| `deferred_due_count` | capacity 不足や skip で入れられなかった due 件数 |
+| `entries` | item 要約、`activity_kind`、`skill_direction`、reason codes / 説明文。内部 score は含めない |
+| `summary_reason_codes` | plan 全体の reason code（初出順） |
+| `policy_version` | 配分規則の版 |
+| `explanation_summary` | 内部 score を出さない短い配分説明 |
+
+reason の説明文は code から deterministic に生成する。LLM は使わない。
+
+### POST /api/tutor/today/sessions
+
+現在の DB 状態から Plan を再計算し、既存 Exercise 基盤で Today Session を組み立てる。
+長時間 Plan を予約保持しない。inactive / 消化済み due / 生成不能は skip する。
+Session 自体は DB に保存せず、学習履歴は回答ごとの LearningEvent が source of truth。
+Phase 3 の Practice Session と Phase 4 の「今日の復習」は維持する。
+
+| フィールド | 型 | デフォルト | 説明 |
+|------------|-----|------------|------|
+| `question_count` | 1〜20 の整数 | `10` | 要求する総件数 |
+| `max_new_count` | 0〜20 の整数 | `3` | 新規 LearningItem の上限 |
+| `seed` | string optional | サーバー既定 | 再現用。Exercise 本文の再構成には使わない |
+
+任意時刻の `now` は受け取らない。0件でも 200。正解は問題提示時に返さない。
+
+レスポンスは Phase 3/4 と共通の `PublicExercise` に加え、plan entry（説明可能な reason）と
+`review_count` / `new_count` / `deferred_due_count` を含む。
+review entry は due direction を守る。new entry の ReviewSchedule は初回回答後に初めて作られる。
 
 ### GET /api/questions/next クエリパラメータ
 

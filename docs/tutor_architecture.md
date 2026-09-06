@@ -33,7 +33,8 @@ LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築
 Phase 4 vertical slice と Exit Criteria（Issue #167）、
 および Phase 5 の推薦入力 signal snapshot（Issue #175）、
 説明可能な ranking policy と score decomposition（Issue #176）、
-新規学習と復習の配分を決める Daily Learning Plan policy（Issue #177）
+新規学習と復習の配分を決める Daily Learning Plan policy（Issue #177）、
+「今日の学習」Plan API と Tutor Session 生成（Issue #178）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -97,6 +98,20 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）、
   - unsupported は理由付き skip し、次順位で補充する
   - OpenAI / LLM 非依存。`policy_version` で配分規則を追跡する
   - 原則は「Phase 5 — Daily Learning Plan policy」を正とする
+- 今日の学習 Plan / Session（Phase 5）:
+  `backend/app/domain/today_session.py`
+  / `backend/app/services/today_learning_service.py`
+  / `backend/tests/test_today_session.py`
+  / `backend/tests/test_today_learning_service.py`
+  / `backend/tests/test_today_learning_api.py`
+  （Issue #178）
+  - HTTP: `GET /api/tutor/today` / `POST /api/tutor/today/sessions`
+  - 入力: active LearningItem + LearnerState / ReviewSchedule / LearningEvent / Source
+  - 出力: 公開 Plan（内部 score なし）と既存 Exercise 基盤の Today Session
+  - reason code から短い説明文を deterministic に生成する（LLM 不使用）
+  - stale plan（inactive / 消化済み due / 生成不能）は skip し、Event は作らない
+  - Phase 3 Practice / Phase 4 Review Session は置換しない
+  - 原則は「Phase 5 — 今日の学習 Plan API と Tutor Session」を正とする
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -658,6 +673,8 @@ POST /api/tutor/items/{item_id}/reviews
 | GET | `/api/tutor/reviews/due` | 現在 due の active LearningItem |
 | GET | `/api/tutor/reviews/queue` | direction-aware な due review queue（Issue #163） |
 | POST | `/api/tutor/review/sessions` | due queue から Review Practice Session を生成（Issue #164） |
+| GET | `/api/tutor/today` | 今日の学習 Plan（Issue #178） |
+| POST | `/api/tutor/today/sessions` | 今日の学習 Plan から Tutor Today Session を生成（Issue #178） |
 
 `GET /api/tutor/reviews/due` は任意時刻を HTTP query から受け取らない。
 due 判定の基準はサーバー時刻（`utcnow`）。テストでは `TutorService` の
@@ -2520,6 +2537,8 @@ Phase 5 へ進む前提は、Phase 0〜4 が `bash scripts/quality-check.sh` で
 推薦の入力特徴量は Issue #175 の `RecommendationSignalSnapshot`、
 順位付けそのものは下記「Phase 5 — 説明可能な ranking policy」を正とする。
 新規と復習の件数配分は下記「Phase 5 — Daily Learning Plan policy」を正とする。
+今日の学習 Plan / Session は下記
+「Phase 5 — 今日の学習 Plan API と Tutor Session」を正とする。
 
 ## Phase 5 — 説明可能な ranking policy（Issue #176）
 
@@ -2535,7 +2554,9 @@ RecommendationSignalSnapshot
 ```
 
 実装は `domain.recommendation_ranking.rank_recommendations` と
-`score_recommendation`。HTTP API / Frontend は後続 Issue。
+`score_recommendation`。HTTP API は下記
+「Phase 5 — 今日の学習 Plan API と Tutor Session」を正とする。
+Frontend は後続 Issue。
 新規と復習の最終件数 mix は下記
 「Phase 5 — Daily Learning Plan policy」を正とする。
 LearningEvent には policy version を書かない。
@@ -2614,7 +2635,7 @@ gap > 0 なら production を、gap < 0 なら recognition を上げる。
 ### スコープ外
 
 - 新規 / 復習の最終件数 mix（Issue #177 の Daily Learning Plan）
-- HTTP API / Frontend
+- HTTP API（Issue #178）/ Frontend
 - ML ranking / LLM による推薦順位決定
 - Phase 4 due queue の並び替え（overdue 順のまま）
 
@@ -2647,7 +2668,8 @@ ranked review candidates
 ```
 
 実装は `domain.daily_learning_plan.build_daily_learning_plan`。
-HTTP API / Frontend / 学習時間の精密予測は後続 Issue。
+HTTP API は下記「Phase 5 — 今日の学習 Plan API と Tutor Session」を正とする。
+Frontend / 学習時間の精密予測は後続 Issue。
 Phase 4 の純 Review Session（due だけを解く）は書き換えない。
 
 ### plan contract
@@ -2702,7 +2724,7 @@ Phase 4 の rebuild / 履歴を source of truth とし、schedule 欠損を
 
 ### スコープ外
 
-- HTTP API / Frontend
+- HTTP API / Frontend（HTTP は Issue #178）
 - 学習時間の精密予測
 - reinforcement learning / FSRS 変更
 - notification
@@ -2722,6 +2744,93 @@ Phase 4 の rebuild / 履歴を source of truth とし、schedule 欠損を
 | same input で deterministic | `test_same_input_same_plan` |
 | Phase 4 純 review session を壊さない | `TestPhase4Boundary` |
 | OpenAI / LLM 非依存 | `test_module_does_not_import_llm` |
+
+## Phase 5 — 今日の学習 Plan API と Tutor Session（Issue #178）
+
+説明可能な ranking と Daily Learning Plan を HTTP 経由で利用し、
+**復習 + 新規学習を Tutor が選んだ順序で解く「今日の学習」Session** を生成する。
+
+```text
+GET /api/tutor/today
+  -> ranked DailyLearningPlan（公開 DTO。内部 score なし）
+POST /api/tutor/today/sessions
+  -> Tutor Today Session
+  -> 既存 Exercise renderer/evaluator
+  -> LearningEvent / state / schedule 更新（回答時。既存 Phase 3 API）
+```
+
+実装は `domain.today_session` と `TodayLearningService`。
+Frontend / plan 永続化 / LLM による reason 文章生成は対象外。
+Phase 3 の Practice Session と Phase 4 の「今日の復習」は維持する。
+
+### 公開 plan contract
+
+Frontend に内部 score の全詳細は出さない。
+
+| フィールド | 意味 |
+|------------|------|
+| `generated_at` | サーバー時刻。HTTP から任意時刻は受け取らない |
+| `requested_count` / `total_count` | 要求件数と採用件数 |
+| `review_count` / `new_count` | 復習 / 新規の件数 |
+| `deferred_due_count` | 入れられなかった due 件数 |
+| `entries[]` | item 要約、`activity_kind`、`skill_direction`、reason codes / 説明文、任意の source title |
+| `summary_reason_codes[]` | plan 全体の reason（初出順） |
+| `policy_version` | Daily Learning Plan の版（初期 `plan-v1`） |
+| `explanation_summary` | 配分の短い説明 |
+
+### explanation 生成
+
+reason code から短い説明文を deterministic に生成する。LLM は使わない。
+
+| reason code | 説明 |
+|-------------|------|
+| `OVERDUE_REVIEW` | 復習時期を迎えています |
+| `RECENT_ERROR` | 最近この項目で間違えています |
+| `PRODUCTION_WEAKER` | 意味は分かっていますが、自分で言う練習が不足しています |
+| `RECENT_SOURCE` | 最近追加した教材に出てきた表現です |
+
+### Session 生成
+
+- review entry は due direction を守り、Phase 4 と同じ Exercise 優先順を再利用する
+- new entry は Phase 3 の Exercise 生成を再利用する
+- 未回答の new entry に ReviewSchedule を先に作らない。初回回答で作る
+- 正解は問題提示時に返さない。採点は既存 `POST /api/tutor/items/{id}/exercises/{type}/answer`
+
+### stale plan
+
+Phase 5 初期では長時間 plan を予約保持しない。Session 開始時に DB 状態から
+Plan を再計算する。渡された plan を変換する場合も、少なくとも次を skip する。
+
+- inactive になった Item
+- 直前に別 Session で消化済みの due
+- Exercise 生成不能になった Item
+
+stale plan から誤った LearningEvent は作らない。
+
+### スコープ外
+
+- Frontend
+- push notification
+- plan 永続化 / 予約
+- LLM による reason 文章生成
+- ML ranking
+- Phase 3/4 API の置換
+
+| 観点 | 自動テスト |
+|------|------------|
+| today plan が review/new 件数を返す | `test_today_plan_returns_review_and_new_counts` |
+| due 優先・new 上限 | `test_due_priority_and_new_cap` / `test_today_plan_due_cap_and_deferred` |
+| reason explanation | `TestReasonExplanation` |
+| deferred_due_count | `test_deferred_due_count` |
+| today session 生成 | `test_today_session_generates_exercises_without_answers` |
+| review は due direction を維持 | `test_session_reuses_exercise_and_keeps_direction` |
+| new 初回回答で schedule 作成 | `test_today_session_new_answer_creates_schedule` |
+| 正解漏洩なし | `test_today_session_generates_exercises_without_answers` |
+| stale/inactive skip | `TestTodaySession` / `test_session_refresh_drops_answered_due` |
+| question_count / max_new validation | `test_today_validation` |
+| empty plan | `test_today_plan_empty` |
+| existing practice/review API 回帰なし | `test_existing_practice_and_review_apis_remain` |
+| API key 非依存 | `test_module_does_not_import_llm_or_frameworks` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
@@ -2766,3 +2875,5 @@ Phase 4 自体の完了条件と Phase 5 への引継ぎは、上記
 「Phase 5 — 説明可能な ranking policy」を正とする。
 新規と復習の配分は上記
 「Phase 5 — Daily Learning Plan policy」を正とする。
+今日の学習 Plan / Session は上記
+「Phase 5 — 今日の学習 Plan API と Tutor Session」を正とする。

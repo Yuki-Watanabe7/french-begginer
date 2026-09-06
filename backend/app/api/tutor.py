@@ -1,11 +1,11 @@
 """Tutor 最小 API（Issue #112）と Source 一覧（Issue #121）、
 Candidate 抽出・採否（Issue #134）、Exercise 取得・回答判定（Issue #149）、
 Practice Session 組み立て（Issue #150）、due review queue（Issue #163）、
-Review Practice Session（Issue #164）。
+Review Practice Session（Issue #164）、今日の学習 Plan / Session（Issue #178）。
 
 business rule は TutorService / CandidateService / ExerciseService /
-PracticeSessionService / ReviewSessionService に任せ、このモジュールは
-request/response schema と HTTP status 変換だけを持つ。
+PracticeSessionService / ReviewSessionService / TodayLearningService に任せ、
+このモジュールは request/response schema と HTTP status 変換だけを持つ。
 """
 
 from typing import Annotated, Any
@@ -18,7 +18,14 @@ from app.api.deps import (
     get_exercise_service,
     get_practice_session_service,
     get_review_session_service,
+    get_today_learning_service,
     get_tutor_service,
+)
+from app.domain.daily_learning_plan import (
+    DEFAULT_MAX_NEW_COUNT,
+    DEFAULT_PLAN_SIZE,
+    MAX_PLAN_SIZE,
+    MIN_PLAN_SIZE,
 )
 from app.domain.exercise import PublicExercise, to_public_exercise
 from app.domain.practice_session import (
@@ -34,6 +41,11 @@ from app.domain.review_queue import (
     ReviewQueue,
 )
 from app.domain.review_session import SkippedReviewEntry
+from app.domain.today_session import (
+    SkippedTodayEntry,
+    TodayLearningPlanView,
+    TodayPlanEntryView,
+)
 from app.domain.tutor import (
     AnswerOutcome,
     CandidateStatus,
@@ -60,6 +72,7 @@ from app.services.exceptions import (
     InvalidPracticeFilterError,
     InvalidReviewSessionError,
     InvalidSourceRefError,
+    InvalidTodayLearningError,
     TutorConflictError,
     TutorInconsistentStateError,
     TutorInvalidCandidateError,
@@ -71,6 +84,7 @@ from app.services.exceptions import (
 from app.services.exercise_service import ExerciseService
 from app.services.practice_session_service import PracticeSessionService
 from app.services.review_session_service import ReviewSessionService
+from app.services.today_learning_service import TodayLearningService
 from app.services.tutor_service import TutorService
 
 router = APIRouter(prefix="/api/tutor", tags=["tutor"])
@@ -83,6 +97,9 @@ PracticeSessionServiceDep = Annotated[
 ]
 ReviewSessionServiceDep = Annotated[
     ReviewSessionService, Depends(get_review_session_service)
+]
+TodayLearningServiceDep = Annotated[
+    TodayLearningService, Depends(get_today_learning_service)
 ]
 
 SOURCE_LIST_LIMIT_DEFAULT = 50
@@ -269,6 +286,42 @@ class ReviewPracticeSessionResponse(BaseModel):
     generated_count: int
 
 
+class CreateTodaySessionRequest(BaseModel):
+    """今日の学習 Session の入力。plan は予約保持せず、開始時に再計算する。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question_count: int = Field(
+        default=DEFAULT_PLAN_SIZE,
+        ge=MIN_PLAN_SIZE,
+        le=MAX_PLAN_SIZE,
+    )
+    max_new_count: int = Field(
+        default=DEFAULT_MAX_NEW_COUNT,
+        ge=0,
+        le=MAX_PLAN_SIZE,
+    )
+    seed: str | None = Field(default=None, min_length=1)
+
+
+class TodayLearningSessionResponse(BaseModel):
+    """Plan から組み立てた今日の学習 Session。正解は含めない。永続化しない。"""
+
+    session_id: str
+    exercises: list[PublicExercise]
+    entries: list[TodayPlanEntryView]
+    skipped_entries: list[SkippedTodayEntry]
+    requested_count: int
+    generated_count: int
+    review_count: int
+    new_count: int
+    deferred_due_count: int
+    explanation_summary: str
+    policy_version: str
+    generated_at: UtcDatetime
+    summary_reason_codes: list[str]
+
+
 def _to_source_summary(document: SourceDocument) -> SourceSummary:
     return SourceSummary(
         id=document.id,
@@ -320,6 +373,8 @@ def _to_http(exc: TutorServiceError) -> HTTPException:
     if isinstance(exc, InvalidPracticeFilterError):
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, InvalidReviewSessionError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, InvalidTodayLearningError):
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, TutorInconsistentStateError):
         return HTTPException(
@@ -594,6 +649,61 @@ def create_review_session(
         skipped_entries=list(session.skipped_entries),
         requested_count=session.requested_count,
         generated_count=session.generated_count,
+    )
+
+
+@router.get("/today", response_model=TodayLearningPlanView)
+def get_today_plan(
+    service: TodayLearningServiceDep,
+    question_count: int = Query(
+        default=DEFAULT_PLAN_SIZE,
+        ge=MIN_PLAN_SIZE,
+        le=MAX_PLAN_SIZE,
+    ),
+    max_new_count: int = Query(
+        default=DEFAULT_MAX_NEW_COUNT,
+        ge=0,
+        le=MAX_PLAN_SIZE,
+    ),
+) -> TodayLearningPlanView:
+    """今日の学習 Plan を返す。Session は開始しない。永続化しない。"""
+    try:
+        return service.get_plan(
+            question_count=question_count,
+            max_new_count=max_new_count,
+        )
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+
+
+@router.post("/today/sessions", response_model=TodayLearningSessionResponse)
+def create_today_session(
+    req: CreateTodaySessionRequest,
+    service: TodayLearningServiceDep,
+) -> TodayLearningSessionResponse:
+    """現在の DB 状態から今日の学習 Session を組み立てる。永続化しない。"""
+    try:
+        session = service.create_session(
+            question_count=req.question_count,
+            max_new_count=req.max_new_count,
+            seed=req.seed,
+        )
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    return TodayLearningSessionResponse(
+        session_id=session.session_id,
+        exercises=list(session.to_public_exercises()),
+        entries=list(session.entries),
+        skipped_entries=list(session.skipped_entries),
+        requested_count=session.requested_count,
+        generated_count=session.generated_count,
+        review_count=session.review_count,
+        new_count=session.new_count,
+        deferred_due_count=session.deferred_due_count,
+        explanation_summary=session.explanation_summary,
+        policy_version=session.policy_version,
+        generated_at=session.generated_at,
+        summary_reason_codes=list(session.summary_reason_codes),
     )
 
 

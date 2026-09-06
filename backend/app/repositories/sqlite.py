@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.review_scheduler import DIRECTION_ORDER, DUE_ITEM_STATUS
 from app.domain.tutor import (
+    SKILL_DIRECTION_BY_EXERCISE_TYPE,
     CandidateStatus,
     LearnerState,
     LearningEvent,
@@ -190,6 +191,36 @@ class SqliteLearningEventRepository:
                 .where(LearningEventRow.learning_item_id == item_id)
                 .order_by(LearningEventRow.occurred_at, LearningEventRow.id)
             ).all()
+            return [row.to_domain() for row in rows]
+
+    def list_by_item_and_direction(
+        self,
+        item_id: str,
+        direction: SkillDirection,
+        *,
+        limit: int | None = None,
+    ) -> list[LearningEvent]:
+        """指定 item × direction の LearningEvent を occurred_at 昇順で返す。"""
+        exercise_types = [
+            exercise_type
+            for exercise_type, mapped in SKILL_DIRECTION_BY_EXERCISE_TYPE.items()
+            if mapped == direction
+        ]
+        with self._sessions() as session:
+            stmt = select(LearningEventRow).where(
+                LearningEventRow.learning_item_id == item_id,
+                LearningEventRow.exercise_type.in_(exercise_types),
+            )
+            if limit is not None:
+                stmt = stmt.order_by(
+                    LearningEventRow.occurred_at.desc(),
+                    LearningEventRow.id.desc(),
+                ).limit(limit)
+                rows = list(session.scalars(stmt).all())
+                rows.reverse()
+                return [row.to_domain() for row in rows]
+            stmt = stmt.order_by(LearningEventRow.occurred_at, LearningEventRow.id)
+            rows = session.scalars(stmt).all()
             return [row.to_domain() for row in rows]
 
 
