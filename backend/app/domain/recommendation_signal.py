@@ -10,7 +10,7 @@
 Source / LearningItem / LearnerState / ReviewSchedule / LearningEvent
   -> extract_recommendation_signal()
   -> RecommendationSignalSnapshot
-  -> ranking policy（後続Issue）
+  -> rank_recommendations()（Issue #176）
 ```
 
 ## 設計原則

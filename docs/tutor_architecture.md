@@ -31,7 +31,8 @@ due queue からの Review Practice Session（Issue #164）、
 「今日の復習」Frontend 導線（Issue #165）、
 LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築（Issue #166）、
 Phase 4 vertical slice と Exit Criteria（Issue #167）、
-および Phase 5 の推薦入力 signal snapshot（Issue #175）
+および Phase 5 の推薦入力 signal snapshot（Issue #175）、
+説明可能な ranking policy と score decomposition（Issue #176）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -75,6 +76,16 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）、
   - missing data は neutral とし、unseen と low mastery を区別する
   - `now` を注入可能にし、wall clock を呼ばない（deterministic）
   - `feature_version` で snapshot スキーマ版を追跡する
+- 説明可能な ranking policy（Phase 5）:
+  `backend/app/domain/recommendation_ranking.py`
+  / `backend/tests/test_recommendation_ranking.py`
+  （Issue #176）
+  - 入力: `RecommendationSignalSnapshot`
+  - 出力: `RecommendationScore` + `RankedRecommendation`
+    （total だけでなく component 寄与と reason code）
+  - ranking 単位: `learning_item_id + skill_direction + activity_kind`
+  - OpenAI / LLM 非依存。`policy_version` で weights / 式を追跡する
+  - 原則は「Phase 5 — 説明可能な ranking policy」を正とする
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -2495,6 +2506,119 @@ due queue の並びは overdue 順のまま維持する。
 Phase 5 へ進む前提は、Phase 0〜4 が `bash scripts/quality-check.sh` で
 継続して通ることである。
 
+推薦の入力特徴量は Issue #175 の `RecommendationSignalSnapshot`、
+順位付けそのものは下記「Phase 5 — 説明可能な ranking policy」を正とする。
+
+## Phase 5 — 説明可能な ranking policy（Issue #176）
+
+`RecommendationSignalSnapshot` を入力に、「今日、何を優先するか」を
+deterministic に順位付けする。Phase 5 初期では LLM や学習済み ML へ
+順位付けを委ねず、各 signal の寄与を説明できる score decomposition を使う。
+
+```text
+RecommendationSignalSnapshot
+  -> weighted / rule-based scoring
+  -> RecommendationScore
+  -> ranked recommendation candidates
+```
+
+実装は `domain.recommendation_ranking.rank_recommendations` と
+`score_recommendation`。HTTP API / Frontend / 新規と復習の最終件数 mix は
+後続 Issue。LearningEvent には policy version を書かない。
+
+### ranking 単位
+
+`learning_item_id + skill_direction + activity_kind`。
+
+| activity_kind | 条件 |
+|---------------|------|
+| `review` | 当該 direction の `review_urgency = due` |
+| `new_practice` | unseen かつ due ではない |
+
+seen かつ future / unscheduled の direction は今日の候補にしない。
+同じ Item でも recognition と production は独立に順位付けする。
+
+### score component
+
+各 component は `[0, weight]` の有限範囲。`total_score` は寄与の合計。
+ゼロ寄与も含め、次のキーをすべて返す。
+
+| component | 入力 | 方針 |
+|-----------|------|------|
+| `overdue` | due / overdue_days | 最大 weight。ちょうど due でも `DUE_BASE` を残す |
+| `low_mastery` | 1 - mastery_score | unseen は 0（苦手と誤認しない） |
+| `lapse_risk` | lapse_count | 飽和あり |
+| `recent_error` | recent_error_rate と last_incorrect_age | 直近誤答を上げる |
+| `direction_imbalance` | production_gap | 弱い方向だけを上げる一般式 |
+| `level_fit` | level_distance | 遠い CEFR を排除しない。unknown は 0.5 raw |
+| `source_recency` | source_recency_days | 補助 signal。Source なしは 0 |
+| `interest` | interest_weight | 補助。未設定（1.0）は 0 寄与 |
+| `importance` | importance_weight | 補助。未設定（1.0）は 0 寄与 |
+
+weights / 飽和定数は `COMPONENT_WEIGHTS` ほかモジュール定数に一元管理する。
+`policy_version`（初期値 `ranking-v1`）で後から A/B 比較できる。
+
+### due review を軽視しない
+
+`overdue` を最大 weight にし、ちょうど due の寄与が
+interest + recency + importance + level_fit の最大合計を超える。
+interest だけで overdue を押しのけない。
+
+### direction imbalance
+
+`production_gap = recognition_mastery - production_mastery`。
+gap > 0 なら production を、gap < 0 なら recognition を上げる。
+片方が unseen で gap が None のときは 0。
+
+### reason code
+
+内部 score をそのまま UI に出さない。寄与が閾値以上の component から
+変換可能な code を、寄与の大きい順で返す。
+
+| reason code | component |
+|-------------|-----------|
+| `OVERDUE_REVIEW` | overdue |
+| `LOW_MASTERY` | low_mastery |
+| `LAPSE_RISK` | lapse_risk |
+| `RECENT_ERROR` | recent_error |
+| `PRODUCTION_WEAKER` / `RECOGNITION_WEAKER` | direction_imbalance |
+| `LEVEL_FIT` | level_fit（既知かつ distance ≤ 1） |
+| `RECENT_SOURCE` | source_recency |
+| `HIGH_INTEREST` | interest |
+| `HIGH_IMPORTANCE` | importance |
+
+### tie-break
+
+`total_score` 降順のあと、同一 score は次で deterministic にする。
+
+1. `review` > `new_practice`
+2. review は `overdue_days` 降順、new_practice は `source_recency_days` 昇順
+   （より新しい Source が先。Source なしは最後）
+3. `learning_item_id` 昇順
+4. `skill_direction`（recognition < production）
+
+### スコープ外
+
+- 新規 / 復習の最終件数 mix
+- HTTP API / Frontend
+- ML ranking / LLM による推薦順位決定
+- Phase 4 due queue の並び替え（overdue 順のまま）
+
+| 観点 | 自動テスト |
+|------|------------|
+| overdue review が neutral new より上位 | `test_overdue_review_ranks_above_neutral_new_item` |
+| recent error が同条件の優先度を上げる | `test_recent_error_raises_priority_of_otherwise_equal_item` |
+| production gap で production が上位 | `test_production_gap_ranks_production_above_recognition` |
+| interest だけで overdue を押しのけない | `test_max_interest_does_not_outrank_overdue` |
+| unknown level を極端に不利にしない | `test_unknown_level_is_not_far_below_perfect_fit` |
+| unseen と low mastery を区別 | `test_unseen_does_not_get_low_mastery_component` |
+| 同一 snapshot で同一 score / 順序 | `test_same_snapshot_same_score` / `test_same_snapshots_same_order` |
+| tie-break が deterministic | `TestTieBreak` |
+| component 合計と total の整合 | `test_components_sum_to_total` |
+| reason code が component と一致 | `test_reason_codes_match_positive_components` |
+| policy_version | `test_policy_version_is_set` |
+| OpenAI / LLM 非依存 | `test_module_does_not_import_llm` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -2533,3 +2657,6 @@ Event / State / Schedule の原子性と schedule 再構築は上記
 「Phase 4 — LearningEvent / LearnerState / ReviewSchedule の原子性と schedule 再構築」を正とする。
 Phase 4 自体の完了条件と Phase 5 への引継ぎは、上記
 「Phase 4 Exit Criteria」と「Phase 5 への引き継ぎ」を正とする。
+推薦入力の signal snapshot は上記リスト先頭の Issue #175、
+説明可能な ranking policy は上記
+「Phase 5 — 説明可能な ranking policy」を正とする。

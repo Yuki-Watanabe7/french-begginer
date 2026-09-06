@@ -47,6 +47,8 @@ backend/app/
 │   ├── review_scheduler.py  # 初期復習間隔の算出
 │   ├── review_queue.py  # direction-awareなdue review queue（Issue #163）
 │   ├── review_session.py  # due queueからReview Practice Sessionを組み立てる（Issue #164）
+│   ├── recommendation_signal.py  # 推薦入力のsignal snapshot（Issue #175）
+│   ├── recommendation_ranking.py  # 説明可能なranking policy（Issue #176）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 │   ├── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
 │   ├── exercise_generation.py  # LearningItemからのdeterministic Exercise生成（vocab/expression/cloze/conjugation adapter）
