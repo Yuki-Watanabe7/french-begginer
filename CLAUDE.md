@@ -13,6 +13,7 @@ uv run ruff check .          # lint
 uv run pytest                # 全テスト
 uv run pytest tests/test_api.py::test_health  # 単一テスト
     uv run python ../scripts/evaluate_tutor_extraction.py  # Tutor抽出の実LLM品質評価（任意。OPENAI_API_KEY が必要）
+    uv run python ../scripts/evaluate_tutor_recommendations.py  # Tutor推薦品質の固定fixture評価（任意。LLM不要）
     uv run python ../scripts/rebuild_review_schedules.py --check  # ReviewSchedule 不整合の検出（任意）
 ```
 
@@ -57,7 +58,7 @@ backend/app/
 │   ├── exercise_evaluation.py  # Tutor Exercise の server-side 採点（Issue #149）
 │   ├── practice_session.py  # active LearningItem から Practice Session を組み立てる（Issue #150）
 │   └── conjugation_adapter.py  # conjugation Item→既存動詞活用への安全な接続
-├── evaluation/    # LLM抽出の固定fixtureと品質チェック（Issue #136）
+├── evaluation/    # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/      # ユースケース（domain を組み合わせる処理）
