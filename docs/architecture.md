@@ -256,8 +256,9 @@ backend/app/
 │   ├── recommendation_signal.py  # 推薦入力の signal snapshot（Issue #175）
 │   ├── recommendation_ranking.py  # 説明可能な ranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
+│   ├── today_session.py        # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   └── conjugation_adapter.py
-├── evaluation/   # LLM抽出の固定fixtureと品質チェック（Issue #136）。HTTPからは使わない
+├── evaluation/   # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）。HTTPからは使わない
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
@@ -270,7 +271,8 @@ backend/app/
     ├── candidate_service.py       # 抽出結果の保存と accept/reject（Issue #134）
     ├── exercise_service.py        # Exercise 取得・採点・LearningEvent 記録（Issue #149）
     ├── practice_session_service.py  # Practice Session 組み立て（Issue #150）
-    └── review_session_service.py  # Review Practice Session 組み立て（Issue #164）
+    ├── review_session_service.py  # Review Practice Session 組み立て（Issue #164）
+    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。
@@ -297,6 +299,9 @@ backend/app/
 > Phase 4 の学習 → 期限到来 → 今日の復習 → 再schedule vertical slice は
 > `backend/tests/test_tutor_phase4_vertical_slice.py` と
 > `frontend/src/test/TutorPhase4Flow.test.tsx` で統合テストする。
+> Phase 5 の Signal → Ranking → 今日の学習 → 履歴更新 vertical slice は
+> `backend/tests/test_tutor_phase5_vertical_slice.py` と
+> `frontend/src/test/TutorPhase5Flow.test.tsx` で統合テストする。
 
 ## 動詞データ管理方針
 

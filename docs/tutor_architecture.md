@@ -36,7 +36,8 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）、
 新規学習と復習の配分を決める Daily Learning Plan policy（Issue #177）、
 「今日の学習」Plan API と Tutor Session 生成（Issue #178）、
 「今日の学習」Tutor UI と推薦理由の可視化（Issue #179）、
-Tutor 推薦品質の固定 fixture・反実仮想テスト（Issue #180）
+Tutor 推薦品質の固定 fixture・反実仮想テスト（Issue #180）、
+Phase 5 vertical slice と Exit Criteria（Issue #181）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -135,6 +136,10 @@ Tutor 推薦品質の固定 fixture・反実仮想テスト（Issue #180）
   - score の絶対値は golden 固定しない。LLM-as-judge を唯一の gate にしない
   - 通常 CI は外部 API なしで通る
   - 原則は「Phase 5 — 推薦品質の固定 fixture と反実仮想テスト」を正とする
+- Phase 5 vertical slice: `backend/tests/test_tutor_phase5_vertical_slice.py`
+  / `frontend/src/test/TutorPhase5Flow.test.tsx`
+  / `frontend/src/test/TutorTodayLearningCard.test.tsx`
+  （Issue #181）
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -2564,6 +2569,8 @@ Phase 5 へ進む前提は、Phase 0〜4 が `bash scripts/quality-check.sh` で
 「Phase 5 — 今日の学習 Plan API と Tutor Session」を正とする。
 推薦品質の検証は下記
 「Phase 5 — 推薦品質の固定 fixture と反実仮想テスト」を正とする。
+Phase 5 自体の完了条件と Phase 6 への引継ぎは、下記
+「Phase 5 Exit Criteria」と「Phase 6 への引き継ぎ」を正とする。
 
 ## Phase 5 — 説明可能な ranking policy（Issue #176）
 
@@ -2993,6 +3000,152 @@ fixture name / ranked IDs / reasons を評価結果へ残す。
 | policy snapshot | `test_policy_snapshot_is_serializable` |
 | OpenAI / LLM 非依存 | `test_quality_modules_do_not_import_llm` |
 
+## Phase 5 vertical slice（Issue #181）
+
+Issue #175〜#180 で追加した signal snapshot・説明可能 ranking・
+Daily Learning Plan・今日の学習 API/UI・推薦品質 fixture を、
+ユーザー操作として一本につながった vertical slice として検証する。
+
+Phase 5 のゴールは、単に due を出すだけでなく、
+**学習履歴・弱点・Source・レベル等を使って今日の限られた学習枠を構成し、
+その理由をユーザーが理解できること**である。
+
+必須フロー:
+
+```text
+1. 複数 Source / LearningItem を用意
+2. recognition / production で異なる学習履歴を作る
+3. 一部 Item を due / overdue にする
+4. 一部 Item に recent incorrect を作る
+5. 新規 Item を複数用意する
+6. RecommendationSignalSnapshot を生成
+7. ranking score / reason code を生成
+8. Daily Learning Plan を生成
+9. due review を優先し、残枠に new を上限内で入れる
+10. Tutor UI に review/new 件数と推薦理由を表示
+11. Today Session を開始
+12. review/new 双方へ回答
+13. LearningEvent / LearnerState / ReviewSchedule を更新
+14. Session 完了後に Plan を再取得
+15. 消化済み due・新規導入済み Item を反映した次 Plan になる
+16. DB 再 open 後も同じ履歴から同じ推薦 signal を再構成できる
+```
+
+推奨 fixture は 5 Item で役割を分ける。
+
+| Item | 役割 | 期待 |
+|------|------|------|
+| A | expression。production が overdue。medium mastery | 最優先の review |
+| B | recognition 高 / production 低 + 直近誤答。due 近辺 | `PRODUCTION_WEAKER` / `RECENT_ERROR` |
+| C | unseen。learner level に近い最近の Source | due 消化後の new 上位 |
+| D | 古い / 低 interest の new | C より下位。due は追い越さない |
+| E | level unknown | unknown で自動排除されない |
+
+clock は注入し、実時間待ちは使わない。公開 Plan に内部 score は出さない。
+reason 未設定時は説明を捏造しない。Today Session 開始時は DB から
+Plan を再計算し、長時間 plan を予約保持しない。
+
+### 品質境界
+
+Phase 5 完了時点で以下が明確であること。
+
+#### deterministic layer が保証すること
+
+- urgency / mastery / lapse / recent error / direction imbalance /
+  level fit / Source recency / interest を signal として表現できる
+- missing data を根拠なく苦手・低関心と推測しない
+- signal から deterministic な ranking と score decomposition を生成できる
+- `feature_version` / ranking `policy_version` / plan `policy_version` を追跡できる
+- due review が新規項目に埋もれない
+- 新規学習数に上限を設け、capacity 不足の due を deferred として明示できる
+- review entry は Phase 4 の due direction を維持する
+- new entry の初期 direction は recognition 優先（出せないときだけ production）
+- 回答後に LearningEvent / LearnerState / ReviewSchedule が一貫して更新される
+- Session 後の再 plan が最新学習状態を反映する
+- 通常 ranking は LLM / 外部 API に依存しない
+
+#### Phase 5 ではまだ行わないこと
+
+- URL / PDF / YouTube / 字幕 / 音声の Source ingestion
+- ML ranking / reinforcement learning / LLM による順位決定
+- FSRS / SM-2 への移行
+- notification / reminder
+- 自由会話 Tutor
+- Phase 3 通常 Practice と Phase 4「今日の復習」の置換
+
+| 観点 | 自動テスト |
+|------|------------|
+| 履歴 → signal → ranking → Plan → Session → 再 plan → DB 再 open | `test_phase5_signal_to_today_to_replan_vertical_slice` |
+| A overdue が最優先 / B に production 理由 | 同上 |
+| C が D より上位 / E を排除しない | 同上 |
+| reason と signal の整合 / deterministic | `test_phase5_ranking_explanations_match_signals_and_stay_deterministic` |
+| due <= capacity と due > capacity の件数 | `test_phase5_new_review_mix_under_and_over_capacity` |
+| direction 維持 / recognition 誤答で production を捏造しない | `test_phase5_direction_policy_keeps_due_direction_and_does_not_cross_errors` |
+| stale / inactive / duplicate / schedule 失敗の rollback | `test_phase5_stale_plan_transaction_and_duplicate` |
+| 既存 quiz / TTS / Practice / 今日の復習の回帰 | `test_phase5_existing_quiz_practice_review_and_tts_contracts_are_unchanged` |
+| today API は `now` を受け取らず LLM ranking endpoint を持たない | `test_phase5_today_endpoints_exist_without_now_or_llm_ranking` |
+| ranking モジュールの LLM 非依存 | `test_phase5_ranking_modules_are_llm_independent` |
+| Frontend loading/error/empty / 件数 / 理由 / 開始 | `TutorTodayLearningCard.test.tsx` |
+| 推奨 fixture の役割表示 / 完了後 refresh / 今日の復習維持 | `TutorPhase5Flow.test.tsx` |
+| review/new badge / 既存 renderer | `TutorPhase5Flow.test.tsx` / `PracticeSessionFlow.test.tsx` |
+| スマホ相当幅 | `TutorPhase5Flow.test.tsx` / `TutorTodayLearningCard.test.tsx` |
+
+## Phase 5 Exit Criteria（Issue #107）との対応
+
+Issue #107 の Phase 5 は、学習履歴・弱点・Source・レベルを使って
+今日の学習枠を自動編成し、その理由をユーザーが理解できることである。
+
+| Exit Criteria | 満たした実装 | 自動テスト |
+|---------------|--------------|------------|
+| urgency / mastery / lapse / recent error / direction imbalance / level fit / Source recency / interest を推薦 signal として表現できる | `extract_recommendation_signal` | `test_phase5_signal_to_today_to_replan_vertical_slice` / `test_recommendation_signal.py` |
+| missing data を根拠なく苦手・低関心等と推測しない | unseen ≠ low mastery、unknown level は中立 | 同上 / `test_phase5_ranking_explanations_match_signals_and_stay_deterministic` |
+| signal から deterministic な ranking を生成できる | `rank_recommendations` | 同上 |
+| ranking の各主要寄与を説明できる | `RecommendationScore.components` + reason code | 同上 |
+| policy / feature version を追跡できる | `signal-v1` / `ranking-v1` / `plan-v1` | 同上 / `test_tutor_recommendation_quality.py` |
+| due review が新規項目に埋もれない | overdue 最大 weight | 同上 / fixture A |
+| 新規学習数に上限を設けられる | `max_new_count` | `test_phase5_new_review_mix_under_and_over_capacity` |
+| capacity 不足の due 件数を deferred として明示できる | `deferred_due_count` | 同上 |
+| recognition / production imbalance を方向別優先度へ反映できる | `production_gap` | `test_phase5_direction_policy_keeps_due_direction_and_does_not_cross_errors` |
+| 「今日の学習」Plan API が review/new 混在 Plan を返せる | `GET /api/tutor/today` | `test_phase5_signal_to_today_to_replan_vertical_slice` |
+| 各推薦にユーザー向けの短い理由を提示できる | `REASON_EXPLANATIONS` / `visibleReasonLabels` | 同上 / `TutorPhase5Flow.test.tsx` |
+| 理由の根拠がない場合に説明を捏造しない | empty reason は中立文のみ | `test_phase5_ranking_explanations_match_signals_and_stay_deterministic` / `TutorTodayLearningCard.test.tsx` |
+| Today Session で review/new 双方を実際に学習できる | `POST /api/tutor/today/sessions` | `test_phase5_signal_to_today_to_replan_vertical_slice` / `TutorPhase5Flow.test.tsx` |
+| review entry は due direction を維持する | Phase 4 の Exercise 優先順 | `test_phase5_direction_policy_keeps_due_direction_and_does_not_cross_errors` |
+| new entry は回答後に LearningEvent / State / Schedule へ接続される | 既存 answer API | `test_phase5_signal_to_today_to_replan_vertical_slice` |
+| Session 後の再 plan が最新学習状態を反映する | Session 開始時に Plan 再計算 | 同上 / `TutorPhase5Flow.test.tsx` |
+| ranking 品質を固定 fixture / counterfactual で回帰保護できる | Issue #180 | `test_tutor_recommendation_quality.py` |
+| LLM / external API を通常 ranking の必須依存にしていない | domain / today service に LLM import なし | `test_phase5_ranking_modules_are_llm_independent` |
+| Phase 3 通常 Practice / Phase 4 今日の復習 / Source / Candidate / quiz / TTS に回帰がない | 既存 API は独立 | `test_phase5_existing_quiz_practice_review_and_tts_contracts_are_unchanged` / `TutorPhase5Flow.test.tsx` |
+| スマホ相当幅で主要操作が実用的である | 全幅ボタン、`minHeight` 48 | `TutorPhase5Flow.test.tsx` / `TutorTodayLearningCard.test.tsx` |
+| `bash scripts/quality-check.sh` が通る | ruff / pytest / lint / frontend test / build | 作業完了時に実行 |
+| Phase 5 境界と Phase 6 への引継ぎを記載する | 本セクション | 本ドキュメント |
+
+スマホ実機の使用感は自動 style test だけでは完全代替しない。
+実機未確認の場合は PR に残す。
+
+## Phase 6 への引き継ぎ
+
+Phase 5 で、手動貼り付け Source から得た LearningItem について、
+Tutor が「何を今日学ぶか」を自動編成できるようになる。
+
+Phase 6 ではこの下流 pipeline を変更せず、SourceDocument の入口だけを増やす。
+
+候補:
+
+- Web URL
+- PDF
+- YouTube transcript
+- 字幕
+- 音声文字起こし
+- 会話ログ
+
+すべて `SourceDocument -> Candidate -> LearningItem -> Tutor ranking` へ流す。
+Phase 5 の ranking / Daily Learning Plan / 今日の学習 Session は、
+新しい Source 種別が増えても同じ契約で動くことを前提にする。
+
+Phase 6 へ進む前提は、Phase 0〜5 が `bash scripts/quality-check.sh` で
+継続して通ることである。
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -3042,3 +3195,5 @@ Phase 4 自体の完了条件と Phase 5 への引継ぎは、上記
 「Phase 5 — 「今日の学習」Tutor UI と推薦理由の可視化」を正とする。
 推薦品質の検証は上記
 「Phase 5 — 推薦品質の固定 fixture と反実仮想テスト」を正とする。
+Phase 5 自体の完了条件と Phase 6 への引継ぎは、上記
+「Phase 5 Exit Criteria」と「Phase 6 への引き継ぎ」を正とする。
