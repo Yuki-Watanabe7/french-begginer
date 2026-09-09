@@ -338,6 +338,121 @@ describe('Tutor Phase 5 today learning flow', () => {
     expect(screen.queryByText('今日の学習を終えました')).not.toBeInTheDocument()
   })
 
+  it('推奨fixtureの overdue / production弱点 / 新規が Tutor 上で区別できる', async () => {
+    const entries = [
+      todayPlanEntryFixture({
+        learning_item_id: 'item-expr',
+        canonical_form: 'se rendre compte de',
+        meaning_ja: '〜に気づく',
+        item_type: 'expression',
+        activity_kind: 'review',
+        skill_direction: 'production',
+        selected_exercise_type: 'ja_to_fr',
+        reason_codes: ['OVERDUE_REVIEW'],
+        explanation: '復習時期を迎えています。',
+      }),
+      todayPlanEntryFixture({
+        learning_item_id: 'item-vocab',
+        canonical_form: 'stratégie',
+        meaning_ja: '戦略',
+        activity_kind: 'review',
+        skill_direction: 'production',
+        selected_exercise_type: 'ja_to_fr',
+        reason_codes: ['PRODUCTION_WEAKER', 'RECENT_ERROR'],
+        explanation:
+          '意味は分かっていますが、自分で言う練習が不足しています。最近この項目で間違えています。',
+      }),
+      todayPlanEntryFixture({
+        learning_item_id: 'item-new-c',
+        canonical_form: 'bonjour',
+        meaning_ja: 'こんにちは',
+        activity_kind: 'new_practice',
+        skill_direction: 'recognition',
+        selected_exercise_type: 'meaning_recognition',
+        reason_codes: ['RECENT_SOURCE'],
+        explanation: '最近追加した教材に出てきた表現です。',
+      }),
+      todayPlanEntryFixture({
+        learning_item_id: 'item-new-d',
+        canonical_form: 'ancien',
+        meaning_ja: '古い',
+        activity_kind: 'new_practice',
+        reason_codes: [],
+        explanation: '今日の学習候補です。',
+      }),
+      todayPlanEntryFixture({
+        learning_item_id: 'item-new-e',
+        canonical_form: 'mystère',
+        meaning_ja: '謎',
+        activity_kind: 'new_practice',
+        reason_codes: [],
+        explanation: '今日の学習候補です。',
+      }),
+    ]
+    mockPlan
+      .mockResolvedValueOnce(
+        todayPlanFixture({
+          entries,
+          deferred_due_count: 0,
+          summary_reason_codes: ['OVERDUE_REVIEW', 'PRODUCTION_WEAKER', 'RECENT_SOURCE'],
+        }),
+      )
+      .mockResolvedValue(
+        todayPlanFixture({
+          review_count: 1,
+          new_count: 2,
+        }),
+      )
+    mockToday.mockResolvedValue(
+      todaySessionFixture(
+        [TEXT, CHOICE],
+        [entries[0], entries[2]],
+      ),
+    )
+    mockSubmit
+      .mockResolvedValueOnce(okFeedback('se rendre compte de', 'se rendre compte de'))
+      .mockResolvedValueOnce(okFeedback('本', '本'))
+
+    render(<App />)
+    await userEvent.click(screen.getByText('自分の教材'))
+
+    await screen.findByRole('heading', { name: '今日の学習' })
+    expect(screen.getByTestId('today-total-count')).toHaveTextContent('5')
+    expect(screen.getByTestId('today-mix')).toHaveTextContent('復習 2 / 新規 3')
+    expect(screen.getByText('se rendre compte de')).toBeInTheDocument()
+    expect(screen.getByText('stratégie')).toBeInTheDocument()
+    expect(screen.getByText('bonjour')).toBeInTheDocument()
+    expect(screen.queryByText('LEVEL_FIT')).not.toBeInTheDocument()
+    expect(screen.queryByText('HIGH_INTEREST')).not.toBeInTheDocument()
+    expect(screen.getAllByText('復習時期を迎えています').length).toBeGreaterThan(0)
+    expect(
+      screen.getByText('意味は分かっていますが、自分で言う練習を優先します'),
+    ).toBeInTheDocument()
+    const start = screen.getByRole('button', { name: '学習を始める' })
+    expect(start).toHaveStyle({ width: '100%', minHeight: '48px' })
+    await userEvent.click(start)
+
+    await screen.findByPlaceholderText('回答を入力...')
+    expect(screen.getByText('復習')).toBeInTheDocument()
+    await userEvent.type(screen.getByPlaceholderText('回答を入力...'), 'se rendre compte de', {
+      delay: null,
+    })
+    await userEvent.click(screen.getByRole('button', { name: '判定する' }))
+    await userEvent.click(await screen.findByRole('button', { name: '次の問題 →' }))
+
+    await screen.findByText('意味')
+    expect(screen.getByText('新しい項目')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '本' }))
+    await userEvent.click(await screen.findByRole('button', { name: '結果を見る →' }))
+
+    await screen.findByText('今日の学習を終えました')
+    expect(screen.getByTestId('today-result-mix')).toHaveTextContent('復習 1件 / 新規 1件')
+    await userEvent.click(screen.getByRole('button', { name: '教材一覧へ戻る' }))
+    await screen.findByRole('heading', { name: '今日の学習' })
+    expect(screen.getByTestId('today-mix')).toHaveTextContent('復習 1 / 新規 2')
+    expect(screen.getByRole('heading', { name: '今日の復習' })).toBeInTheDocument()
+  })
+
   it('完了後の plan/due 再取得失敗でも学習結果は残る', async () => {
     mockPlan
       .mockResolvedValueOnce(todayPlanFixture({ review_count: 1 }))
