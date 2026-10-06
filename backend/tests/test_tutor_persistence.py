@@ -507,6 +507,105 @@ def test_schema_upgrades_from_v2_rebuilds_directional_schedules_from_events(
     assert rec.due_at != datetime(2099, 1, 1, tzinfo=UTC)
     assert store.review_schedules.list_for_item(orphan.id) == []
     store.engine.dispose()
+
+
+def test_schema_upgrades_from_v3_preserves_manual_text_and_adds_ingestion_columns(
+    tmp_path: Path,
+):
+    """既存 content は再正規化せず、ingestion 列だけを足して DB を開き直す。"""
+    db_path = tmp_path / "v3.db"
+    url = f"sqlite:///{db_path}"
+    content = "cafe\u0301"
+    created = datetime(2026, 2, 1, 8, 0, tzinfo=UTC)
+    engine = create_db_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE schema_migrations (
+                    version INTEGER NOT NULL PRIMARY KEY,
+                    applied_at VARCHAR NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE source_documents (
+                    id VARCHAR NOT NULL PRIMARY KEY,
+                    source_type VARCHAR NOT NULL,
+                    title VARCHAR NOT NULL,
+                    content TEXT NOT NULL,
+                    language VARCHAR NOT NULL,
+                    created_at VARCHAR NOT NULL,
+                    metadata_json JSON NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text("INSERT INTO schema_migrations (version, applied_at) VALUES (3, :at)"),
+            {"at": dump_utc(utcnow())},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO source_documents "
+                "(id, source_type, title, content, language, created_at, "
+                "metadata_json) "
+                "VALUES (:id, 'manual_text', '記事', :content, 'fr', :at, '{}')"
+            ),
+            {"id": "src-old", "content": content, "at": dump_utc(created)},
+        )
+    assert get_schema_version(engine) == 3
+    engine.dispose()
+
+    store = TutorSqliteStore(url)
+    assert get_schema_version(store.engine) == CURRENT_SCHEMA_VERSION
+    with store.engine.connect() as conn:
+        columns = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(source_documents)"))
+        }
+    assert {
+        "content_hash",
+        "ingestion_version",
+        "canonical_locator",
+        "provenance_json",
+        "segments_json",
+    } <= columns
+    index_names = {
+        index["name"] for index in inspect(store.engine).get_indexes("source_documents")
+    }
+    assert "ix_source_documents_ingestion_identity" in index_names
+
+    loaded = store.source_documents.get("src-old")
+    assert loaded == SourceDocument(
+        id="src-old",
+        title="記事",
+        content=content,
+        language="fr",
+        created_at=created,
+        metadata={},
+    )
+    assert loaded is not None
+    assert loaded.content == content
+    assert loaded.content_hash is None
+    assert loaded.provenance is None
+    assert loaded.segments == []
+
+    added = SourceDocument(
+        id="src-new",
+        title="字幕",
+        content="Bonjour",
+        source_type="youtube_transcript",
+    )
+    store.source_documents.create(added)
+    assert store.source_documents.get(added.id) == added
+    assert store.source_documents.get("src-old").content == content
+    store.engine.dispose()
+
+
+def test_learning_item_duplicate_id_is_rejected(store: TutorSqliteStore):
     item = _item()
     store.learning_items.create(item)
     with pytest.raises(DuplicateEntityError):

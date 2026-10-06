@@ -80,8 +80,15 @@ export interface NounFilter {
   category?: NounCategory
 }
 
-/** Phase 1 は手入力テキストのみ。将来 URL/PDF 等が追加される。 */
-export type SourceType = 'manual_text'
+/** 作成 API は手入力のまま。種別は Phase 6 の ingestion 契約に合わせる。 */
+export type SourceType =
+  | 'manual_text'
+  | 'web_url'
+  | 'pdf'
+  | 'youtube_transcript'
+  | 'subtitle'
+  | 'audio_transcript'
+  | 'conversation_log'
 
 export interface SourceDocument {
   id: string

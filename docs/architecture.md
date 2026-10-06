@@ -62,6 +62,8 @@ SQLite (初期) → PostgreSQL (将来)
 
 レスポンスは全文ではなく `SourceSummary`（`content_preview` は先頭120文字）。0件でも 200 + `[]`。
 
+`POST /api/tutor/sources` は手入力のまま `content` を正規化せず保存する。`GET /api/tutor/sources/{source_id}` の `SourceDocument` は、Phase 6 の ingestion で作った Source について `content_hash` / `ingestion_version` / `provenance` / `segments` を返す。手入力の既存行ではこれらは空である。URL / PDF 等の取得エンドポイントはまだ無い。
+
 ### GET /api/tutor/items クエリパラメータ
 
 | パラメータ | 型 | デフォルト | 説明 |

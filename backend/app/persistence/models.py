@@ -44,6 +44,15 @@ class SchemaMigrationRow(Base):
 
 class SourceDocumentRow(Base):
     __tablename__ = "source_documents"
+    __table_args__ = (
+        Index(
+            "ix_source_documents_ingestion_identity",
+            "canonical_locator",
+            "source_type",
+            "content_hash",
+            "ingestion_version",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     source_type: Mapped[str] = mapped_column(String, nullable=False)
@@ -54,9 +63,15 @@ class SourceDocumentRow(Base):
     extra_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata_json", JSON, nullable=False
     )
+    content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    ingestion_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    canonical_locator: Mapped[str | None] = mapped_column(String, nullable=True)
+    provenance_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    segments_json: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
 
     @classmethod
     def from_domain(cls, document: SourceDocument) -> SourceDocumentRow:
+        provenance = document.provenance
         return cls(
             id=document.id,
             source_type=document.source_type,
@@ -65,6 +80,17 @@ class SourceDocumentRow(Base):
             language=document.language,
             created_at=dump_utc(document.created_at),
             extra_metadata=document.metadata,
+            content_hash=document.content_hash,
+            ingestion_version=document.ingestion_version,
+            canonical_locator=(
+                None if provenance is None else provenance.canonical_locator
+            ),
+            provenance_json=(
+                None if provenance is None else provenance.model_dump(mode="json")
+            ),
+            segments_json=[
+                segment.model_dump(mode="json") for segment in document.segments
+            ],
         )
 
     def to_domain(self) -> SourceDocument:
@@ -77,6 +103,10 @@ class SourceDocumentRow(Base):
                 "language": self.language,
                 "created_at": load_utc(self.created_at),
                 "metadata": self.extra_metadata,
+                "content_hash": self.content_hash,
+                "ingestion_version": self.ingestion_version,
+                "provenance": self.provenance_json,
+                "segments": self.segments_json or [],
             }
         )
 

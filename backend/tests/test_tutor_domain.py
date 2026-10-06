@@ -81,6 +81,14 @@ def test_source_document_rejects_unknown_source_type():
         SourceDocument(title="t", content="c", source_type="youtube")
 
 
+def test_source_document_accepts_phase6_source_types():
+    from app.domain.source_ingestion import SOURCE_TYPES
+
+    for source_type in SOURCE_TYPES:
+        document = SourceDocument(title="t", content="c", source_type=source_type)
+        assert document.source_type == source_type
+
+
 def test_source_document_rejects_naive_created_at():
     with pytest.raises(ValidationError):
         SourceDocument(title="t", content="c", created_at=datetime(2026, 1, 1, 12, 0))

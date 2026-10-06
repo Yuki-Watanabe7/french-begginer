@@ -25,7 +25,7 @@ from app.persistence.models import (
     SchemaMigrationRow,
 )
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 UpgradeFn = Callable[[Connection], None]
 
@@ -151,9 +151,43 @@ def _learning_event_from_db_row(row: dict[str, object]) -> LearningEvent:
         return LearningEvent.model_construct(**payload)
 
 
+_INGESTION_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("content_hash", "VARCHAR"),
+    ("ingestion_version", "VARCHAR"),
+    ("canonical_locator", "VARCHAR"),
+    ("provenance_json", "JSON"),
+    ("segments_json", "JSON"),
+)
+
+
+def _upgrade_to_4(conn: Connection) -> None:
+    """Phase 6: ingestion の hash / provenance / segment 列を足す。
+
+    既存行の content は書き換えない。新列は NULL のままにする。
+    source_type は元から文字列で、CHECK 制約は足さない。
+    """
+
+    existing = {
+        row[1] for row in conn.execute(text("PRAGMA table_info(source_documents)"))
+    }
+    for name, column_type in _INGESTION_COLUMNS:
+        if name not in existing:
+            conn.execute(
+                text(f"ALTER TABLE source_documents ADD COLUMN {name} {column_type}")
+            )
+    conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_source_documents_ingestion_identity "
+            "ON source_documents ("
+            "canonical_locator, source_type, content_hash, ingestion_version)"
+        )
+    )
+
+
 # (target_version, upgrade) 。初期スキーマは create_all で作るため、
-# 新規DBは version 3 として作成される。既存の version 1/2 DB は upgrade する。
+# 新規DBは version 4 として作成される。既存の version 1/2/3 DB は upgrade する。
 UPGRADE_STEPS: list[tuple[int, UpgradeFn]] = [
     (2, _upgrade_to_2),
     (3, _upgrade_to_3),
+    (4, _upgrade_to_4),
 ]

@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from app.api.deps import get_tutor_store
 from app.api.tutor import SOURCE_CONTENT_PREVIEW_MAX_CHARS
 from app.domain.noun import NOUNS
+from app.domain.source_ingestion import SOURCE_TYPES
 from app.domain.tutor import SourceDocument
 from app.main import app
 from app.repositories.sqlite import TutorSqliteStore
@@ -167,6 +168,17 @@ def test_phase1_validation_errors(client: TestClient):
     assert client.get("/api/tutor/sources?limit=101").status_code == 422
 
 
+def test_phase1_manual_create_does_not_normalize_content(client: TestClient):
+    raw = "cafe\u0301\r\n\r\n\r\nsuite"
+    created = _post_source(client, content=raw, metadata={})
+    assert created["content"] == raw
+    assert created["source_type"] == "manual_text"
+    assert created["content_hash"] is None
+    assert created["ingestion_version"] is None
+    assert created["provenance"] is None
+    assert created["segments"] == []
+
+
 def test_phase1_list_preview_is_truncated(client: TestClient):
     content = "é" * (SOURCE_CONTENT_PREVIEW_MAX_CHARS + 20)
     created = _post_source(client, content=content, metadata={})
@@ -226,9 +238,7 @@ def test_phase1_has_no_url_pdf_youtube_ingestion_endpoints():
     source_type = spec["components"]["schemas"]["SourceDocument"]["properties"][
         "source_type"
     ]
-    assert source_type.get("const") == "manual_text" or source_type.get("enum") == [
-        "manual_text"
-    ]
+    assert _openapi_enum(spec, source_type) == list(SOURCE_TYPES)
 
 
 def test_phase1_existing_quiz_and_tts_contracts_are_unchanged(
@@ -276,3 +286,24 @@ def test_phase1_existing_quiz_and_tts_contracts_are_unchanged(
     tts = client.get("/api/tts/speak?text=bonjour")
     assert tts.status_code == 503
     assert "OPENAI_API_KEY" in tts.json()["detail"]
+
+
+def _openapi_enum(spec: dict, node: dict) -> list[str] | str | None:
+    if "$ref" in node:
+        name = node["$ref"].rsplit("/", 1)[-1]
+        node = spec["components"]["schemas"][name]
+    if "allOf" in node:
+        for item in node["allOf"]:
+            found = _openapi_enum(spec, item)
+            if found is not None:
+                return found
+    if "anyOf" in node:
+        for item in node["anyOf"]:
+            found = _openapi_enum(spec, item)
+            if found is not None:
+                return found
+    if "enum" in node:
+        return node["enum"]
+    if "const" in node:
+        return node["const"]
+    return None
