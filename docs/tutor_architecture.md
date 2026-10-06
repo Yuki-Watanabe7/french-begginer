@@ -371,7 +371,11 @@ UI層の責務とし、domain層はUTCで一貫させる。
 
 | モデル | 不変条件 |
 |--------|----------|
-| `SourceDocument` | `title` / `content` は空文字不可 |
+| `SourceDocument` | `title` / `content` は空文字不可。保存後の `content` は再正規化しない |
+| `SourceDocument` | `content_hash` があるとき、その値は保存済み `content` の `sha256:` digest と一致する |
+| `SourceDocument` | `segments` は `content` 上の半開区間で、互いに重ならない |
+| `SourceSegment` | `normalized_end > normalized_start`。timecode は start / end が揃うときだけ |
+| `SourceIngestionResult` | `normalized_content` は共有正規化の不動点。raw HTML / PDF は content にしない |
 | `EvidenceSpan` | `start >= 0` かつ `end > start` |
 | `SourceRef` | `confidence` は 0.0〜1.0 |
 | `LearningItem` | `canonical_form` / `meaning_ja` は空文字不可 |
@@ -521,11 +525,15 @@ Phase 0 では schedule を別 TX としており、失敗時に event/state だ
 2. version < 現行: `UPGRADE_STEPS` の upgrade 関数を順に適用する
 3. version > 現行: `SchemaVersionError`（新しいDBを古いコードで開いた）
 
-現行 version は `3`。version 2 の upgrade は `learning_item_candidates`
+現行 version は `4`。version 2 の upgrade は `learning_item_candidates`
 テーブルを追加する（Issue #131）。version 3 の upgrade は
 `review_schedules` を `(learning_item_id, skill_direction)` の複合主キーへ再構築し、
 旧 schedule 行はコピーせず LearningEvent を direction 別に replay する
-（Issue #162）。新規DBは `create_all` で version 3 を直接作る。
+（Issue #162）。version 4 の upgrade は `source_documents` に
+`content_hash` / `ingestion_version` / `canonical_locator` /
+`provenance_json` / `segments_json` を追加する（Issue #189）。
+既存行の `content` は書き換えない。`source_type` は文字列のままで、
+CHECK 制約は足さない。新規DBは `create_all` で version 4 を直接作る。
 
 ローカルで生成される `*.db` は git 管理対象外（`.gitignore`）。
 
@@ -847,8 +855,10 @@ Phase 1 ではこの文から LearningItem を抽出しない。
 - Source 内容を自動要約しない
 - Source の編集・削除を提供しない
 
-`SourceType` は `manual_text` のみ。`CreateSourceRequest` は `source_type` を
-受け取らず、作成時は常に手入力テキストになる。
+Phase 1 の `CreateSourceRequest` は `source_type` を受け取らず、作成時は常に
+手入力テキストになる。投稿された `content` は正規化せずそのまま保存する。
+型としての `SourceType` は Phase 6（Issue #189）で拡張した。作成 API は
+URL / PDF 等を受け取らない。
 
 ### Phase 2 への引き継ぎ
 
@@ -3129,6 +3139,7 @@ Phase 5 で、手動貼り付け Source から得た LearningItem について�
 Tutor が「何を今日学ぶか」を自動編成できるようになる。
 
 Phase 6 ではこの下流 pipeline を変更せず、SourceDocument の入口だけを増やす。
+共通契約は下記「Phase 6 — Source ingestion 共通契約」を正とする。
 
 候補:
 
@@ -3146,6 +3157,117 @@ Phase 5 の ranking / Daily Learning Plan / 今日の学習 Session は、
 Phase 6 へ進む前提は、Phase 0〜5 が `bash scripts/quality-check.sh` で
 継続して通ることである。
 
+## Phase 6 — Source ingestion 共通契約（Issue #189）
+
+個別の URL / PDF / transcript adapter を書く前に、すべての外部入力を
+同じ `SourceDocument` へ正規化する境界を固定する。下流の
+Candidate 抽出、evidence span、ranking、今日の学習 Session は変えない。
+
+```text
+external input
+  -> SourceIngestionRequest
+  -> SourceIngestionAdapter（形式ごとの実装は後続）
+  -> normalize_source_text + SourceSegment
+  -> SourceIngestionResult
+  -> SourceDocument.content（plain text が source of truth）
+  -> 既存 Candidate extraction 以降
+```
+
+実装は `backend/app/domain/source_ingestion.py`。
+保存時の再利用 / 履歴追加は `SourceIngestionService`。
+HTTP の取得エンドポイントは追加しない。`POST /api/tutor/sources` は
+これまでどおり、投稿された本文を正規化せず保存する。
+
+### SourceType
+
+`manual_text` / `web_url` / `pdf` / `youtube_transcript` / `subtitle` /
+`audio_transcript` / `conversation_log`。DB の `source_type` は文字列のままで、
+CHECK 制約は無い。未知の値（`youtube` など）は domain が拒否する。
+
+### 正規化 `source-ingest-v1`
+
+`normalize_source_text` は adapter 横断で一度だけ適用する。
+
+| 規則 | 内容 |
+|------|------|
+| Unicode | NFC |
+| BOM | 先頭の U+FEFF を除去 |
+| 改行 | CRLF / CR / U+2028 / U+2029 / U+0085 を LF にする |
+| 行末 | 空白とタブを除去 |
+| 段落 | 3 連続以上の LF は LF 2 つに畳む |
+| 前後 | 全文の前後空白を除去 |
+
+同じ入力と同じ `ingestion_version` から `normalized_content` と
+`content_hash`（`sha256:` + UTF-8 SHA-256）は deterministic に決まる。
+正規化は不動点である。`original_content_hash` は正規化前の plain text を
+同じアルゴリズムで記録する。
+
+EvidenceSpan の座標は、保存済み `SourceDocument.content` の Unicode
+コードポイントである。抽出の検証前後で本文を NFC しない。
+ingestion で作った Source の `content` はすでに正規化済みなので、
+span はその文字列上のオフセットと一致する。schema upgrade は既存行の
+`content` を書き換えない。
+
+`SourceSegment.normalized_start` / `normalized_end` は EvidenceSpan と
+同じ半開区間である。page / `start_seconds` / `end_seconds` / speaker /
+`external_locator` へ、正規化後の span から戻れる。区間は content 内で
+重ならない。隙間（segment 同士の段落区切り）は span の帰属先にしない。
+
+HTML 文書と PDF の raw payload（`%PDF`）は `content` にしない。
+adapter は本文抽出のあとで `assemble_ingestion_result` を通す。
+
+### provenance
+
+`SourceProvenance` は canonical locator、filename、external id、
+`fetched_at` / `ingested_at`、adapter version、provider / model version、
+正規化前 hash、MIME type、`ingestion_version` を持つ。
+segment の page / time / speaker は `SourceSegment` 側に置く。
+
+### 再投入
+
+locator の前後空白だけを除き、URL の正規化と SSRF 対策は後続 Issue に残す。
+
+| 状態 | action | 既存行 |
+|------|--------|--------|
+| locator が無い | `create` | 触らない。同じ貼り付けでも別 Source |
+| 同じ source_type / locator / content_hash / ingestion_version | `reuse` | 既存を返す。title も更新しない |
+| locator は同じで本文または ingestion_version が違う | `append_version` | 新しい Source を追加し `metadata.prior_source_id` で先行を指す。content は上書きしない |
+
+### 失敗分類と上限
+
+| kind | 再試行 | 例 |
+|------|--------|----|
+| `validation` | しない | 必須欠落、空本文、認証情報つき locator、HTML/PDF raw |
+| `unsupported_media` | しない | MIME / 拡張子が source_type と合わない |
+| `input_too_large` | しない | 本文が 200_000 コードポイントを超える |
+| `timeout` | する | `provider_timeout` |
+| `provider` | する | `provider_failure` |
+| `not_implemented` | しない | URL / PDF 等の adapter がまだ無い |
+
+metadata のキーに secret（`api_key` / `token` / `password` など）や
+raw payload 用のキーは保存しない。本文中の「token」という語は拒否しない。
+locator の userinfo（`https://user:pass@host/`）は保存しない。
+
+### 依存境界
+
+`app.domain.source_ingestion` は標準ライブラリと Pydantic だけに依存する。
+HTTP client、PDF parser、OpenAI SDK は domain に置かない。
+`SourceIngestionAdapter` の実装がそれらのライブラリを持ってよい。
+Issue #189 では manual text の組み立てと、adapter を差し込むプロトコルまで。
+
+### テスト
+
+| 確認 | 自動テスト |
+|------|------------|
+| SourceType を型で表現 | `test_source_types_cover_phase6_contract` / `test_source_document_accepts_phase6_source_types` |
+| segment の範囲検証と page / time / speaker への復元 | `test_normalized_span_maps_back_to_page_time_and_speaker` / `test_invalid_segment_ranges_are_rejected` |
+| 同じ入力と version で deterministic、hash が安定 | `test_manual_text_ingestion_is_deterministic` / `test_content_digest_is_stable_sha256` |
+| 不正 segment を拒否 | `test_invalid_segment_ranges_are_rejected` |
+| schema 4 へ上げても既存 manual_text を再正規化しない | `test_schema_upgrades_from_v3_preserves_manual_text_and_adds_ingestion_columns` |
+| 手入力 API の回帰 | `test_phase1_manual_create_does_not_normalize_content` / `test_phase1_text_ingestion_vertical_slice` |
+| domain が HTTP / PDF / OpenAI に依存しない | `test_ingestion_modules_do_not_import_adapter_libraries` |
+| 再投入は上書きしない | `test_commit_reuses_same_locator_and_appends_when_content_changes` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -3161,7 +3283,7 @@ SourceDocument として保存・参照できる最小 UI/API である。
 | empty/loading/error/404 の主要状態が扱われている | list / detail status | `TutorPhase1Flow.test.tsx` |
 | 既存の動詞・名詞・冠詞・TTS学習フローに回帰がない | quiz/TTS API は Tutor ingestion と独立 | `test_phase1_existing_quiz_and_tts_contracts_are_unchanged` / `App.test.tsx` |
 | Phase 1 では LLM 非依存である | Tutor API / service / domain に LLM import なし | `test_phase1_tutor_modules_are_llm_independent` |
-| URL/PDF/YouTube 等の入力を含めていない | `SourceType=manual_text` のみ | `test_phase1_has_no_url_pdf_youtube_ingestion_endpoints` |
+| URL/PDF/YouTube 等の入力を含めていない | 作成 API は手入力のまま。取得エンドポイントは追加していない | `test_phase1_has_no_url_pdf_youtube_ingestion_endpoints` |
 | スマホ相当幅で主要操作に問題がない | 本文 `minHeight: 40vh`、折り返し、全幅ボタン | `TutorPhase1Flow.test.tsx` / 各コンポーネントの style 検証 |
 
 Phase 2 以降へ進む前提は、Phase 0 と Phase 1 が
@@ -3197,3 +3319,5 @@ Phase 4 自体の完了条件と Phase 5 への引継ぎは、上記
 「Phase 5 — 推薦品質の固定 fixture と反実仮想テスト」を正とする。
 Phase 5 自体の完了条件と Phase 6 への引継ぎは、上記
 「Phase 5 Exit Criteria」と「Phase 6 への引き継ぎ」を正とする。
+Source ingestion の共通契約は上記
+「Phase 6 — Source ingestion 共通契約」を正とする。

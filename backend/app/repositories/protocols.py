@@ -32,6 +32,12 @@ class SourceDocumentRepository(Protocol):
         """created_at 降順。同一時刻は id 昇順。limit 未指定なら全件。"""
         ...
 
+    def list_by_locator(
+        self, *, source_type: str, canonical_locator: str
+    ) -> list[SourceDocument]:
+        """同一 source_type と canonical locator を created_at, id 昇順で返す。"""
+        ...
+
 
 class LearningItemRepository(Protocol):
     def create(self, item: LearningItem) -> LearningItem: ...

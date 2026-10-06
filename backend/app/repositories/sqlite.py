@@ -61,6 +61,21 @@ class SqliteSourceDocumentRepository:
             rows = session.scalars(stmt).all()
             return [row.to_domain() for row in rows]
 
+    def list_by_locator(
+        self, *, source_type: str, canonical_locator: str
+    ) -> list[SourceDocument]:
+        stmt = (
+            select(SourceDocumentRow)
+            .where(
+                SourceDocumentRow.source_type == source_type,
+                SourceDocumentRow.canonical_locator == canonical_locator,
+            )
+            .order_by(SourceDocumentRow.created_at, SourceDocumentRow.id)
+        )
+        with self._sessions() as session:
+            rows = session.scalars(stmt).all()
+            return [row.to_domain() for row in rows]
+
 
 class SqliteLearningItemRepository:
     def __init__(self, sessions: sessionmaker[Session]) -> None:

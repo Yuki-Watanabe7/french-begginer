@@ -26,6 +26,8 @@ Candidate の状態遷移は `apply_candidate_status` が担う（Issue #131）�
 LLM 抽出は `services/extraction_service` が担う（Issue #132）。
 Candidate の evidence 検証・正規化・重複統合は
 `candidate_normalization` が担う（Issue #133）。
+外部 Source の正規化と provenance は `source_ingestion` が担う（Issue #189）。
+手入力 API はこの正規化を通さず、投稿された content をそのまま保存する。
 抽出結果の保存と採否 API は `services/candidate_service` が担う（Issue #134）。
 LearningItem → Exercise の契約・適用条件は `exercise` が担う（Issue #145）。
 vocabulary / expression の deterministic 生成は `exercise_generation` が担う
@@ -57,6 +59,15 @@ from pydantic import (
     model_validator,
 )
 
+from app.domain.source_ingestion import (
+    SourceIngestionResult,
+    SourceProvenance,
+    SourceSegment,
+    SourceType,
+    content_digest,
+    ensure_segment_layout,
+)
+
 # ---------------------------------------------------------------------------
 # 共通の型・ユーティリティ
 # ---------------------------------------------------------------------------
@@ -79,9 +90,6 @@ def new_id() -> str:
     """
     return str(uuid.uuid4())
 
-
-SourceType = Literal["manual_text"]
-"""Sourceの入力形式。Phase 1は手入力テキストのみ。URL/PDF等はPhase 6で追加する。"""
 
 LearningItemType = Literal["vocabulary", "expression", "grammar", "conjugation"]
 
@@ -158,6 +166,26 @@ class SourceDocument(BaseModel):
     language: str = "fr"
     created_at: UtcDatetime = Field(default_factory=utcnow)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    content_hash: str | None = None
+    ingestion_version: str | None = None
+    provenance: SourceProvenance | None = None
+    segments: list[SourceSegment] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_ingestion_fields(self) -> "SourceDocument":
+        """保存済み content を再正規化しない。hash があるときだけ一致を確認する。"""
+
+        if self.content_hash is not None and self.content_hash != content_digest(
+            self.content
+        ):
+            raise ValueError("content_hash が content と一致しない")
+        if self.provenance is not None:
+            if self.ingestion_version != self.provenance.ingestion_version:
+                raise ValueError("ingestion_version が provenance と一致しない")
+            if self.content_hash is None:
+                raise ValueError("provenance がある Source は content_hash が必要")
+        ensure_segment_layout(self.content, self.segments)
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +302,32 @@ def apply_candidate_status(
             f"{new_status} へは変更できない"
         )
     return candidate.model_copy(update={"status": new_status})
+
+
+def source_document_from_ingestion(
+    result: SourceIngestionResult, *, prior_source_id: str | None = None
+) -> SourceDocument:
+    """ingestion 結果を SourceDocument にする。content は正規化済み plain text。
+
+    `created_at` は ingested_at を使う。既存行の content は書き換えない。
+    `prior_source_id` は履歴の参照であり、先行 Source を更新しない。
+    """
+
+    metadata = dict(result.metadata)
+    if prior_source_id is not None:
+        metadata["prior_source_id"] = prior_source_id
+    return SourceDocument(
+        source_type=result.source_type,
+        title=result.title,
+        content=result.normalized_content,
+        language=result.language,
+        metadata=metadata,
+        content_hash=result.content_hash,
+        ingestion_version=result.ingestion_version,
+        provenance=result.provenance,
+        segments=list(result.segments),
+        created_at=result.provenance.ingested_at,
+    )
 
 
 def read_source_evidence(content: str, span: EvidenceSpan) -> str:
