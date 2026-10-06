@@ -35,6 +35,7 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/nouns/article/check` | 冠詞+名詞回答の正誤判定 |
 | GET | `/api/tts/speak` | フランス語テキストをOpenAI TTSで音声化してaudio/mpegを返す。`OPENAI_API_KEY`未設定時は503を返す |
 | POST | `/api/tutor/sources` | 手入力の SourceDocument を作成する |
+| POST | `/api/tutor/sources/ingest/url` | Web URL の本文を取得して SourceDocument にする。同じ URL と本文は既存を返し、本文が変わったら版を追加する。危険な URL は 400、サイズ超過は 413、非 HTML は 415、本文なしは 422、上流エラーは 502、タイムアウトは 504 |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`created_at` 降順）。全文ではなく SourceSummary を返す |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得する |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から学習候補を抽出し保存する。存在しない Source は 404。API key 未設定・一時障害は 503、LLM 応答不正は 502 |
@@ -247,6 +248,7 @@ backend/app/
 │   ├── conjugation.py
 │   ├── noun.py
 │   ├── tutor.py              # Tutor機能の中核モデル（docs/tutor_architecture.md）
+│   ├── source_ingestion.py   # Source ingestion 共通契約（Issue #189）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合（Issue #133）
 │   ├── review_scheduler.py   # 初期復習間隔の算出（Issue #111）
 │   ├── exercise.py           # LearningItem→Exercise契約（Issue #145）
@@ -260,6 +262,12 @@ backend/app/
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
 │   ├── today_session.py        # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   └── conjugation_adapter.py
+├── ingestion/    # Web URL の検証・取得・本文抽出（Issue #190）。domain からは依存しない
+│   ├── url_policy.py         # SSRF 向け URL / IP 判定（DNS はしない）
+│   ├── html_extract.py       # HTML 本文抽出（html.parser）
+│   ├── fetcher.py            # fetcher / transport の境界と redirect 再検証
+│   ├── stdlib_http.py        # IP を固定した標準ライブラリ HTTP
+│   └── web_url.py            # web_url adapter
 ├── evaluation/   # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）。HTTPからは使わない
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
@@ -269,6 +277,8 @@ backend/app/
     ├── learning_state_service.py  # LearningEvent → LearnerState 更新
     ├── review_service.py          # 復習予定の保存と due 取得
     ├── tutor_service.py           # Tutor最小APIのユースケース
+    ├── source_ingestion_service.py  # ingestion 結果の再利用 / 版追加（Issue #189）
+    ├── web_url_ingestion.py     # Web URL 取り込み（Issue #190）
     ├── extraction_service.py      # Source から Candidate を抽出し正規化する
     ├── candidate_service.py       # 抽出結果の保存と accept/reject（Issue #134）
     ├── exercise_service.py        # Exercise 取得・採点・LearningEvent 記録（Issue #149）

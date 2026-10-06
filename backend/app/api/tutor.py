@@ -1,17 +1,19 @@
 """Tutor 最小 API（Issue #112）と Source 一覧（Issue #121）、
 Candidate 抽出・採否（Issue #134）、Exercise 取得・回答判定（Issue #149）、
 Practice Session 組み立て（Issue #150）、due review queue（Issue #163）、
-Review Practice Session（Issue #164）、今日の学習 Plan / Session（Issue #178）。
+Review Practice Session（Issue #164）、今日の学習 Plan / Session（Issue #178）、
+Web URL からの Source 取り込み（Issue #190）。
 
 business rule は TutorService / CandidateService / ExerciseService /
-PracticeSessionService / ReviewSessionService / TodayLearningService に任せ、
-このモジュールは request/response schema と HTTP status 変換だけを持つ。
+PracticeSessionService / ReviewSessionService / TodayLearningService /
+WebUrlIngestionService に任せ、このモジュールは request/response schema と
+HTTP status 変換だけを持つ。
 """
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.deps import (
     get_candidate_service,
@@ -20,6 +22,7 @@ from app.api.deps import (
     get_review_session_service,
     get_today_learning_service,
     get_tutor_service,
+    get_web_url_ingestion_service,
 )
 from app.domain.daily_learning_plan import (
     DEFAULT_MAX_NEW_COUNT,
@@ -41,6 +44,13 @@ from app.domain.review_queue import (
     ReviewQueue,
 )
 from app.domain.review_session import SkippedReviewEntry
+from app.domain.source_ingestion import (
+    MAX_LOCATOR_CHARS,
+    MAX_SHORT_FIELD_CHARS,
+    IngestAction,
+    IngestionFailureKind,
+    SourceIngestionError,
+)
 from app.domain.today_session import (
     SkippedTodayEntry,
     TodayLearningPlanView,
@@ -63,6 +73,7 @@ from app.domain.tutor import (
     SourceType,
     UtcDatetime,
 )
+from app.ingestion.errors import WebFetchErrorCode, WebUrlIngestionError
 from app.services.candidate_service import CandidateService, CandidateView
 from app.services.exceptions import (
     ExtractionConfigError,
@@ -86,6 +97,7 @@ from app.services.practice_session_service import PracticeSessionService
 from app.services.review_session_service import ReviewSessionService
 from app.services.today_learning_service import TodayLearningService
 from app.services.tutor_service import TutorService
+from app.services.web_url_ingestion import WebUrlIngestionService
 
 router = APIRouter(prefix="/api/tutor", tags=["tutor"])
 
@@ -100,6 +112,9 @@ ReviewSessionServiceDep = Annotated[
 ]
 TodayLearningServiceDep = Annotated[
     TodayLearningService, Depends(get_today_learning_service)
+]
+WebUrlIngestionServiceDep = Annotated[
+    WebUrlIngestionService, Depends(get_web_url_ingestion_service)
 ]
 
 SOURCE_LIST_LIMIT_DEFAULT = 50
@@ -116,6 +131,37 @@ class CreateSourceRequest(BaseModel):
     content: str = Field(min_length=1)
     language: str = "fr"
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class IngestUrlRequest(BaseModel):
+    """Web URL の取り込み。title と note は省略できる。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(min_length=1, max_length=MAX_LOCATOR_CHARS)
+    title: str | None = Field(
+        default=None, min_length=1, max_length=MAX_SHORT_FIELD_CHARS
+    )
+    note: str | None = Field(default=None, min_length=1, max_length=2_000)
+    language: str = Field(default="fr", min_length=1, max_length=32)
+
+    @field_validator("url", "title", "note", "language")
+    @classmethod
+    def _reject_blank(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("空文字は指定できない")
+            return stripped
+        return value
+
+
+class IngestUrlResponse(BaseModel):
+    """保存した、または再利用した SourceDocument と、再投入の扱い。"""
+
+    action: IngestAction
+    created: bool
+    source: SourceDocument
 
 
 class CreateLearningItemRequest(BaseModel):
@@ -393,6 +439,50 @@ def _to_http(exc: TutorServiceError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
+_INGESTION_KIND_HTTP: dict[IngestionFailureKind, tuple[str, int]] = {
+    IngestionFailureKind.validation: ("invalid_url", status.HTTP_400_BAD_REQUEST),
+    IngestionFailureKind.unsupported_media: (
+        "unsupported_content_type",
+        status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    ),
+    IngestionFailureKind.input_too_large: (
+        "response_too_large",
+        status.HTTP_413_CONTENT_TOO_LARGE,
+    ),
+    IngestionFailureKind.timeout: ("fetch_timeout", status.HTTP_504_GATEWAY_TIMEOUT),
+    IngestionFailureKind.provider: ("upstream_error", status.HTTP_502_BAD_GATEWAY),
+    IngestionFailureKind.not_implemented: (
+        "not_implemented",
+        status.HTTP_501_NOT_IMPLEMENTED,
+    ),
+}
+
+_WEB_URL_CODE_HTTP: dict[WebFetchErrorCode, int] = {
+    WebFetchErrorCode.invalid_url: status.HTTP_400_BAD_REQUEST,
+    WebFetchErrorCode.blocked_url: status.HTTP_400_BAD_REQUEST,
+    WebFetchErrorCode.fetch_timeout: status.HTTP_504_GATEWAY_TIMEOUT,
+    WebFetchErrorCode.unsupported_content_type: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    WebFetchErrorCode.response_too_large: status.HTTP_413_CONTENT_TOO_LARGE,
+    WebFetchErrorCode.extraction_empty: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    WebFetchErrorCode.upstream_error: status.HTTP_502_BAD_GATEWAY,
+    WebFetchErrorCode.too_many_redirects: status.HTTP_502_BAD_GATEWAY,
+}
+
+
+def _ingestion_http(exc: SourceIngestionError) -> HTTPException:
+    """取得失敗を、内部 IP や応答本文を足さずに利用者向けコードへ分ける。"""
+
+    if isinstance(exc, WebUrlIngestionError):
+        detail: dict[str, object] = {"code": exc.code.value, "message": str(exc)}
+        if exc.upstream_status is not None:
+            detail["upstream_status"] = exc.upstream_status
+        return HTTPException(status_code=_WEB_URL_CODE_HTTP[exc.code], detail=detail)
+    code, http_status = _INGESTION_KIND_HTTP[exc.kind]
+    return HTTPException(
+        status_code=http_status, detail={"code": code, "message": str(exc)}
+    )
+
+
 @router.post(
     "/sources",
     response_model=SourceDocument,
@@ -408,6 +498,46 @@ def create_source(req: CreateSourceRequest, service: TutorServiceDep) -> SourceD
         )
     except TutorServiceError as exc:
         raise _to_http(exc) from exc
+
+
+@router.post(
+    "/sources/ingest/url",
+    response_model=IngestUrlResponse,
+    responses={
+        200: {"description": "同じ URL と本文の再取り込み。既存 Source を返す"},
+        201: {"description": "新しい Source、または本文が変わった版を追加する"},
+        400: {"description": "invalid_url または blocked_url"},
+        413: {"description": "response_too_large"},
+        415: {"description": "unsupported_content_type"},
+        422: {"description": "extraction_empty"},
+        502: {"description": "upstream_error または too_many_redirects"},
+        504: {"description": "fetch_timeout"},
+    },
+)
+def ingest_url_source(
+    req: IngestUrlRequest,
+    service: WebUrlIngestionServiceDep,
+    response: Response,
+) -> IngestUrlResponse:
+    """URL の本文を SourceDocument にする。既存の本文は上書きしない。"""
+
+    try:
+        committed = service.ingest_url(
+            url=req.url,
+            title=req.title,
+            note=req.note,
+            language=req.language,
+        )
+    except SourceIngestionError as exc:
+        raise _ingestion_http(exc) from exc
+    response.status_code = (
+        status.HTTP_201_CREATED if committed.created else status.HTTP_200_OK
+    )
+    return IngestUrlResponse(
+        action=committed.action,
+        created=committed.created,
+        source=committed.document,
+    )
 
 
 @router.get("/sources", response_model=list[SourceSummary])

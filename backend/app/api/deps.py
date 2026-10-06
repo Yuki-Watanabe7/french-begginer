@@ -9,6 +9,8 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from app.ingestion.fetcher import WebPageFetcher
+from app.ingestion.stdlib_http import build_web_page_fetcher
 from app.repositories.sqlite import TutorSqliteStore
 from app.services.candidate_service import CandidateService, build_candidate_service
 from app.services.exercise_service import ExerciseService, build_exercise_service
@@ -28,6 +30,7 @@ from app.services.today_learning_service import (
     build_today_learning_service,
 )
 from app.services.tutor_service import TutorService, build_tutor_service
+from app.services.web_url_ingestion import WebUrlIngestionService
 
 
 @lru_cache(maxsize=1)
@@ -82,3 +85,16 @@ def get_today_learning_service(
     store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
 ) -> TodayLearningService:
     return build_today_learning_service(store)
+
+
+def get_web_page_fetcher() -> WebPageFetcher:
+    """本番の URL 取得。テストは fake fetcher で上書きし、ネットワークを使わない。"""
+
+    return build_web_page_fetcher()
+
+
+def get_web_url_ingestion_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+    fetcher: Annotated[WebPageFetcher, Depends(get_web_page_fetcher)],
+) -> WebUrlIngestionService:
+    return WebUrlIngestionService(store.source_documents, fetcher)

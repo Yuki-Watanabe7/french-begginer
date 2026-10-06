@@ -57,7 +57,9 @@ backend/app/
 │   ├── exercise_generation.py  # LearningItemからのdeterministic Exercise生成（vocab/expression/cloze/conjugation adapter）
 │   ├── exercise_evaluation.py  # Tutor Exercise の server-side 採点（Issue #149）
 │   ├── practice_session.py  # active LearningItem から Practice Session を組み立てる（Issue #150）
-│   └── conjugation_adapter.py  # conjugation Item→既存動詞活用への安全な接続
+│   ├── conjugation_adapter.py  # conjugation Item→既存動詞活用への安全な接続
+│   └── source_ingestion.py  # Source ingestion 共通契約（Issue #189）
+├── ingestion/     # Web URL の検証・取得・本文抽出（Issue #190）
 ├── evaluation/    # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
@@ -67,6 +69,8 @@ backend/app/
     ├── review_service.py  # 復習予定の保存と due 取得
     ├── review_schedule_rebuilder.py  # Event履歴からReviewSchedule再構築（Issue #166）
     ├── tutor_service.py  # Tutor最小APIのユースケース
+    ├── source_ingestion_service.py  # ingestion 結果の再利用 / 版追加（Issue #189）
+    ├── web_url_ingestion.py  # Web URL 取り込み（Issue #190）
     ├── extraction_service.py  # Source から LearningItemCandidate を抽出
     ├── candidate_service.py  # 抽出結果の保存と accept/reject
     ├── exercise_service.py  # Exercise 取得・採点・LearningEvent 記録
@@ -120,6 +124,7 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 | GET | `/api/questions/next?group=all` | ランダム問題取得。`group` は `all`/`er`/`ir`/`irregular` |
 | POST | `/api/answers/check` | `{verb, tense, pronoun, answer}` → `{correct, expected, given}` |
 | POST | `/api/tutor/sources` | 手入力 SourceDocument の作成 |
+| POST | `/api/tutor/sources/ingest/url` | Web URL から SourceDocument を作成。同一 URL・同一本文は既存を返す |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`SourceSummary`） |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得 |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から Candidate を抽出して保存。再実行しても重複爆発しない |
