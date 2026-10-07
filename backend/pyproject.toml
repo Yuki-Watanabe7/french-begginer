@@ -9,6 +9,8 @@ dependencies = [
     "pydantic>=2.9.0",
     "openai>=1.0.0",
     "sqlalchemy>=2.0.36",
+    "pypdf>=6.19.0",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]

@@ -36,6 +36,7 @@ SQLite (初期) → PostgreSQL (将来)
 | GET | `/api/tts/speak` | フランス語テキストをOpenAI TTSで音声化してaudio/mpegを返す。`OPENAI_API_KEY`未設定時は503を返す |
 | POST | `/api/tutor/sources` | 手入力の SourceDocument を作成する |
 | POST | `/api/tutor/sources/ingest/url` | Web URL の本文を取得して SourceDocument にする。同じ URL と本文は既存を返し、本文が変わったら版を追加する。危険な URL は 400、サイズ超過は 413、非 HTML は 415、本文なしは 422、上流エラーは 502、タイムアウトは 504 |
+| POST | `/api/tutor/sources/ingest/pdf` | テキスト PDF を multipart で取り込み、ページ位置付きの SourceDocument にする。同じファイルと本文は既存を返す。不正・破損は 400、サイズやページ数の超過は 413、PDF 以外は 415、パスワード付きとテキストレイヤー不足は 422、解析タイムアウトは 504。OCR はしない |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`created_at` 降順）。全文ではなく SourceSummary を返す |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得する |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から学習候補を抽出し保存する。存在しない Source は 404。API key 未設定・一時障害は 503、LLM 応答不正は 502 |
@@ -63,7 +64,7 @@ SQLite (初期) → PostgreSQL (将来)
 
 レスポンスは全文ではなく `SourceSummary`（`content_preview` は先頭120文字）。0件でも 200 + `[]`。
 
-`POST /api/tutor/sources` は手入力のまま `content` を正規化せず保存する。`GET /api/tutor/sources/{source_id}` の `SourceDocument` は、Phase 6 の ingestion で作った Source について `content_hash` / `ingestion_version` / `provenance` / `segments` を返す。手入力の既存行ではこれらは空である。URL / PDF 等の取得エンドポイントはまだ無い。
+`POST /api/tutor/sources` は手入力のまま `content` を正規化せず保存する。`GET /api/tutor/sources/{source_id}` の `SourceDocument` は、Phase 6 の ingestion で作った Source について `content_hash` / `ingestion_version` / `provenance` / `segments` を返す。手入力の既存行ではこれらは空である。Web URL は `POST /api/tutor/sources/ingest/url`、テキスト PDF は `POST /api/tutor/sources/ingest/pdf`。YouTube 等の取得はまだ無い。
 
 ### GET /api/tutor/items クエリパラメータ
 
@@ -262,12 +263,16 @@ backend/app/
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
 │   ├── today_session.py        # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   └── conjugation_adapter.py
-├── ingestion/    # Web URL の検証・取得・本文抽出（Issue #190）。domain からは依存しない
+├── ingestion/    # Web URL と PDF の取得・本文抽出（Issue #190 / #191）。domain からは依存しない
 │   ├── url_policy.py         # SSRF 向け URL / IP 判定（DNS はしない）
 │   ├── html_extract.py       # HTML 本文抽出（html.parser）
 │   ├── fetcher.py            # fetcher / transport の境界と redirect 再検証
 │   ├── stdlib_http.py        # IP を固定した標準ライブラリ HTTP
-│   └── web_url.py            # web_url adapter
+│   ├── web_url.py            # web_url adapter
+│   ├── pdf_errors.py         # PDF 取り込みの失敗分類
+│   ├── pdf_text.py           # PDF のマジック・ファイル名・ページ整形
+│   ├── pdf_parser.py         # pypdf による text layer 抽出（OCR はしない）
+│   └── pdf.py                # pdf adapter
 ├── evaluation/   # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）。HTTPからは使わない
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
@@ -279,6 +284,7 @@ backend/app/
     ├── tutor_service.py           # Tutor最小APIのユースケース
     ├── source_ingestion_service.py  # ingestion 結果の再利用 / 版追加（Issue #189）
     ├── web_url_ingestion.py     # Web URL 取り込み（Issue #190）
+    ├── pdf_ingestion.py         # テキスト PDF 取り込み（Issue #191）
     ├── extraction_service.py      # Source から Candidate を抽出し正規化する
     ├── candidate_service.py       # 抽出結果の保存と accept/reject（Issue #134）
     ├── exercise_service.py        # Exercise 取得・採点・LearningEvent 記録（Issue #149）

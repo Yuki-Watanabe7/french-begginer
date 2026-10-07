@@ -3177,6 +3177,7 @@ external input
 保存時の再利用 / 履歴追加は `SourceIngestionService`。
 Issue #189 では HTTP の取得エンドポイントは追加しない。
 Web URL の取り込みは下記「Phase 6 — Web URL から SourceDocument を取り込む」。
+テキスト PDF の取り込みは下記「Phase 6 — PDF から SourceDocument を取り込む」。
 `POST /api/tutor/sources` はこれまでどおり、投稿された本文を正規化せず保存する。
 
 ### SourceType
@@ -3245,7 +3246,7 @@ web_url のホスト正規化と SSRF 対策は、adapter が `canonical_locator
 | `input_too_large` | しない | 本文が 200_000 コードポイントを超える |
 | `timeout` | する | `provider_timeout` |
 | `provider` | する | `provider_failure` |
-| `not_implemented` | しない | PDF 等、まだ接続していない adapter |
+| `not_implemented` | しない | YouTube transcript 等、まだ接続していない adapter |
 
 metadata のキーに secret（`api_key` / `token` / `password` など）や
 raw payload 用のキーは保存しない。本文中の「token」という語は拒否しない。
@@ -3352,6 +3353,89 @@ canonical が安全な http(s) のときだけ `metadata.canonical_url` を残�
 | 手入力 API を壊さない | `test_ingest_url_api_returns_source_detail_and_keeps_manual_create` |
 | HTTP client を domain / service / 抽出 adapter に置かない | `test_adapter_boundary_does_not_import_an_http_client` |
 
+## Phase 6 — PDF から SourceDocument を取り込む（Issue #191）
+
+テキストレイヤーを持つ PDF を、ページ位置を残した plain text の
+`SourceDocument` にする。画像スキャンの OCR、手書き、表の復元、
+PDF ビューアは扱わない。
+
+```text
+POST /api/tutor/sources/ingest/pdf
+  multipart/form-data（file, 任意の title / note / language）
+  -> サイズ / ファイル名 / MIME / マジック
+  -> text layer 抽出（adapter 内、OCR なし）
+  -> normalize_source_text
+  -> SourceSegment（page_number）
+  -> SourceDocument(source_type=pdf)
+  -> 既存 Candidate extraction
+```
+
+実装は `backend/app/ingestion/`。`PdfIngestionService` は `PdfTextParser` にだけ依存し、
+pypdf は `pdf_parser.py` に閉じる。domain は `app.ingestion` を import しない。
+raw PDF は SQLite に保存しない。
+
+### 境界
+
+- ファイルは 8_000_000 バイトまで、ページは 50 まで
+- `%PDF-` が先頭 1024 バイト以内に無いファイルは壊れた PDF として拒否する。拡張子だけでは通さない
+- 宣言された Content-Type があるときは `application/pdf`、`application/x-pdf`、`application/octet-stream` だけを受ける
+- ファイル名は basename だけを残し、制御文字を除いて NFC にする。パスは保存しない
+- ユーザーパスワード付き PDF は拒否する。API にパスワード欄は無い
+- 空のユーザーパスワードで開く制限付き PDF は読み、`metadata.pdf_access` を `owner_restrictions` にする
+- 解析の区切り（開く前、開いた後、各ページの前）で 10 秒を超えたら止める。1 ページの抽出自体は、ファイルサイズとページ上限が処理量の境界になる
+- テキストレイヤーの Unicode 文字が 20 未満、または本文のあるページが無い場合は `ocr_required` で拒否する。OCR は実行しない
+- 空ページは segment にせず、`metadata.empty_page_numbers` に残す。後続ページの page number は詰めない
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_pdf` | 400 | 空ファイル、ファイル名、title / note / language |
+| `malformed_pdf` | 400 | マジック不一致、壊れた PDF |
+| `unsupported_media` | 415 | 宣言された MIME が PDF 系でない |
+| `file_too_large` | 413 | ファイルサイズ上限 |
+| `too_many_pages` | 413 | ページ数上限 |
+| `text_too_large` | 413 | 抽出本文が 200_000 文字超 |
+| `encrypted_pdf` | 422 | ユーザーパスワードが必要 |
+| `ocr_required` | 422 | 十分な text layer が無い。OCR はしない |
+| `parser_timeout` | 504 | 解析が時間内に終わらない |
+
+### 本文と provenance
+
+抽出は pypdf の plain モードに固定する。座標からの再レイアウト、
+ヘッダー / フッター除去、ハイフン改行の結合、合字の展開、
+アポストロフィの置換はしない。行内の連続空白だけを 1 つに畳み、
+その後で共有の `normalize_source_text`（`source-ingest-v1`）を一度だけ通す。
+
+各非空ページは 1 つの `SourceSegment` になる。`normalized_start` /
+`normalized_end` は保存済み `content` 上の半開区間で、`page_number` は
+PDF のページ番号（1 始まり）である。ページのあいだは LF 2 つで、
+その隙間はどのページにも属さない。EvidenceSpan が 1 ページの中にあれば
+`segment_for_span` で「PDF の p.N」へ戻せる。
+
+`canonical_locator` は生ファイルの `sha256:` ダイジェストである。
+同じバイト列から同じ本文が出たときは既存 Source を返す。
+バイト列が違えば別の Source を作る。既存行の content は書き換えない。
+filename、MIME、page count、parser name / version、adapter version
+`pdf-text-v1`、`ingestion_version` を provenance または metadata に残す。
+
+任意の `title` はファイル名の stem より優先する。`note` は `metadata.note` に置く。
+成功応答は Web URL と同じく `source` に SourceDocument を載せ、新規は 201、再利用は 200。
+
+### テスト
+
+| 確認 | 自動テスト |
+|------|------------|
+| 固定 PDF のアクセント、アポストロフィ、段落、ページ順 | `test_lesson_pdf_saves_pages_in_order_with_provenance` |
+| ページ segment の offset と空ページの page number | `test_lesson_pdf_saves_pages_in_order_with_provenance` / `test_empty_page_keeps_later_page_numbers` |
+| EvidenceSpan からページへ戻り、Candidate 抽出へ渡せる | `test_evidence_span_maps_to_page_for_candidate_extraction` / `test_ingest_pdf_api_returns_source_and_keeps_manual_create` |
+| 破損、暗号化、サイズ、ページ数、テキストなしを保存しない | `test_rejects_bad_files_without_saving_or_leaking_bytes` |
+| OCR が必要な PDF を変換しない | `test_rejects_bad_files_without_saving_or_leaking_bytes` / `test_short_text_needs_ocr_and_unicode_is_preserved` |
+| 合字とアポストロフィを壊さない | `test_page_text_keeps_ligatures_apostrophes_and_line_breaks` / `test_short_text_needs_ocr_and_unicode_is_preserved` |
+| 同じファイルは再利用、別バイト列は別 Source | `test_same_bytes_reuse_and_other_bytes_create_a_new_source` |
+| DB を開き直しても page mapping が残る | `test_pdf_source_survives_database_reopen` |
+| 拡張子だけを信用しない | `test_txt_extension_is_accepted_when_magic_is_pdf` / `test_rejects_bad_files_without_saving_or_leaking_bytes` |
+| パーサを adapter の外へ出さない。外部 API も OCR も import しない | `test_adapter_boundary_does_not_import_parser_or_ocr` |
+| 手入力 API を壊さない | `test_ingest_pdf_api_returns_source_and_keeps_manual_create` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -3407,3 +3491,5 @@ Source ingestion の共通契約は上記
 「Phase 6 — Source ingestion 共通契約」を正とする。
 Web URL 取り込みは上記
 「Phase 6 — Web URL から SourceDocument を取り込む」を正とする。
+PDF 取り込みは上記
+「Phase 6 — PDF から SourceDocument を取り込む」を正とする。

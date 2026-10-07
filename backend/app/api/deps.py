@@ -10,6 +10,8 @@ from typing import Annotated
 from fastapi import Depends
 
 from app.ingestion.fetcher import WebPageFetcher
+from app.ingestion.pdf_parser import PypdfTextParser
+from app.ingestion.pdf_text import PdfTextParser
 from app.ingestion.stdlib_http import build_web_page_fetcher
 from app.repositories.sqlite import TutorSqliteStore
 from app.services.candidate_service import CandidateService, build_candidate_service
@@ -17,6 +19,7 @@ from app.services.exercise_service import ExerciseService, build_exercise_servic
 from app.services.extraction_service import ExtractionService
 from app.services.extractors import LearningItemExtractor
 from app.services.openai_extractor import OpenAILearningItemExtractor
+from app.services.pdf_ingestion import PdfIngestionService
 from app.services.practice_session_service import (
     PracticeSessionService,
     build_practice_session_service,
@@ -98,3 +101,16 @@ def get_web_url_ingestion_service(
     fetcher: Annotated[WebPageFetcher, Depends(get_web_page_fetcher)],
 ) -> WebUrlIngestionService:
     return WebUrlIngestionService(store.source_documents, fetcher)
+
+
+def get_pdf_text_parser() -> PdfTextParser:
+    """本番の PDF 解析。テストは別実装で上書きし、OCR も外部 API も使わない。"""
+
+    return PypdfTextParser()
+
+
+def get_pdf_ingestion_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+    parser: Annotated[PdfTextParser, Depends(get_pdf_text_parser)],
+) -> PdfIngestionService:
+    return PdfIngestionService(store.source_documents, parser)

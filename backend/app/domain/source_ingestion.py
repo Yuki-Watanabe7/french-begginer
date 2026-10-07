@@ -45,6 +45,7 @@ locator があるとき:
 - 既存行の content は更新しない
 
 web_url のホスト正規化と SSRF 対策は `app.ingestion`（Issue #190）。
+PDF の text layer 抽出は `app.ingestion`（Issue #191）。OCR はしない。
 このモジュールの locator 比較は、前後空白を除いた文字列の一致である。
 URL を同一視する正規化は、web adapter が `canonical_locator` に書く前に行う。
 """

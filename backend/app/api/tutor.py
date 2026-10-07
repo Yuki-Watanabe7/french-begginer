@@ -2,22 +2,34 @@
 Candidate 抽出・採否（Issue #134）、Exercise 取得・回答判定（Issue #149）、
 Practice Session 組み立て（Issue #150）、due review queue（Issue #163）、
 Review Practice Session（Issue #164）、今日の学習 Plan / Session（Issue #178）、
-Web URL からの Source 取り込み（Issue #190）。
+Web URL からの Source 取り込み（Issue #190）、
+テキスト PDF からの Source 取り込み（Issue #191）。
 
 business rule は TutorService / CandidateService / ExerciseService /
 PracticeSessionService / ReviewSessionService / TodayLearningService /
-WebUrlIngestionService に任せ、このモジュールは request/response schema と
-HTTP status 変換だけを持つ。
+WebUrlIngestionService / PdfIngestionService に任せ、このモジュールは
+request/response schema と HTTP status 変換だけを持つ。
 """
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.deps import (
     get_candidate_service,
     get_exercise_service,
+    get_pdf_ingestion_service,
     get_practice_session_service,
     get_review_session_service,
     get_today_learning_service,
@@ -74,6 +86,7 @@ from app.domain.tutor import (
     UtcDatetime,
 )
 from app.ingestion.errors import WebFetchErrorCode, WebUrlIngestionError
+from app.ingestion.pdf_errors import PdfIngestErrorCode, PdfIngestionError
 from app.services.candidate_service import CandidateService, CandidateView
 from app.services.exceptions import (
     ExtractionConfigError,
@@ -93,6 +106,7 @@ from app.services.exceptions import (
     TutorUnsupportedExerciseError,
 )
 from app.services.exercise_service import ExerciseService
+from app.services.pdf_ingestion import PdfIngestionService
 from app.services.practice_session_service import PracticeSessionService
 from app.services.review_session_service import ReviewSessionService
 from app.services.today_learning_service import TodayLearningService
@@ -115,6 +129,9 @@ TodayLearningServiceDep = Annotated[
 ]
 WebUrlIngestionServiceDep = Annotated[
     WebUrlIngestionService, Depends(get_web_url_ingestion_service)
+]
+PdfIngestionServiceDep = Annotated[
+    PdfIngestionService, Depends(get_pdf_ingestion_service)
 ]
 
 SOURCE_LIST_LIMIT_DEFAULT = 50
@@ -157,7 +174,10 @@ class IngestUrlRequest(BaseModel):
 
 
 class IngestUrlResponse(BaseModel):
-    """保存した、または再利用した SourceDocument と、再投入の扱い。"""
+    """保存した、または再利用した SourceDocument と、再投入の扱い。
+
+    Web URL と PDF で同じ形を返す。
+    """
 
     action: IngestAction
     created: bool
@@ -457,6 +477,18 @@ _INGESTION_KIND_HTTP: dict[IngestionFailureKind, tuple[str, int]] = {
     ),
 }
 
+_PDF_CODE_HTTP: dict[PdfIngestErrorCode, int] = {
+    PdfIngestErrorCode.invalid_pdf: status.HTTP_400_BAD_REQUEST,
+    PdfIngestErrorCode.malformed_pdf: status.HTTP_400_BAD_REQUEST,
+    PdfIngestErrorCode.encrypted_pdf: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    PdfIngestErrorCode.unsupported_media: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    PdfIngestErrorCode.file_too_large: status.HTTP_413_CONTENT_TOO_LARGE,
+    PdfIngestErrorCode.too_many_pages: status.HTTP_413_CONTENT_TOO_LARGE,
+    PdfIngestErrorCode.text_too_large: status.HTTP_413_CONTENT_TOO_LARGE,
+    PdfIngestErrorCode.ocr_required: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    PdfIngestErrorCode.parser_timeout: status.HTTP_504_GATEWAY_TIMEOUT,
+}
+
 _WEB_URL_CODE_HTTP: dict[WebFetchErrorCode, int] = {
     WebFetchErrorCode.invalid_url: status.HTTP_400_BAD_REQUEST,
     WebFetchErrorCode.blocked_url: status.HTTP_400_BAD_REQUEST,
@@ -477,6 +509,11 @@ def _ingestion_http(exc: SourceIngestionError) -> HTTPException:
         if exc.upstream_status is not None:
             detail["upstream_status"] = exc.upstream_status
         return HTTPException(status_code=_WEB_URL_CODE_HTTP[exc.code], detail=detail)
+    if isinstance(exc, PdfIngestionError):
+        return HTTPException(
+            status_code=_PDF_CODE_HTTP[exc.code],
+            detail={"code": exc.code.value, "message": str(exc)},
+        )
     code, http_status = _INGESTION_KIND_HTTP[exc.kind]
     return HTTPException(
         status_code=http_status, detail={"code": code, "message": str(exc)}
@@ -527,6 +564,50 @@ def ingest_url_source(
             title=req.title,
             note=req.note,
             language=req.language,
+        )
+    except SourceIngestionError as exc:
+        raise _ingestion_http(exc) from exc
+    response.status_code = (
+        status.HTTP_201_CREATED if committed.created else status.HTTP_200_OK
+    )
+    return IngestUrlResponse(
+        action=committed.action,
+        created=committed.created,
+        source=committed.document,
+    )
+
+
+@router.post(
+    "/sources/ingest/pdf",
+    response_model=IngestUrlResponse,
+    responses={
+        200: {"description": "同じ PDF と本文の再取り込み。既存 Source を返す"},
+        201: {"description": "新しい Source、または本文が変わった版を追加する"},
+        400: {"description": "invalid_pdf または malformed_pdf"},
+        413: {"description": "file_too_large、too_many_pages、または text_too_large"},
+        415: {"description": "unsupported_media"},
+        422: {"description": "encrypted_pdf または ocr_required"},
+        504: {"description": "parser_timeout"},
+    },
+)
+def ingest_pdf_source(
+    service: PdfIngestionServiceDep,
+    response: Response,
+    file: Annotated[UploadFile, File()],
+    title: Annotated[str | None, Form()] = None,
+    note: Annotated[str | None, Form()] = None,
+    language: Annotated[str, Form()] = "fr",
+) -> IngestUrlResponse:
+    """テキスト PDF を SourceDocument にする。画像 PDF は OCR せず拒否する。"""
+
+    try:
+        committed = service.ingest_pdf(
+            source=file.file,
+            filename=file.filename,
+            declared_media_type=file.content_type,
+            title=title,
+            note=note,
+            language=language,
         )
     except SourceIngestionError as exc:
         raise _ingestion_http(exc) from exc
