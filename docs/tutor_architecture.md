@@ -3175,8 +3175,9 @@ external input
 
 実装は `backend/app/domain/source_ingestion.py`。
 保存時の再利用 / 履歴追加は `SourceIngestionService`。
-HTTP の取得エンドポイントは追加しない。`POST /api/tutor/sources` は
-これまでどおり、投稿された本文を正規化せず保存する。
+Issue #189 では HTTP の取得エンドポイントは追加しない。
+Web URL の取り込みは下記「Phase 6 — Web URL から SourceDocument を取り込む」。
+`POST /api/tutor/sources` はこれまでどおり、投稿された本文を正規化せず保存する。
 
 ### SourceType
 
@@ -3225,7 +3226,9 @@ segment の page / time / speaker は `SourceSegment` 側に置く。
 
 ### 再投入
 
-locator の前後空白だけを除き、URL の正規化と SSRF 対策は後続 Issue に残す。
+locator の前後空白だけを除いた文字列比較は、この共通契約の同一性である。
+web_url のホスト正規化と SSRF 対策は、adapter が `canonical_locator` を書く前に行う
+（下記 Issue #190）。
 
 | 状態 | action | 既存行 |
 |------|--------|--------|
@@ -3242,7 +3245,7 @@ locator の前後空白だけを除き、URL の正規化と SSRF 対策は後�
 | `input_too_large` | しない | 本文が 200_000 コードポイントを超える |
 | `timeout` | する | `provider_timeout` |
 | `provider` | する | `provider_failure` |
-| `not_implemented` | しない | URL / PDF 等の adapter がまだ無い |
+| `not_implemented` | しない | PDF 等、まだ接続していない adapter |
 
 metadata のキーに secret（`api_key` / `token` / `password` など）や
 raw payload 用のキーは保存しない。本文中の「token」という語は拒否しない。
@@ -3254,6 +3257,7 @@ locator の userinfo（`https://user:pass@host/`）は保存しない。
 HTTP client、PDF parser、OpenAI SDK は domain に置かない。
 `SourceIngestionAdapter` の実装がそれらのライブラリを持ってよい。
 Issue #189 では manual text の組み立てと、adapter を差し込むプロトコルまで。
+Web URL の取得実装は Issue #190。
 
 ### テスト
 
@@ -3267,6 +3271,86 @@ Issue #189 では manual text の組み立てと、adapter を差し込むプロ
 | 手入力 API の回帰 | `test_phase1_manual_create_does_not_normalize_content` / `test_phase1_text_ingestion_vertical_slice` |
 | domain が HTTP / PDF / OpenAI に依存しない | `test_ingestion_modules_do_not_import_adapter_libraries` |
 | 再投入は上書きしない | `test_commit_reuses_same_locator_and_appends_when_content_changes` |
+
+## Phase 6 — Web URL から SourceDocument を取り込む（Issue #190）
+
+ユーザーが指定した 1 件の http(s) URL を、既存の Candidate 抽出が読める
+plain text の `SourceDocument` にする。ログインページ、SPA の描画、
+paywall、巡回は扱わない。
+
+```text
+POST /api/tutor/sources/ingest/url
+  -> URL 検証 / SSRF
+  -> fetch（redirect のたび再検証）
+  -> HTML 本文抽出（adapter 内）
+  -> normalize_source_text
+  -> SourceDocument(source_type=web_url)
+  -> 既存 Candidate extraction
+```
+
+実装は `backend/app/ingestion/`。`WebUrlIngestionService` は
+`WebPageFetcher` にだけ依存し、標準ライブラリの HTTP 実装は
+`stdlib_http.py` に閉じる。通常のテストは fake fetcher / fake transport
+で完結し、DNS も TCP も呼ばない。domain は `app.ingestion` を import しない。
+
+### 安全
+
+- `http` / `https` のみ。認証情報つき URL は保存せず拒否する
+- localhost、単一ラベル、`.local` / `.internal` などの名前を拒否する
+- IP リテラルは十進・八進・十六進・IPv4-mapped IPv6 も IP として読む
+- 解決したアドレスが 1 つでも loopback / private / link-local / metadata 帯なら拒否する
+- 接続は検査済み IP に固定し、Host と TLS の SNI だけ元のホスト名を使う
+- redirect は最大 5 回。各 hop で同じ検査をやり直す
+- timeout 10 秒、応答 2_000_000 バイト、media type は
+  `text/html` / `application/xhtml+xml` / `text/plain`
+- エラーメッセージに解決した private IP や応答本文を含めない
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_url` | 400 | 形式不正、認証情報つき URL |
+| `blocked_url` | 400 | private / metadata など許可しない接続先 |
+| `response_too_large` | 413 | 応答または抽出本文が上限超過 |
+| `unsupported_content_type` | 415 | HTML / text 以外 |
+| `extraction_empty` | 422 | 本文が空、または 40 文字未満 |
+| `upstream_error` | 502 | 名前解決失敗、上流 4xx/5xx（`upstream_status`） |
+| `too_many_redirects` | 502 | redirect 上限超過 |
+| `fetch_timeout` | 504 | 時間内に取得できない |
+
+### 本文と provenance
+
+`html.parser` で `nav` / `footer` / `script` / `style` などを除く。
+`article` または `main` があるときはその中だけを段落順に残す。
+Unicode とアポストロフィは共有正規化（NFC）以外では変えない。
+JavaScript の実行はしない。
+
+`canonical_locator` は、利用者が指定した URL を正規化したもの
+（scheme とホストの小文字化、既定ポートと fragment の除去、空 path は `/`）。
+同じ locator・同じ `content_hash`・同じ `ingestion_version` は既存 Source を返す。
+本文が変わったときは新しい Source を追加し、`metadata.prior_source_id` で先行を指す。
+既存行の content は書き換えない。
+
+`metadata.requested_url` / `metadata.final_url` に加え、HTML の
+canonical が安全な http(s) のときだけ `metadata.canonical_url` を残す。
+`provenance` には `fetched_at`、media type、adapter version
+`web-url-v1`、正規化前 hash、`ingestion_version` を置く。
+`content_hash` は正規化後本文の `sha256:` ダイジェストである。
+
+任意の `title` は抽出タイトルより優先する。`note` は `metadata.note` に置く。
+成功応答は `source` に SourceDocument を載せ、新規は 201、再利用は 200。
+
+### テスト
+
+| 確認 | 自動テスト |
+|------|------------|
+| 公開 URL fixture の title / 本文 / nav・script 除外 | `test_public_url_fixture_extracts_title_body_and_drops_noise` / `test_ingest_saves_provenance_and_plain_text_for_candidate_extraction` |
+| redirect の再検証と private への不追随 | `test_redirect_is_revalidated_and_private_targets_are_not_followed` |
+| localhost / private / link-local / DNS の private 応答を拒否 | `test_url_normalization_and_blocked_literals_hide_private_addresses` / `test_dns_answer_containing_a_private_address_is_blocked` |
+| サイズ、非 HTML、timeout、上流 4xx/5xx | `test_redirect_limit_timeout_upstream_type_and_size` |
+| 同じ URL は再利用、本文変化は版追加 | `test_same_url_reuses_source_and_changed_body_appends_a_version` |
+| 保存後に Candidate 抽出へ渡せる | `test_ingest_saves_provenance_and_plain_text_for_candidate_extraction` |
+| ネットワークなし | `test_web_url_ingestion.py` の autouse（`getaddrinfo` / `create_connection` を禁止） |
+| 手入力 API を壊さない | `test_ingest_url_api_returns_source_detail_and_keeps_manual_create` |
+| HTTP client を domain / service / 抽出 adapter に置かない | `test_adapter_boundary_does_not_import_an_http_client` |
 
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
@@ -3283,7 +3367,7 @@ SourceDocument として保存・参照できる最小 UI/API である。
 | empty/loading/error/404 の主要状態が扱われている | list / detail status | `TutorPhase1Flow.test.tsx` |
 | 既存の動詞・名詞・冠詞・TTS学習フローに回帰がない | quiz/TTS API は Tutor ingestion と独立 | `test_phase1_existing_quiz_and_tts_contracts_are_unchanged` / `App.test.tsx` |
 | Phase 1 では LLM 非依存である | Tutor API / service / domain に LLM import なし | `test_phase1_tutor_modules_are_llm_independent` |
-| URL/PDF/YouTube 等の入力を含めていない | 作成 API は手入力のまま。取得エンドポイントは追加していない | `test_phase1_has_no_url_pdf_youtube_ingestion_endpoints` |
+| URL/PDF/YouTube 等を Phase 1 の作成 API に含めていない | `POST /api/tutor/sources` は手入力のまま。Phase 1 で列挙した取得パスは追加していない | `test_phase1_has_no_url_pdf_youtube_ingestion_endpoints` |
 | スマホ相当幅で主要操作に問題がない | 本文 `minHeight: 40vh`、折り返し、全幅ボタン | `TutorPhase1Flow.test.tsx` / 各コンポーネントの style 検証 |
 
 Phase 2 以降へ進む前提は、Phase 0 と Phase 1 が
@@ -3321,3 +3405,5 @@ Phase 5 自体の完了条件と Phase 6 への引継ぎは、上記
 「Phase 5 Exit Criteria」と「Phase 6 への引き継ぎ」を正とする。
 Source ingestion の共通契約は上記
 「Phase 6 — Source ingestion 共通契約」を正とする。
+Web URL 取り込みは上記
+「Phase 6 — Web URL から SourceDocument を取り込む」を正とする。

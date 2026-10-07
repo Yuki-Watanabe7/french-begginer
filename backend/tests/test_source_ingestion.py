@@ -506,9 +506,16 @@ def test_ingestion_modules_do_not_import_adapter_libraries():
 
     assert _imported_roots(ingestion).isdisjoint(forbidden)
     assert _imported_roots(ingestion).isdisjoint(
-        {"app.services", "app.api", "app.persistence", "app.repositories"}
+        {
+            "app.services",
+            "app.api",
+            "app.persistence",
+            "app.repositories",
+            "app.ingestion",
+        }
     )
     assert _imported_roots(service).isdisjoint(forbidden)
+    assert "app.ingestion" not in _imported_roots(service)
 
     import app.domain.candidate_normalization as normalization
 

@@ -44,8 +44,9 @@ locator があるとき:
 - 本文または ingestion_version が変わったら新しい Source を追加する
 - 既存行の content は更新しない
 
-URL のホスト正規化や SSRF 対策は後続 Issue。locator は前後空白を除いた
-文字列をそのまま同一性に使う。
+web_url のホスト正規化と SSRF 対策は `app.ingestion`（Issue #190）。
+このモジュールの locator 比較は、前後空白を除いた文字列の一致である。
+URL を同一視する正規化は、web adapter が `canonical_locator` に書く前に行う。
 """
 
 from __future__ import annotations
@@ -102,9 +103,12 @@ SOURCE_TYPES: tuple[SourceType, ...] = (
     "conversation_log",
 )
 
+WEB_URL_MEDIA_TYPES = frozenset({"text/html", "application/xhtml+xml", "text/plain"})
+"""web_url が保存してよい応答の media type。charset パラメータは含めない。"""
+
 _ALLOWED_MIME_TYPES: dict[SourceType, frozenset[str]] = {
     "manual_text": frozenset({"text/plain"}),
-    "web_url": frozenset({"text/html", "application/xhtml+xml"}),
+    "web_url": WEB_URL_MEDIA_TYPES,
     "pdf": frozenset({"application/pdf"}),
     "youtube_transcript": frozenset({"text/plain", "application/json"}),
     "subtitle": frozenset({"text/vtt", "application/x-subrip", "text/plain"}),
