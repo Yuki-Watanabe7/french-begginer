@@ -13,6 +13,8 @@ from app.ingestion.fetcher import WebPageFetcher
 from app.ingestion.pdf_parser import PypdfTextParser
 from app.ingestion.pdf_text import PdfTextParser
 from app.ingestion.stdlib_http import build_web_page_fetcher
+from app.ingestion.youtube import YoutubeTranscriptProvider
+from app.ingestion.youtube_api import YoutubeTranscriptApiProvider
 from app.repositories.sqlite import TutorSqliteStore
 from app.services.candidate_service import CandidateService, build_candidate_service
 from app.services.exercise_service import ExerciseService, build_exercise_service
@@ -28,12 +30,14 @@ from app.services.review_session_service import (
     ReviewSessionService,
     build_review_session_service,
 )
+from app.services.subtitle_ingestion import SubtitleIngestionService
 from app.services.today_learning_service import (
     TodayLearningService,
     build_today_learning_service,
 )
 from app.services.tutor_service import TutorService, build_tutor_service
 from app.services.web_url_ingestion import WebUrlIngestionService
+from app.services.youtube_ingestion import YoutubeIngestionService
 
 
 @lru_cache(maxsize=1)
@@ -114,3 +118,24 @@ def get_pdf_ingestion_service(
     parser: Annotated[PdfTextParser, Depends(get_pdf_text_parser)],
 ) -> PdfIngestionService:
     return PdfIngestionService(store.source_documents, parser)
+
+
+def get_youtube_transcript_provider() -> YoutubeTranscriptProvider:
+    """本番の公開字幕取得。テストは fake provider で上書きする。"""
+
+    return YoutubeTranscriptApiProvider()
+
+
+def get_youtube_ingestion_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+    provider: Annotated[
+        YoutubeTranscriptProvider, Depends(get_youtube_transcript_provider)
+    ],
+) -> YoutubeIngestionService:
+    return YoutubeIngestionService(store.source_documents, provider)
+
+
+def get_subtitle_ingestion_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+) -> SubtitleIngestionService:
+    return SubtitleIngestionService(store.source_documents)

@@ -59,7 +59,7 @@ backend/app/
 │   ├── practice_session.py  # active LearningItem から Practice Session を組み立てる（Issue #150）
 │   ├── conjugation_adapter.py  # conjugation Item→既存動詞活用への安全な接続
 │   └── source_ingestion.py  # Source ingestion 共通契約（Issue #189）
-├── ingestion/     # Web URL と PDF の取得・本文抽出（Issue #190 / #191）
+├── ingestion/     # Web URL、PDF、YouTube 字幕、SRT / VTT（Issue #190 / #191 / #192）
 ├── evaluation/    # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
@@ -72,6 +72,8 @@ backend/app/
     ├── source_ingestion_service.py  # ingestion 結果の再利用 / 版追加（Issue #189）
     ├── web_url_ingestion.py  # Web URL 取り込み（Issue #190）
     ├── pdf_ingestion.py  # テキスト PDF 取り込み（Issue #191）
+    ├── youtube_ingestion.py  # YouTube 公開字幕の取り込み（Issue #192）
+    ├── subtitle_ingestion.py  # SRT / VTT 取り込み（Issue #192）
     ├── extraction_service.py  # Source から LearningItemCandidate を抽出
     ├── candidate_service.py  # 抽出結果の保存と accept/reject
     ├── exercise_service.py  # Exercise 取得・採点・LearningEvent 記録
@@ -127,6 +129,8 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 | POST | `/api/tutor/sources` | 手入力 SourceDocument の作成 |
 | POST | `/api/tutor/sources/ingest/url` | Web URL から SourceDocument を作成。同一 URL・同一本文は既存を返す |
 | POST | `/api/tutor/sources/ingest/pdf` | テキスト PDF をページ位置付き SourceDocument にする。同一ファイル・同一本文は既存を返す。OCR はしない |
+| POST | `/api/tutor/sources/ingest/youtube` | YouTube の公開字幕を時刻付き SourceDocument にする。同一動画・同一本文は既存を返す。音声 download はしない |
+| POST | `/api/tutor/sources/ingest/subtitle` | SRT / VTT を時刻付き SourceDocument にする。同一ファイル・同一本文は既存を返す |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`SourceSummary`） |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得 |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から Candidate を抽出して保存。再実行しても重複爆発しない |

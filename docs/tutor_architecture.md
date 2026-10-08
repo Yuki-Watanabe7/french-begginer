@@ -3178,6 +3178,8 @@ external input
 Issue #189 では HTTP の取得エンドポイントは追加しない。
 Web URL の取り込みは下記「Phase 6 — Web URL から SourceDocument を取り込む」。
 テキスト PDF の取り込みは下記「Phase 6 — PDF から SourceDocument を取り込む」。
+YouTube の公開字幕と SRT / VTT は下記
+「Phase 6 — YouTube transcript / SRT / VTT を時刻付きで取り込む」。
 `POST /api/tutor/sources` はこれまでどおり、投稿された本文を正規化せず保存する。
 
 ### SourceType
@@ -3246,7 +3248,7 @@ web_url のホスト正規化と SSRF 対策は、adapter が `canonical_locator
 | `input_too_large` | しない | 本文が 200_000 コードポイントを超える |
 | `timeout` | する | `provider_timeout` |
 | `provider` | する | `provider_failure` |
-| `not_implemented` | しない | YouTube transcript 等、まだ接続していない adapter |
+| `not_implemented` | しない | 音声文字起こし、会話ログなど、まだ接続していない adapter |
 
 metadata のキーに secret（`api_key` / `token` / `password` など）や
 raw payload 用のキーは保存しない。本文中の「token」という語は拒否しない。
@@ -3436,6 +3438,126 @@ filename、MIME、page count、parser name / version、adapter version
 | パーサを adapter の外へ出さない。外部 API も OCR も import しない | `test_adapter_boundary_does_not_import_parser_or_ocr` |
 | 手入力 API を壊さない | `test_ingest_pdf_api_returns_source_and_keeps_manual_create` |
 
+## Phase 6 — YouTube transcript / SRT / VTT を時刻付きで取り込む（Issue #192）
+
+YouTube の公開字幕と、SRT / VTT ファイルを、同じ時刻付き plain text の
+`SourceDocument` にする。動画の download、自動音声文字起こし、字幕の翻訳、
+playlist の一括取り込みは扱わない。
+
+```text
+YouTube URL / video ID または SRT / VTT
+  -> timed cue（入力順を維持）
+  -> normalize_source_text
+  -> SourceSegment（start_seconds / end_seconds）
+  -> SourceDocument
+  -> 既存 Candidate extraction
+```
+
+YouTube は `POST /api/tutor/sources/ingest/youtube`（JSON の `video` に
+URL または 11 文字の video ID）。字幕ファイルは
+`POST /api/tutor/sources/ingest/subtitle`（multipart の `file` と、任意の
+`title` / `note` / `language`）。
+
+実装は `backend/app/ingestion/`。`YoutubeIngestionService` は
+`YoutubeTranscriptProvider` にだけ依存し、`youtube-transcript-api` は
+`youtube_api.py` に閉じる。通常のテストは fake provider で完結し、
+DNS も TCP も呼ばない。SRT / VTT の解析は標準ライブラリだけである。
+domain は `app.ingestion` を import しない。
+
+### YouTube
+
+- `youtube.com` / `m.youtube.com` / `music.youtube.com` /
+  `youtube-nocookie.com` の watch、embed、shorts、live と、`youtu.be` を受ける
+- playlist だけの URL、チャンネル URL、認証情報つき URL は拒否する
+- `canonical_locator` は `youtube:{video_id}`。URL の形が違っても同じ動画は同じ locator
+- 希望言語はリクエストの `language`（既定 `fr`）。別言語へは落とさない
+- 同じ言語では、翻訳でない手動字幕、翻訳でない自動字幕、翻訳字幕の順。
+  同点は language code と track id の辞書順
+- 翻訳字幕を選んだときは `transcript_is_translation` と `translated_from` を残し、
+  発話言語としては扱わない
+- 発話言語 `speech_language` は、翻訳でない自動字幕が 1 言語だけのときだけ書く
+- 公開済みの caption track だけを読む。翻訳 API で字幕を作らない
+- 字幕が無い、無効、動画を取れない、のときは音声 download に切り替えない
+- 取得の timeout は 10 秒
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_video` | 400 | URL / video ID が不正、または playlist |
+| `text_too_large` | 413 | 抽出本文が 200_000 文字超 |
+| `transcript_unavailable` | 422 | 希望言語の公開字幕が無い。`available_languages` を付けることがある |
+| `transcript_disabled` | 422 | 字幕が無効 |
+| `video_unavailable` | 422 | 動画の公開字幕を取得できない |
+| `malformed_transcript` | 422 | 時刻が負、または数値でない |
+| `transcript_empty` | 422 | cue の本文が空 |
+| `transcript_provider_error` | 502 | 取得先の失敗。再試行してよい |
+| `transcript_timeout` | 504 | 時間内に取得できない |
+
+### SRT / VTT
+
+- ファイルは 2_000_000 バイトまで。拡張子は `.srt` / `.vtt`
+- 宣言された Content-Type があるときは、SRT なら `application/x-subrip`、
+  `application/x-srt`、`text/plain`、`application/octet-stream`。
+  VTT なら `text/vtt`、`text/plain`、`application/octet-stream`
+- `.vtt` は先頭が `WEBVTT` であること。`.srt` が `WEBVTT` で始まるときは拒否する
+- ファイル名は basename だけを残し、制御文字を除いて NFC にする。パスは保存しない
+- 時刻は `HH:MM:SS,mmm` または `MM:SS.mmm`。終了が開始以下、分秒が範囲外、
+  ミリ秒が 3 桁でない cue はファイルごと拒否する
+- 時刻が重なっても、ファイルに書かれた順のまま両方残す。並べ替えない
+- `<i>` などの装飾、`{\an8}`、VTT の `<v Speaker>` を除く。
+  cue 全体が一人の話者なら `speaker` に残す
+- NOTE / STYLE / REGION と `X-TIMESTAMP-MAP` は本文にしない。時刻は cue の値のまま
+- アポストロフィは置換しない。NFC は共有正規化が一度だけ行う
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_subtitle` | 400 | 空ファイル、ファイル名、title / note / language |
+| `malformed_subtitle` | 400 | 時刻不正、UTF-8 でない、拡張子と中身の不一致 |
+| `unsupported_media` | 415 | 拡張子または宣言された MIME が SRT / VTT でない |
+| `file_too_large` | 413 | ファイルサイズ上限 |
+| `text_too_large` | 413 | 抽出本文が 200_000 文字超 |
+| `subtitle_empty` | 422 | cue の本文が空 |
+
+### 本文と provenance
+
+空でない cue は 1 つの `SourceSegment` になる。隣接 cue は結合しない。
+cue のあいだは LF 2 つで、その隙間はどちらの時刻にも属さない。
+`normalized_start` / `normalized_end` は保存済み `content` 上の半開区間なので、
+EvidenceSpan が 1 cue の中にあれば `segment_for_span` で
+`start_seconds` / `end_seconds` へ戻せる。
+
+YouTube の provenance は video id、元の URL（`metadata.original_url`）、
+選んだ字幕の言語、provider、`fetched_at`、adapter version
+`youtube-transcript-v1`、`ingestion_version` を持つ。
+duration が 0 の cue は終了を開始の 0.001 秒後にして、本文は捨てない。
+
+字幕ファイルの `canonical_locator` は生ファイルの `sha256:` ダイジェストである。
+同じバイト列から同じ本文が出たときは既存 Source を返す。
+filename、形式（`srt` / `vtt`）、cue 数、adapter version `subtitle-v1`、
+`ingestion_version` を provenance または metadata に残す。
+`content_hash` は正規化後本文のダイジェストで、ファイルのダイジェストとは別である。
+
+任意の `title` は、YouTube では `YouTube {video_id}` より、字幕ではファイル名の
+stem より優先する。`note` は `metadata.note` に置く。
+成功応答は Web URL と同じく `source` に SourceDocument を載せ、新規は 201、再利用は 200。
+既存行の content は書き換えない。
+
+### テスト
+
+| 確認 | 自動テスト |
+|------|------------|
+| fake transcript の本文、時刻、provenance | `test_fake_youtube_transcript_saves_timed_segments` |
+| 字幕が無いときは cue を取得しない | `test_transcript_unavailable_does_not_fetch_cues` |
+| 字幕無効を別コードにする | `test_transcript_disabled_is_explicit` |
+| フランス語の手動字幕を優先し、翻訳を原文の発話にしない | `test_language_selection_prefers_original_french_and_records_translation` / `test_translation_is_not_treated_as_original_speech` |
+| SRT / VTT のアクセント、アポストロフィ、話者 | `test_srt_and_vtt_keep_accents_apostrophes_speakers_and_order` / `test_combining_accent_is_normalized_without_replacing_apostrophes` |
+| 壊れた時刻を保存しない | `test_malformed_timestamps_are_rejected_without_saving` / `test_malformed_transcript_and_empty_cues_are_not_saved` |
+| 重なる cue をファイル順のまま残す | `test_overlapping_cues_keep_file_order_and_timecodes` / `test_youtube_cues_keep_provider_order_when_times_overlap` |
+| 文字位置から時刻へ戻す | `test_character_offset_maps_to_timestamp` / `test_character_offset_maps_to_youtube_timestamp` |
+| Candidate の evidence から時刻を取る | `test_candidate_evidence_maps_to_timecode` |
+| 同じ動画・同じファイルは再利用する | `test_same_video_reuses_and_changed_transcript_appends` / `test_same_subtitle_reuses_and_other_bytes_create_a_new_source` |
+| ネットワークなし。翻訳 API も音声 download もしない | `test_youtube_ingestion_does_not_use_network` / `test_subtitle_ingestion_does_not_use_network` / `test_provider_reads_published_captions_without_translating` / `test_youtube_modules_do_not_download_audio` |
+| 手入力 API を壊さない | `test_ingest_youtube_api_returns_source_and_keeps_manual_create` / `test_ingest_subtitle_api_returns_source_and_keeps_manual_create` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -3493,3 +3615,5 @@ Web URL 取り込みは上記
 「Phase 6 — Web URL から SourceDocument を取り込む」を正とする。
 PDF 取り込みは上記
 「Phase 6 — PDF から SourceDocument を取り込む」を正とする。
+YouTube transcript と SRT / VTT の取り込みは上記
+「Phase 6 — YouTube transcript / SRT / VTT を時刻付きで取り込む」を正とする。

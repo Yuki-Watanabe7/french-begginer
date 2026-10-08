@@ -3,11 +3,13 @@ Candidate 抽出・採否（Issue #134）、Exercise 取得・回答判定（Iss
 Practice Session 組み立て（Issue #150）、due review queue（Issue #163）、
 Review Practice Session（Issue #164）、今日の学習 Plan / Session（Issue #178）、
 Web URL からの Source 取り込み（Issue #190）、
-テキスト PDF からの Source 取り込み（Issue #191）。
+テキスト PDF からの Source 取り込み（Issue #191）、
+YouTube transcript と SRT / VTT からの Source 取り込み（Issue #192）。
 
 business rule は TutorService / CandidateService / ExerciseService /
 PracticeSessionService / ReviewSessionService / TodayLearningService /
-WebUrlIngestionService / PdfIngestionService に任せ、このモジュールは
+WebUrlIngestionService / PdfIngestionService / YoutubeIngestionService /
+SubtitleIngestionService に任せ、このモジュールは
 request/response schema と HTTP status 変換だけを持つ。
 """
 
@@ -32,9 +34,11 @@ from app.api.deps import (
     get_pdf_ingestion_service,
     get_practice_session_service,
     get_review_session_service,
+    get_subtitle_ingestion_service,
     get_today_learning_service,
     get_tutor_service,
     get_web_url_ingestion_service,
+    get_youtube_ingestion_service,
 )
 from app.domain.daily_learning_plan import (
     DEFAULT_MAX_NEW_COUNT,
@@ -87,6 +91,11 @@ from app.domain.tutor import (
 )
 from app.ingestion.errors import WebFetchErrorCode, WebUrlIngestionError
 from app.ingestion.pdf_errors import PdfIngestErrorCode, PdfIngestionError
+from app.ingestion.subtitle_errors import (
+    SubtitleIngestErrorCode,
+    SubtitleIngestionError,
+)
+from app.ingestion.youtube_errors import YoutubeIngestErrorCode, YoutubeIngestionError
 from app.services.candidate_service import CandidateService, CandidateView
 from app.services.exceptions import (
     ExtractionConfigError,
@@ -109,9 +118,11 @@ from app.services.exercise_service import ExerciseService
 from app.services.pdf_ingestion import PdfIngestionService
 from app.services.practice_session_service import PracticeSessionService
 from app.services.review_session_service import ReviewSessionService
+from app.services.subtitle_ingestion import SubtitleIngestionService
 from app.services.today_learning_service import TodayLearningService
 from app.services.tutor_service import TutorService
 from app.services.web_url_ingestion import WebUrlIngestionService
+from app.services.youtube_ingestion import YoutubeIngestionService
 
 router = APIRouter(prefix="/api/tutor", tags=["tutor"])
 
@@ -132,6 +143,12 @@ WebUrlIngestionServiceDep = Annotated[
 ]
 PdfIngestionServiceDep = Annotated[
     PdfIngestionService, Depends(get_pdf_ingestion_service)
+]
+YoutubeIngestionServiceDep = Annotated[
+    YoutubeIngestionService, Depends(get_youtube_ingestion_service)
+]
+SubtitleIngestionServiceDep = Annotated[
+    SubtitleIngestionService, Depends(get_subtitle_ingestion_service)
 ]
 
 SOURCE_LIST_LIMIT_DEFAULT = 50
@@ -173,10 +190,33 @@ class IngestUrlRequest(BaseModel):
         return value
 
 
+class IngestYoutubeRequest(BaseModel):
+    """YouTube の URL または 11 文字の video ID。playlist は受け取らない。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    video: str = Field(min_length=1, max_length=MAX_LOCATOR_CHARS)
+    title: str | None = Field(
+        default=None, min_length=1, max_length=MAX_SHORT_FIELD_CHARS
+    )
+    note: str | None = Field(default=None, min_length=1, max_length=2_000)
+    language: str = Field(default="fr", min_length=1, max_length=32)
+
+    @field_validator("video", "title", "note", "language")
+    @classmethod
+    def _reject_blank(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("空文字は指定できない")
+            return stripped
+        return value
+
+
 class IngestUrlResponse(BaseModel):
     """保存した、または再利用した SourceDocument と、再投入の扱い。
 
-    Web URL と PDF で同じ形を返す。
+    Web URL、PDF、YouTube transcript、字幕ファイルで同じ形を返す。
     """
 
     action: IngestAction
@@ -489,6 +529,29 @@ _PDF_CODE_HTTP: dict[PdfIngestErrorCode, int] = {
     PdfIngestErrorCode.parser_timeout: status.HTTP_504_GATEWAY_TIMEOUT,
 }
 
+_YOUTUBE_CODE_HTTP: dict[YoutubeIngestErrorCode, int] = {
+    YoutubeIngestErrorCode.invalid_video: status.HTTP_400_BAD_REQUEST,
+    YoutubeIngestErrorCode.transcript_unavailable: (
+        status.HTTP_422_UNPROCESSABLE_CONTENT
+    ),
+    YoutubeIngestErrorCode.transcript_disabled: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    YoutubeIngestErrorCode.video_unavailable: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    YoutubeIngestErrorCode.malformed_transcript: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    YoutubeIngestErrorCode.transcript_empty: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    YoutubeIngestErrorCode.text_too_large: status.HTTP_413_CONTENT_TOO_LARGE,
+    YoutubeIngestErrorCode.transcript_timeout: status.HTTP_504_GATEWAY_TIMEOUT,
+    YoutubeIngestErrorCode.transcript_provider_error: status.HTTP_502_BAD_GATEWAY,
+}
+
+_SUBTITLE_CODE_HTTP: dict[SubtitleIngestErrorCode, int] = {
+    SubtitleIngestErrorCode.invalid_subtitle: status.HTTP_400_BAD_REQUEST,
+    SubtitleIngestErrorCode.malformed_subtitle: status.HTTP_400_BAD_REQUEST,
+    SubtitleIngestErrorCode.unsupported_media: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    SubtitleIngestErrorCode.file_too_large: status.HTTP_413_CONTENT_TOO_LARGE,
+    SubtitleIngestErrorCode.text_too_large: status.HTTP_413_CONTENT_TOO_LARGE,
+    SubtitleIngestErrorCode.subtitle_empty: status.HTTP_422_UNPROCESSABLE_CONTENT,
+}
+
 _WEB_URL_CODE_HTTP: dict[WebFetchErrorCode, int] = {
     WebFetchErrorCode.invalid_url: status.HTTP_400_BAD_REQUEST,
     WebFetchErrorCode.blocked_url: status.HTTP_400_BAD_REQUEST,
@@ -512,6 +575,16 @@ def _ingestion_http(exc: SourceIngestionError) -> HTTPException:
     if isinstance(exc, PdfIngestionError):
         return HTTPException(
             status_code=_PDF_CODE_HTTP[exc.code],
+            detail={"code": exc.code.value, "message": str(exc)},
+        )
+    if isinstance(exc, YoutubeIngestionError):
+        detail = {"code": exc.code.value, "message": str(exc)}
+        if exc.available_languages:
+            detail["available_languages"] = list(exc.available_languages)
+        return HTTPException(status_code=_YOUTUBE_CODE_HTTP[exc.code], detail=detail)
+    if isinstance(exc, SubtitleIngestionError):
+        return HTTPException(
+            status_code=_SUBTITLE_CODE_HTTP[exc.code],
             detail={"code": exc.code.value, "message": str(exc)},
         )
     code, http_status = _INGESTION_KIND_HTTP[exc.kind]
@@ -602,6 +675,93 @@ def ingest_pdf_source(
 
     try:
         committed = service.ingest_pdf(
+            source=file.file,
+            filename=file.filename,
+            declared_media_type=file.content_type,
+            title=title,
+            note=note,
+            language=language,
+        )
+    except SourceIngestionError as exc:
+        raise _ingestion_http(exc) from exc
+    response.status_code = (
+        status.HTTP_201_CREATED if committed.created else status.HTTP_200_OK
+    )
+    return IngestUrlResponse(
+        action=committed.action,
+        created=committed.created,
+        source=committed.document,
+    )
+
+
+@router.post(
+    "/sources/ingest/youtube",
+    response_model=IngestUrlResponse,
+    responses={
+        200: {"description": "同じ動画と字幕本文の再取り込み。既存 Source を返す"},
+        201: {"description": "新しい Source、または字幕本文が変わった版を追加する"},
+        400: {"description": "invalid_video"},
+        413: {"description": "text_too_large"},
+        422: {
+            "description": (
+                "transcript_unavailable、transcript_disabled、video_unavailable、"
+                "malformed_transcript、または transcript_empty"
+            )
+        },
+        502: {"description": "transcript_provider_error"},
+        504: {"description": "transcript_timeout"},
+    },
+)
+def ingest_youtube_source(
+    req: IngestYoutubeRequest,
+    service: YoutubeIngestionServiceDep,
+    response: Response,
+) -> IngestUrlResponse:
+    """公開字幕を SourceDocument にする。動画の音声は取得しない。"""
+
+    try:
+        committed = service.ingest_youtube(
+            video=req.video,
+            title=req.title,
+            note=req.note,
+            language=req.language,
+        )
+    except SourceIngestionError as exc:
+        raise _ingestion_http(exc) from exc
+    response.status_code = (
+        status.HTTP_201_CREATED if committed.created else status.HTTP_200_OK
+    )
+    return IngestUrlResponse(
+        action=committed.action,
+        created=committed.created,
+        source=committed.document,
+    )
+
+
+@router.post(
+    "/sources/ingest/subtitle",
+    response_model=IngestUrlResponse,
+    responses={
+        200: {"description": "同じ字幕ファイルと本文の再取り込み。既存 Source を返す"},
+        201: {"description": "新しい Source、または本文が変わった版を追加する"},
+        400: {"description": "invalid_subtitle または malformed_subtitle"},
+        413: {"description": "file_too_large または text_too_large"},
+        415: {"description": "unsupported_media"},
+        422: {"description": "subtitle_empty"},
+    },
+)
+def ingest_subtitle_source(
+    service: SubtitleIngestionServiceDep,
+    response: Response,
+    file: Annotated[UploadFile, File()],
+    title: Annotated[str | None, Form()] = None,
+    note: Annotated[str | None, Form()] = None,
+    language: Annotated[str, Form()] = "fr",
+) -> IngestUrlResponse:
+    """SRT / VTT を時刻付き SourceDocument にする。"""
+
+    try:
+        committed = service.ingest_subtitle(
             source=file.file,
             filename=file.filename,
             declared_media_type=file.content_type,
