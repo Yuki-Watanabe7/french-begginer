@@ -47,7 +47,7 @@ locator があるとき:
 web_url のホスト正規化と SSRF 対策は `app.ingestion`（Issue #190）。
 PDF の text layer 抽出は `app.ingestion`（Issue #191）。OCR はしない。
 YouTube の公開字幕と SRT / VTT の解析は `app.ingestion`（Issue #192）。
-動画の音声取得と自動文字起こしはしない。
+音声ファイルの文字起こしは `app.ingestion`（Issue #193）。raw audio は保存しない。
 このモジュールの locator 比較は、前後空白を除いた文字列の一致である。
 URL を同一視する正規化は、web adapter が `canonical_locator` に書く前に行う。
 """
@@ -141,6 +141,8 @@ _RAW_PAYLOAD_KEYS = frozenset(
         "file_bytes",
         "binary",
         "html_body",
+        "raw_audio",
+        "audio_bytes",
     }
 )
 

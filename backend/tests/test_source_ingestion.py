@@ -288,6 +288,10 @@ def test_limits_media_secrets_and_raw_payload_are_rejected():
     assert secret.value.kind is IngestionFailureKind.validation
     with pytest.raises(SourceIngestionError):
         ingest_manual_text(
+            _manual_request(metadata={"raw_audio": "AAAA"}), ingested_at=FIXED
+        )
+    with pytest.raises(SourceIngestionError):
+        ingest_manual_text(
             _manual_request(metadata={"provider": {"access_token": "x"}}),
             ingested_at=FIXED,
         )

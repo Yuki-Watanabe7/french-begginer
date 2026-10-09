@@ -39,6 +39,7 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/sources/ingest/pdf` | テキスト PDF を multipart で取り込み、ページ位置付きの SourceDocument にする。同じファイルと本文は既存を返す。不正・破損は 400、サイズやページ数の超過は 413、PDF 以外は 415、パスワード付きとテキストレイヤー不足は 422、解析タイムアウトは 504。OCR はしない |
 | POST | `/api/tutor/sources/ingest/youtube` | YouTube URL または video ID の公開字幕を、時刻付き SourceDocument にする。同じ動画と本文は既存を返し、本文が変わったら版を追加する。ID 不正は 400、本文超過は 413、字幕が無い・無効・動画が取れない・時刻不正・本文空は 422、取得失敗は 502、タイムアウトは 504。音声 download と字幕翻訳はしない |
 | POST | `/api/tutor/sources/ingest/subtitle` | SRT / VTT を multipart で取り込み、時刻付き SourceDocument にする。同じファイルと本文は既存を返す。指定不正は 400、時刻不正は 400、サイズ超過は 413、形式不一致は 415、本文が空なら 422 |
+| POST | `/api/tutor/sources/ingest/audio` | 音声を multipart で文字起こし、時刻があれば時刻付きの SourceDocument にする。同じ音声と本文は既存を返す。指定不正・破損は 400、サイズ超過と読めた再生時間の上限超過は 413、形式不一致は 415、空本文・応答不正・翻訳結果は 422、provider の失敗は 502、未設定は 503、タイムアウトは 504。raw audio は保存しない |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`created_at` 降順）。全文ではなく SourceSummary を返す |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得する |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から学習候補を抽出し保存する。存在しない Source は 404。API key 未設定・一時障害は 503、LLM 応答不正は 502 |
@@ -66,7 +67,7 @@ SQLite (初期) → PostgreSQL (将来)
 
 レスポンスは全文ではなく `SourceSummary`（`content_preview` は先頭120文字）。0件でも 200 + `[]`。
 
-`POST /api/tutor/sources` は手入力のまま `content` を正規化せず保存する。`GET /api/tutor/sources/{source_id}` の `SourceDocument` は、Phase 6 の ingestion で作った Source について `content_hash` / `ingestion_version` / `provenance` / `segments` を返す。手入力の既存行ではこれらは空である。Web URL は `POST /api/tutor/sources/ingest/url`、テキスト PDF は `POST /api/tutor/sources/ingest/pdf`、YouTube の公開字幕は `POST /api/tutor/sources/ingest/youtube`、SRT / VTT は `POST /api/tutor/sources/ingest/subtitle`。音声の自動文字起こしはまだ無い。
+`POST /api/tutor/sources` は手入力のまま `content` を正規化せず保存する。`GET /api/tutor/sources/{source_id}` の `SourceDocument` は、Phase 6 の ingestion で作った Source について `content_hash` / `ingestion_version` / `provenance` / `segments` を返す。手入力の既存行ではこれらは空である。Web URL は `POST /api/tutor/sources/ingest/url`、テキスト PDF は `POST /api/tutor/sources/ingest/pdf`、YouTube の公開字幕は `POST /api/tutor/sources/ingest/youtube`、SRT / VTT は `POST /api/tutor/sources/ingest/subtitle`、音声の文字起こしは `POST /api/tutor/sources/ingest/audio`。
 
 ### GET /api/tutor/items クエリパラメータ
 

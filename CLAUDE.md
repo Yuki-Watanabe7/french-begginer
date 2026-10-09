@@ -59,7 +59,7 @@ backend/app/
 │   ├── practice_session.py  # active LearningItem から Practice Session を組み立てる（Issue #150）
 │   ├── conjugation_adapter.py  # conjugation Item→既存動詞活用への安全な接続
 │   └── source_ingestion.py  # Source ingestion 共通契約（Issue #189）
-├── ingestion/     # Web URL、PDF、YouTube 字幕、SRT / VTT（Issue #190 / #191 / #192）
+├── ingestion/     # Web URL、PDF、YouTube 字幕、SRT / VTT、音声文字起こし（Issue #190 / #191 / #192 / #193）
 ├── evaluation/    # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
@@ -74,6 +74,7 @@ backend/app/
     ├── pdf_ingestion.py  # テキスト PDF 取り込み（Issue #191）
     ├── youtube_ingestion.py  # YouTube 公開字幕の取り込み（Issue #192）
     ├── subtitle_ingestion.py  # SRT / VTT 取り込み（Issue #192）
+    ├── audio_ingestion.py  # 音声の文字起こし取り込み（Issue #193）
     ├── extraction_service.py  # Source から LearningItemCandidate を抽出
     ├── candidate_service.py  # 抽出結果の保存と accept/reject
     ├── exercise_service.py  # Exercise 取得・採点・LearningEvent 記録
@@ -131,6 +132,7 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 | POST | `/api/tutor/sources/ingest/pdf` | テキスト PDF をページ位置付き SourceDocument にする。同一ファイル・同一本文は既存を返す。OCR はしない |
 | POST | `/api/tutor/sources/ingest/youtube` | YouTube の公開字幕を時刻付き SourceDocument にする。同一動画・同一本文は既存を返す。音声 download はしない |
 | POST | `/api/tutor/sources/ingest/subtitle` | SRT / VTT を時刻付き SourceDocument にする。同一ファイル・同一本文は既存を返す |
+| POST | `/api/tutor/sources/ingest/audio` | 音声を文字起こし、時刻付き SourceDocument にする。同一音声・同一本文は既存を返す。raw audio は保存しない |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`SourceSummary`） |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得 |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から Candidate を抽出して保存。再実行しても重複爆発しない |
