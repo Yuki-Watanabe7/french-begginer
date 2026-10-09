@@ -17,6 +17,7 @@ from app.ingestion.youtube import YoutubeTranscriptProvider
 from app.ingestion.youtube_api import YoutubeTranscriptApiProvider
 from app.repositories.sqlite import TutorSqliteStore
 from app.services.candidate_service import CandidateService, build_candidate_service
+from app.services.conversation_ingestion import ConversationIngestionService
 from app.services.exercise_service import ExerciseService, build_exercise_service
 from app.services.extraction_service import ExtractionService
 from app.services.extractors import LearningItemExtractor
@@ -31,6 +32,7 @@ from app.services.review_session_service import (
     build_review_session_service,
 )
 from app.services.subtitle_ingestion import SubtitleIngestionService
+from app.services.text_file_ingestion import TextFileIngestionService
 from app.services.today_learning_service import (
     TodayLearningService,
     build_today_learning_service,
@@ -139,3 +141,15 @@ def get_subtitle_ingestion_service(
     store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
 ) -> SubtitleIngestionService:
     return SubtitleIngestionService(store.source_documents)
+
+
+def get_text_file_ingestion_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+) -> TextFileIngestionService:
+    return TextFileIngestionService(store.source_documents)
+
+
+def get_conversation_ingestion_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+) -> ConversationIngestionService:
+    return ConversationIngestionService(store.source_documents)

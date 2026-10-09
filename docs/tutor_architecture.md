@@ -3180,6 +3180,8 @@ Web URL の取り込みは下記「Phase 6 — Web URL から SourceDocument を
 テキスト PDF の取り込みは下記「Phase 6 — PDF から SourceDocument を取り込む」。
 YouTube の公開字幕と SRT / VTT は下記
 「Phase 6 — YouTube transcript / SRT / VTT を時刻付きで取り込む」。
+テキスト / Markdown と structured conversation JSON は下記
+「Phase 6 — 会話ログとテキストファイルを取り込む」。
 `POST /api/tutor/sources` はこれまでどおり、投稿された本文を正規化せず保存する。
 
 ### SourceType
@@ -3214,8 +3216,10 @@ span はその文字列上のオフセットと一致する。schema upgrade は
 
 `SourceSegment.normalized_start` / `normalized_end` は EvidenceSpan と
 同じ半開区間である。page / `start_seconds` / `end_seconds` / speaker /
-`external_locator` へ、正規化後の span から戻れる。区間は content 内で
-重ならない。隙間（segment 同士の段落区切り）は span の帰属先にしない。
+`timestamp` / `external_locator` へ、正規化後の span から戻れる。
+`timestamp` は会話ログの発話時刻で、メディアの秒数区間とは別である。
+区間は content 内で重ならない。隙間（segment 同士の段落区切り）は
+span の帰属先にしない。
 
 HTML 文書と PDF の raw payload（`%PDF`）は `content` にしない。
 adapter は本文抽出のあとで `assemble_ingestion_result` を通す。
@@ -3248,7 +3252,7 @@ web_url のホスト正規化と SSRF 対策は、adapter が `canonical_locator
 | `input_too_large` | しない | 本文が 200_000 コードポイントを超える |
 | `timeout` | する | `provider_timeout` |
 | `provider` | する | `provider_failure` |
-| `not_implemented` | しない | 音声文字起こし、会話ログなど、まだ接続していない adapter |
+| `not_implemented` | しない | 音声文字起こしなど、まだ接続していない adapter |
 
 metadata のキーに secret（`api_key` / `token` / `password` など）や
 raw payload 用のキーは保存しない。本文中の「token」という語は拒否しない。
@@ -3558,6 +3562,132 @@ stem より優先する。`note` は `metadata.note` に置く。
 | ネットワークなし。翻訳 API も音声 download もしない | `test_youtube_ingestion_does_not_use_network` / `test_subtitle_ingestion_does_not_use_network` / `test_provider_reads_published_captions_without_translating` / `test_youtube_modules_do_not_download_audio` |
 | 手入力 API を壊さない | `test_ingest_youtube_api_returns_source_and_keeps_manual_create` / `test_ingest_subtitle_api_returns_source_and_keeps_manual_create` |
 
+## Phase 6 — 会話ログとテキストファイルを取り込む（Issue #194）
+
+すでにテキストとしてある学習素材を、手入力の全文コピペ以外の経路で
+`SourceDocument` にする。Slack / Discord / LINE、Gmail、ChatGPT export の
+専用変換、添付の取得、要約、チャット UI は扱わない。
+
+```text
+POST /api/tutor/sources/ingest/text-file
+  multipart/form-data（file, 任意の title / note / language）
+  -> UTF-8 テキスト、または Markdown の最小 plain text 化
+  -> normalize_source_text
+  -> SourceDocument(source_type=conversation_log)
+
+POST /api/tutor/sources/ingest/conversation
+  multipart/form-data（file, 任意の title / note / language）
+  -> 固定 schema の conversation JSON
+  -> 発話ごとの SourceSegment（speaker / timestamp）
+  -> SourceDocument(source_type=conversation_log)
+  -> 既存 Candidate extraction
+```
+
+実装は `backend/app/ingestion/`。解析は標準ライブラリだけで、URL は取得しない。
+domain は `app.ingestion` を import しない。`POST /api/tutor/sources` の
+手入力は、これまでどおり投稿本文を正規化せず保存する。
+
+### テキスト / Markdown
+
+- ファイルは 2_000_000 バイトまで。拡張子は `.txt` / `.log` / `.md` / `.markdown`
+- `.txt` と `.log` は plain text のままにする。中身が Markdown や会話 JSON に
+  見えても記法としては解釈しない
+- `.md` と `.markdown` だけ、見出し・強調・リスト・引用・コードフェンスを外す。
+  リンクと画像は見える文字だけを残し、URL は本文にも metadata にも残さない
+- 参照定義の URL 行は捨てる。コードフェンスの中は記法として読まない
+- 宣言された Content-Type があるときは、plain text なら `text/plain` か
+  `application/octet-stream`。Markdown ならそれらに加えて `text/markdown` と
+  `text/x-markdown`。未指定は拡張子に任せる
+- UTF-8（BOM 可）以外は拒否する。文字コードは推測しない
+- ファイル名は basename だけを残し、制御文字を除いて NFC にする。パスは保存しない
+- HTML 文書と PDF の raw payload は本文にしない
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_text_file` | 400 | 空ファイル、ファイル名、title / note / language |
+| `malformed_text` | 400 | UTF-8 でない、HTML / PDF、NUL |
+| `unsupported_media` | 415 | 拡張子または宣言された MIME がテキスト / Markdown でない |
+| `file_too_large` | 413 | ファイルサイズ上限 |
+| `text_too_large` | 413 | 本文が 200_000 文字超 |
+| `text_empty` | 422 | 正規化後の本文が空 |
+
+### 会話 JSON
+
+受け付ける形はこれだけである。キーの別名や、配列だけの JSON、他サービスの
+export からは発話を推測しない。未知のキーがある文書は保存しない。
+
+```json
+{
+  "title": "会話練習",
+  "messages": [
+    {"speaker": "user", "text": "Bonjour.", "timestamp": "2026-04-01T12:00:00Z"}
+  ]
+}
+```
+
+- `messages` は必須。`title`、`speaker`、`timestamp` は任意
+- `timestamp` はタイムゾーン付きの ISO-8601。UTC の `...Z` に揃えて
+  `SourceSegment.timestamp` へ置く。秒数の `start_seconds` は作らない
+- タイムゾーンが無い時刻、日付だけ、相対表現は文書ごと拒否する
+- 空の `text` は飛ばす。すべて空なら 422。順番は配列のまま並び替えない
+- 話者名は本文に足さない。EvidenceSpan は発話本文に張れる
+- 日本語や英語の発話が混ざっても Source 全体は拒否しない
+- ファイル名は任意。無いときは Content-Type が `application/json` であること。
+  あるときは拡張子 `.json`。宣言された MIME は `application/json`、
+  `text/plain`、`application/octet-stream` だけ
+- `account_id` や `email`、`api_key`、添付 URL は metadata にコピーしない
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_conversation` | 400 | 空ファイル、ファイル名が無いのに JSON と宣言されていない、title / note / language |
+| `malformed_conversation` | 400 | JSON でない、schema 不一致、未知フィールド、時刻が不正、UTF-8 でない |
+| `unsupported_media` | 415 | 拡張子または宣言された MIME が JSON でない |
+| `file_too_large` | 413 | ファイルサイズ上限 |
+| `text_too_large` | 413 | 本文が 200_000 文字超 |
+| `conversation_empty` | 422 | 残る発話が無い |
+
+### 本文と provenance
+
+テキストファイルは本文全体が 1 つの `SourceSegment` になる。会話は空でない
+発話が 1 つの `SourceSegment` になり、あいだは LF 2 つである。その隙間は
+どちらの発話にも属さない。`normalized_start` / `normalized_end` は保存済み
+`content` 上の半開区間なので、EvidenceSpan が 1 発話の中にあれば
+`segment_for_span` で `speaker` と `timestamp` へ戻せる。
+
+`canonical_locator` は生ファイルの `sha256:` ダイジェストである。
+同じバイト列から同じ本文が出たときは既存 Source を返す。
+ファイル名が違ってもバイト列が同じなら再利用する。別のバイト列は新しい Source になる。
+既存行の content は書き換えない。
+
+provenance には filename（無いことがある）、MIME、`ingested_at`、
+adapter version（`text-file-v1` または `conversation-log-v1`）、
+`ingestion_version` を置く。metadata には `source_format`
+（`plain_text` / `markdown` / `conversation_json`）と `file_sha256` を置く。
+会話では加えて `message_count` と `empty_message_count` を置く。
+`content_hash` は正規化後本文のダイジェストで、ファイルのダイジェストとは別である。
+
+任意の `title` は、テキストではファイル名の stem より、会話では JSON の
+`title` とファイル名の stem より優先する。`note` は `metadata.note` に置く。
+成功応答は Web URL と同じく `source` に SourceDocument を載せ、新規は 201、再利用は 200。
+`GET /api/tutor/sources/{source_id}` で、保存した本文・話者・発話時刻・provenance を確認できる。
+
+### テスト
+
+| 確認 | 自動テスト |
+|------|------------|
+| txt / Markdown の本文と provenance | `test_txt_and_markdown_import_keep_provenance_and_plain_text` / `test_markdown_to_plain_drops_links_and_keeps_french_text` |
+| plain text は Markdown として解釈しない | `test_plain_text_does_not_strip_markdown_syntax` |
+| 正規化と content hash が決定的 | `test_markdown_normalization_is_deterministic` |
+| 会話 JSON の話者・時刻・順序 | `test_conversation_json_keeps_speaker_time_and_message_order` |
+| 壊れた JSON、未知フィールド、他サービスの形を保存しない | `test_unknown_and_malformed_conversation_json_is_not_saved` |
+| 空発話を飛ばし、全部空なら拒否する | `test_empty_messages_are_skipped_and_all_empty_is_rejected` |
+| 同じファイルは再利用する | `test_same_conversation_reuses_source_and_other_bytes_create_a_new_one` / `test_markdown_normalization_is_deterministic` |
+| DB を開き直しても残る | `test_text_and_conversation_sources_survive_database_reopen` |
+| Candidate の evidence から話者と時刻を取る | `test_candidate_evidence_maps_to_conversation_speaker` / `test_ingest_text_file_api_returns_source_and_keeps_manual_create` |
+| 不正なファイルと個人 metadata を残さない | `test_invalid_text_and_conversation_inputs_are_rejected` / `test_ingest_conversation_api_distinguishes_errors_and_keeps_manual_create` |
+| ネットワークも Markdown ライブラリも使わない | `test_text_modules_do_not_fetch` |
+| 手入力 API を壊さない | `test_ingest_text_file_api_returns_source_and_keeps_manual_create` / `test_ingest_conversation_api_distinguishes_errors_and_keeps_manual_create` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -3617,3 +3747,5 @@ PDF 取り込みは上記
 「Phase 6 — PDF から SourceDocument を取り込む」を正とする。
 YouTube transcript と SRT / VTT の取り込みは上記
 「Phase 6 — YouTube transcript / SRT / VTT を時刻付きで取り込む」を正とする。
+会話ログとテキストファイルの取り込みは上記
+「Phase 6 — 会話ログとテキストファイルを取り込む」を正とする。

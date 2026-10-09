@@ -47,6 +47,9 @@ locator があるとき:
 web_url のホスト正規化と SSRF 対策は `app.ingestion`（Issue #190）。
 PDF の text layer 抽出は `app.ingestion`（Issue #191）。OCR はしない。
 YouTube の公開字幕と SRT / VTT の解析は `app.ingestion`（Issue #192）。
+テキスト / Markdown と structured conversation JSON は `app.ingestion`
+（Issue #194）。話者名は本文に足さず、`SourceSegment.speaker` に置く。
+時刻は `timestamp`（UTC の ISO-8601）で、秒数の区間とは別である。
 動画の音声取得と自動文字起こしはしない。
 このモジュールの locator 比較は、前後空白を除いた文字列の一致である。
 URL を同一視する正規化は、web adapter が `canonical_locator` に書く前に行う。
@@ -116,14 +119,14 @@ _ALLOWED_MIME_TYPES: dict[SourceType, frozenset[str]] = {
     "youtube_transcript": frozenset({"text/plain", "application/json"}),
     "subtitle": frozenset({"text/vtt", "application/x-subrip", "text/plain"}),
     "audio_transcript": frozenset({"text/plain", "application/json"}),
-    "conversation_log": frozenset({"text/plain", "application/json"}),
+    "conversation_log": frozenset({"text/plain", "text/markdown", "application/json"}),
 }
 
 _ALLOWED_EXTENSIONS: dict[SourceType, frozenset[str]] = {
     "pdf": frozenset({".pdf"}),
     "subtitle": frozenset({".vtt", ".srt"}),
     "audio_transcript": frozenset({".txt", ".json"}),
-    "conversation_log": frozenset({".txt", ".json", ".log"}),
+    "conversation_log": frozenset({".txt", ".md", ".markdown", ".log", ".json"}),
 }
 
 _SECRET_KEY_RE = re.compile(
@@ -227,6 +230,8 @@ class SourceSegment(BaseModel):
 
     `normalized_start` / `normalized_end` は `SourceDocument.content` および
     EvidenceSpan と同じ半開区間（コードポイント）である。
+    `timestamp` は会話ログの発話時刻（UTC の ISO-8601）で、
+    `start_seconds` / `end_seconds` のメディア区間とは別に持つ。
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -237,9 +242,10 @@ class SourceSegment(BaseModel):
     start_seconds: float | None = Field(default=None, ge=0)
     end_seconds: float | None = Field(default=None, ge=0)
     speaker: str | None = Field(default=None, max_length=200)
+    timestamp: str | None = Field(default=None, max_length=80)
     external_locator: str | None = Field(default=None, max_length=MAX_LOCATOR_CHARS)
 
-    @field_validator("speaker", "external_locator", mode="before")
+    @field_validator("speaker", "timestamp", "external_locator", mode="before")
     @classmethod
     def _blank_to_none(cls, value: object) -> object:
         if isinstance(value, str):
@@ -268,9 +274,10 @@ class SourceSegmentDraft(BaseModel):
     start_seconds: float | None = Field(default=None, ge=0)
     end_seconds: float | None = Field(default=None, ge=0)
     speaker: str | None = Field(default=None, max_length=200)
+    timestamp: str | None = Field(default=None, max_length=80)
     external_locator: str | None = Field(default=None, max_length=MAX_LOCATOR_CHARS)
 
-    @field_validator("speaker", "external_locator", mode="before")
+    @field_validator("speaker", "timestamp", "external_locator", mode="before")
     @classmethod
     def _blank_to_none(cls, value: object) -> object:
         if isinstance(value, str):
@@ -672,6 +679,7 @@ def _compose_plain_text(
                 start_seconds=draft.start_seconds,
                 end_seconds=draft.end_seconds,
                 speaker=draft.speaker,
+                timestamp=draft.timestamp,
                 external_locator=draft.external_locator,
             )
         )
