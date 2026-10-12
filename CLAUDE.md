@@ -51,6 +51,7 @@ backend/app/
 │   ├── recommendation_signal.py  # 推薦入力のsignal snapshot（Issue #175）
 │   ├── recommendation_ranking.py  # 説明可能なranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
+│   ├── admission_policy.py  # 新規LearningItemの流入制御 admission policy（Issue #200）
 │   ├── today_session.py  # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 │   ├── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
