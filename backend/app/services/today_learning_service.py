@@ -1,7 +1,9 @@
 """「今日の学習」Plan と Tutor Today Session の組み立て（Issue #178）。
 
 repository から Item / State / Schedule / Event / Source を読み、
-signal → ranking → Daily Learning Plan を組み立てる。
+signal → admission → ranking → Daily Learning Plan を組み立てる。
+未学習の新規は admission policy（Issue #200）を通過したものだけを
+new_practice として Plan に渡す。復習の順位と max_new_count の配分は変えない。
 Session 自体は保存しない。router は HTTP 変換だけ行う。
 """
 
@@ -14,6 +16,14 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
+from app.domain.admission_policy import (
+    UnseenBacklogItem,
+    build_unseen_backlog_item,
+    count_due_review_units,
+    count_recent_introductions,
+    decide_new_admissions,
+    filter_ranked_new_practice,
+)
 from app.domain.daily_learning_plan import (
     DEFAULT_MAX_NEW_COUNT,
     DEFAULT_PLAN_SEED,
@@ -159,9 +169,22 @@ class TodayLearningService:
         sources_by_id = {row.id: row for row in self._sources.list()}
         snapshots: list[RecommendationSignalSnapshot] = []
         snapshots_by_id: dict[str, RecommendationSignalSnapshot] = {}
+        unseen: list[UnseenBacklogItem] = []
+        first_learned_at: dict[str, datetime] = {}
         for item in all_items:
             if item.status != "active":
                 continue
+            events_by_direction = {
+                direction: self._events.list_by_item_and_direction(item.id, direction)
+                for direction in SKILL_DIRECTIONS
+            }
+            learned_at = [
+                event.occurred_at
+                for events in events_by_direction.values()
+                for event in events
+            ]
+            if learned_at:
+                first_learned_at[item.id] = min(learned_at)
             snapshot = extract_recommendation_signal(
                 item,
                 learner_state=self._states.get(item.id),
@@ -169,18 +192,29 @@ class TodayLearningService:
                     row.skill_direction: row
                     for row in self._schedules.list_for_item(item.id)
                 },
-                events_by_direction={
-                    direction: self._events.list_by_item_and_direction(
-                        item.id, direction
-                    )
-                    for direction in SKILL_DIRECTIONS
-                },
+                events_by_direction=events_by_direction,
                 sources_by_id=sources_by_id,
                 now=when,
             )
             snapshots.append(snapshot)
             snapshots_by_id[item.id] = snapshot
-        ranked = rank_recommendations(snapshots)
+            backlog_item = build_unseen_backlog_item(
+                item,
+                snapshot,
+                sources_by_id=sources_by_id,
+            )
+            if backlog_item is not None:
+                unseen.append(backlog_item)
+        admission = decide_new_admissions(
+            unseen,
+            due_review_count=count_due_review_units(snapshots),
+            recent_introduced_count=count_recent_introductions(
+                first_learned_at,
+                now=when,
+            ),
+            now=when,
+        )
+        ranked = filter_ranked_new_practice(rank_recommendations(snapshots), admission)
         plan = build_daily_learning_plan(
             ranked,
             items_by_id=items_by_id,

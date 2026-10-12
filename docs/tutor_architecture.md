@@ -3999,6 +3999,86 @@ Phase 7 へ進む前提は、Phase 0〜6 が `bash scripts/quality-check.sh` で
 継続して通ることである。OCR、login / paywall の突破、crawler、
 embeddings、ML ranking、自由会話 Tutor は Phase 7 の前提にしない。
 
+新規項目の過剰投入抑止は、下記
+「Phase 7 — 新規LearningItemのadmission policy」を正とする。
+
+## Phase 7 — 新規LearningItemのadmission policy（Issue #200）
+
+accepted 済みの未学習 LearningItem が Source 追加のたびに無制限へ積み上がらないよう、
+「今、新規学習へ入れてよい Item」だけを policy 結果として導出する。
+`LearningItem.status` は増やさない。defer は Candidate の reject ではなく、
+条件が変われば同じ Item が再度 eligible になる。永続化も migration もしない。
+
+```text
+accepted LearningItems
+  -> unseen backlog
+  -> admission policy
+  -> eligible-for-new-learning
+  -> Phase 5 ranking / Daily Learning Plan
+```
+
+実装は `domain.admission_policy.decide_new_admissions`。
+`TodayLearningService` は active Item の signal から unseen backlog と
+due 件数、直近導入件数を作り、defer された `new_practice` だけを
+ranking 結果から外して既存の Daily Learning Plan に渡す。
+ranking の式、`max_new_count`、純 Review Session は変えない。
+
+### 初期 policy
+
+定数は `admission_policy` にまとめ、`policy_version` は `admission-v1`。
+
+| 定数 | 初期値 | 意味 |
+|------|--------|------|
+| `NORMAL_NEW_ADMISSION_CAP` | 8 | due が少ないときの eligible 在庫。セッションの `max_new_count` より広い |
+| `DUE_BACKLOG_SOFT_THRESHOLD` | 8 | これ以上の due direction で新規枠を 1 件へ下げる |
+| `DUE_BACKLOG_HARD_THRESHOLD` | 16 | これ以上の due direction で新規枠を 0 にする |
+| `DAILY_INTRODUCTION_QUOTA` | 8 | 直近に導入済みの新規が達したら追加 eligible を出さない |
+| `RECENT_INTRODUCTION_WINDOW_DAYS` | 1 | 最初の学習イベントを導入済みと数える窓 |
+| `PER_SOURCE_ADMISSION_CAP` | 2 | 同一 Source が新規在庫を占有できる上限 |
+
+due 件数は Item 数ではなく direction 単位。直近導入は、最初の学習が窓内にある
+Item 数であり、まだ unseen の在庫は数えない。
+
+選別の順は次のとおり。
+
+1. 表記ゆれ（大小文字、空白、ハイフン、アポストロフィの字形）が同じ canonical form は
+   優先度の高い 1 件だけを残し、残りを `DUPLICATE_OR_REDUNDANT`。アクセントは残す。
+2. CEFR 距離が 3 以上は `LEVEL_TOO_FAR_FOR_NOW`。距離不明は排除しない。
+3. 残った Item を level fit、Source の新しさ、importance、interest、
+   `learning_item_id` の順で並べる。
+4. Source を跨いで round-robin し、同一 Source は cap まで。
+   Source を持たない Item は互いに cap を共有しない。
+5. cap で落ちた Item は `SOURCE_DAILY_CAP`。
+   due 抑制が無ければ入れた Item は `REVIEW_BACKLOG_HIGH`。
+   それ以外の見送りは `HIGHER_PRIORITY_NEW_EXISTS`。
+   直近導入で枠を使い切った場合も後者になる。
+
+admit の reason code は空。defer は上記のいずれか 1 つ。
+
+Phase 5 の `max_new_count` は 1 セッションの上限のままである。
+admission 在庫がそれより広くても Plan は `max_new_count` を超えない。
+在庫の方が狭ければ Plan の新規は在庫件数で頭打ちになる。
+
+### スコープ外
+
+- Today Plan の ranking 式の変更
+- ML による admission
+- Candidate の自動 reject
+- notification
+- admission 結果の永続化と HTTP での理由一覧
+
+| 観点 | 自動テスト |
+|------|------------|
+| due が多いと新規を抑制する | `test_high_due_backlog_suppresses_new_admission` / `test_today_plan_suppresses_new_when_due_backlog_is_high` |
+| due が少ないと新規を許可する | `test_low_due_backlog_allows_new_admission` / `test_today_plan_admits_new_when_due_backlog_is_low` |
+| 1 Source が全枠を独占しない | `test_single_source_does_not_fill_the_admission_budget` / `test_today_plan_does_not_let_one_source_fill_max_new` |
+| 複数 Source で deterministic | `test_multiple_sources_are_fair_and_deterministic` |
+| CEFR 不明を自動排除しない | `test_unknown_cefr_is_not_excluded` |
+| defer した Item が後日 eligible | `test_deferred_item_becomes_eligible_when_conditions_change` |
+| 同じ状態と now で同じ結果 | `test_same_state_and_now_returns_the_same_result` |
+| `max_new_count` と矛盾しない | `test_max_new_count_still_bounds_the_plan` |
+| OpenAI / LLM 非依存 | `test_module_does_not_import_llm` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -4066,3 +4146,5 @@ YouTube transcript と SRT / VTT の取り込みは上記
 「Phase 6 — 複数Source形式の追加UIとingestion状態・provenance表示」を正とする。
 Phase 6 自体の完了条件と Phase 7 への引継ぎは、上記
 「Phase 6 Exit Criteria」と「Phase 7 への引き継ぎ」を正とする。
+新規 LearningItem の流入制御は、上記
+「Phase 7 — 新規LearningItemのadmission policy」を正とする。
