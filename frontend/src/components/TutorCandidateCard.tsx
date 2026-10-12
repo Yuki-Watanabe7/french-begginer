@@ -7,6 +7,7 @@ import {
 
 interface Props {
   candidate: LearningItemCandidate
+  evidenceProvenance?: string | null
   isBusy: boolean
   actionError: string | null
   onAccept: () => void
@@ -15,6 +16,7 @@ interface Props {
 
 export function TutorCandidateCard({
   candidate,
+  evidenceProvenance = null,
   isBusy,
   actionError,
   onAccept,
@@ -44,6 +46,7 @@ export function TutorCandidateCard({
       {candidate.explanation_ja && (
         <p style={styles.explanation}>{candidate.explanation_ja}</p>
       )}
+      {evidenceProvenance && <p style={styles.provenance}>{evidenceProvenance}</p>}
       <blockquote style={styles.evidence}>
         <span style={styles.evidenceLabel}>原文</span>
         <span lang="fr" style={styles.evidenceText}>
@@ -143,6 +146,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 15,
     color: '#222',
     lineHeight: 1.5,
+  },
+  provenance: {
+    margin: 0,
+    fontSize: 12,
+    fontWeight: 700,
+    color: '#1a56d6',
+    overflowWrap: 'anywhere',
   },
   explanation: {
     margin: 0,

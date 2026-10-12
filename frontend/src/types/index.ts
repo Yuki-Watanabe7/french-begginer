@@ -90,6 +90,33 @@ export type SourceType =
   | 'audio_transcript'
   | 'conversation_log'
 
+/** 正規化後本文を元の URL / ファイルへ戻す記録。内部 hash や provider は通常 UI に出さない。 */
+export interface SourceProvenance {
+  canonical_locator?: string | null
+  filename?: string | null
+  external_id?: string | null
+  fetched_at?: string | null
+  ingested_at?: string | null
+  adapter_version?: string | null
+  provider?: string | null
+  provider_model?: string | null
+  original_content_hash?: string | null
+  mime_type?: string | null
+  ingestion_version?: string | null
+}
+
+/** content 上の区間と、ページ・時刻・話者。 */
+export interface SourceSegment {
+  normalized_start: number
+  normalized_end: number
+  page_number?: number | null
+  start_seconds?: number | null
+  end_seconds?: number | null
+  speaker?: string | null
+  timestamp?: string | null
+  external_locator?: string | null
+}
+
 export interface SourceDocument {
   id: string
   source_type: SourceType | string
@@ -98,6 +125,10 @@ export interface SourceDocument {
   language: string
   created_at: string
   metadata: Record<string, unknown>
+  content_hash?: string | null
+  ingestion_version?: string | null
+  provenance?: SourceProvenance | null
+  segments?: SourceSegment[]
 }
 
 export interface SourceSummary {
@@ -114,6 +145,32 @@ export interface CreateTutorSourceInput {
   content: string
   language?: string
   metadata?: Record<string, unknown>
+}
+
+export type IngestAction = 'create' | 'reuse' | 'append_version'
+
+export interface IngestSourceResponse {
+  action: IngestAction
+  created: boolean
+  source: SourceDocument
+}
+
+export interface IngestTextFields {
+  title?: string
+  note?: string
+  language?: string
+}
+
+export interface IngestUrlInput extends IngestTextFields {
+  url: string
+}
+
+export interface IngestVideoInput extends IngestTextFields {
+  video: string
+}
+
+export interface IngestFileInput extends IngestTextFields {
+  file: File
 }
 
 export interface FetchTutorSourcesOptions {

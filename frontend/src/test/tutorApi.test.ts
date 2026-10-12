@@ -6,6 +6,9 @@ import {
   createReviewSession,
   createTutorSource,
   extractCandidates,
+  ingestTutorPdf,
+  ingestTutorUrl,
+  ingestTutorYoutube,
   fetchCandidates,
   fetchReviewQueue,
   fetchTodayPlan,
@@ -95,6 +98,73 @@ describe('createTutorSource', () => {
           metadata: {},
         }),
       }),
+    )
+  })
+})
+
+describe('ingest tutor sources', () => {
+  it('URL は JSON で送り、title 未入力は載せない', async () => {
+    const source = { ...SOURCE, source_type: 'web_url' }
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse({ action: 'create', created: true, source }, 201),
+    )
+
+    const created = await ingestTutorUrl({
+      url: ' https://example.com/a ',
+      note: ' depuis le web ',
+    })
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith('/api/tutor/sources/ingest/url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        language: 'fr',
+        note: 'depuis le web',
+        url: 'https://example.com/a',
+      }),
+    })
+    expect(created).toEqual(source)
+  })
+
+  it('YouTube は video フィールドで送る', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse({ action: 'reuse', created: false, source: SOURCE }, 200),
+    )
+
+    await ingestTutorYoutube({ video: 'dQw4w9WgXcQ', title: ' 対話 ' })
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      '/api/tutor/sources/ingest/youtube',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          language: 'fr',
+          title: '対話',
+          video: 'dQw4w9WgXcQ',
+        }),
+      }),
+    )
+  })
+
+  it('PDF は multipart で送り、Content-Type は自分で付けない', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse({ action: 'create', created: true, source: SOURCE }, 201),
+    )
+    const file = new File(['%PDF'], 'lecon.pdf', { type: 'application/pdf' })
+
+    await ingestTutorPdf({ file, note: '授業' })
+
+    const init = vi.mocked(globalThis.fetch).mock.calls[0]?.[1]
+    const body = init?.body
+    expect(init?.method).toBe('POST')
+    expect(init?.headers).toBeUndefined()
+    expect(body).toBeInstanceOf(FormData)
+    expect((body as FormData).get('note')).toBe('授業')
+    expect((body as FormData).get('language')).toBe('fr')
+    expect((body as FormData).get('title')).toBeNull()
+    expect((body as FormData).get('file')).toBeInstanceOf(File)
+    expect(String(vi.mocked(globalThis.fetch).mock.calls[0]?.[0])).toBe(
+      '/api/tutor/sources/ingest/pdf',
     )
   })
 })

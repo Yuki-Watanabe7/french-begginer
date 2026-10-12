@@ -3688,6 +3688,49 @@ adapter version（`text-file-v1` または `conversation-log-v1`）、
 | ネットワークも Markdown ライブラリも使わない | `test_text_modules_do_not_fetch` |
 | 手入力 API を壊さない | `test_ingest_text_file_api_returns_source_and_keeps_manual_create` / `test_ingest_conversation_api_distinguishes_errors_and_keeps_manual_create` |
 
+## Phase 6 — 複数Source形式の追加UIとingestion状態・provenance表示（Issue #195）
+
+既存の「教材を追加」から、手入力以外の Source も同じ流れで追加する。
+形式ごとに Candidate UI は作らない。音声の文字起こし API は Issue #193 が
+未実装なので、Frontend は `POST /api/tutor/sources/ingest/audio` を呼び、
+未対応・設定不足・provider 失敗を分けて表示する。ジョブ一覧は作らない。
+
+```text
+教材を追加
+  -> テキストを貼り付ける / Web URL / PDF / YouTube・字幕 / 音声 / 会話ログ・テキストファイル
+  -> 取り込み中
+  -> Source 詳細（URL・ファイル名、ページ、字幕の言語、時刻・話者）
+  -> 学習候補を抽出
+  -> 既存の accept / reject と Today Learning
+```
+
+実装:
+
+- 追加: `TutorSourceForm` と `useTutorSourceForm`。種別は
+  `TutorSourceKindPicker`、ファイルは `TutorSourceFileField`
+- 送信状態は hook に閉じ、失敗しても URL・ファイル・メモは残す
+- 一覧の種別は `sourceTypeLabel`。hash / provider / adapter version は出さない
+- 詳細の出典は `sourceProvenanceFacts`。本文の page / time / speaker は
+  `sourceContentBlocks`、候補の根拠は `evidenceProvenanceLabel`
+- API client: `ingestTutorUrl` / `ingestTutorPdf` / `ingestTutorYoutube` /
+  `ingestTutorSubtitle` / `ingestTutorTextFile` / `ingestTutorConversation` /
+  `ingestTutorAudio`
+
+| 観点 | 自動テスト |
+|------|------------|
+| 種別の選択と手入力の維持 | `TutorSourceIngestionForm.test.tsx` / `TutorSourceForm.test.tsx` |
+| URL 送信と blocked URL | `TutorSourceIngestionForm.test.tsx` / `tutorApi.test.ts` |
+| PDF / 字幕 / テキスト / 会話の upload | `TutorSourceIngestionForm.test.tsx` |
+| 形式・サイズエラーと再選択 | `sourceIngestion.test.ts` / `TutorSourceIngestionForm.test.tsx` |
+| YouTube の字幕なし | `TutorSourceIngestionForm.test.tsx` |
+| 音声の設定不足と provider 失敗 | `TutorSourceIngestionForm.test.tsx` |
+| 失敗時に入力を残す | `TutorSourceIngestionForm.test.tsx` |
+| 一覧の種別 | `TutorSourceList.test.tsx` |
+| 詳細の provenance と候補のページ | `TutorSourceDetail.test.tsx` / `sourceIngestion.test.ts` |
+| 取り込み後の候補抽出 | `TutorFlow.test.tsx` |
+| スマホ幅で折れ、長い URL / ファイル名が折り返す | `TutorSourceIngestionForm.test.tsx` / `TutorSourceDetail.test.tsx` |
+| 手入力の回帰 | `TutorSourceForm.test.tsx` / `TutorPhase1Flow.test.tsx` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -3749,3 +3792,5 @@ YouTube transcript と SRT / VTT の取り込みは上記
 「Phase 6 — YouTube transcript / SRT / VTT を時刻付きで取り込む」を正とする。
 会話ログとテキストファイルの取り込みは上記
 「Phase 6 — 会話ログとテキストファイルを取り込む」を正とする。
+複数 Source 形式の追加 UI は上記
+「Phase 6 — 複数Source形式の追加UIとingestion状態・provenance表示」を正とする。
