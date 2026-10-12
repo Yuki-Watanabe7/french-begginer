@@ -52,6 +52,7 @@ backend/app/
 │   ├── recommendation_ranking.py  # 説明可能なranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
 │   ├── admission_policy.py  # 新規LearningItemの流入制御 admission policy（Issue #200）
+│   ├── known_item_policy.py # 既知項目の explicit known と conservative auto-skip（Issue #201）
 │   ├── today_session.py  # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 │   ├── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
@@ -157,6 +158,9 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベント記録（state / schedule も更新） |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem |
 | GET | `/api/tutor/reviews/queue` | direction-aware な due review queue（件数 summary 付き） |
+| POST | `/api/tutor/items/{item_id}/known` | 既知として新規学習から外す。再指定は冪等。status は変えない。due review は残す |
+| POST | `/api/tutor/items/{item_id}/known/undo` | 既知指定を取り消す。未指定でも冪等 |
+| GET | `/api/tutor/items/{item_id}/known` | explicit known の現在値と更新時刻。未指定でも Item があれば 200 |
 
 ### 現在の動詞データ（`conjugation.py`）
 

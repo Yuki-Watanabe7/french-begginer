@@ -60,6 +60,9 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録し、LearnerState と ReviewSchedule を更新する |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem を返す。任意時刻の query は持たない |
 | GET | `/api/tutor/reviews/queue` | direction-aware な due review queue。`limit` 付き。任意時刻の query は持たない |
+| POST | `/api/tutor/items/{item_id}/known` | 既知として新規学習から外す。再指定は冪等。`LearningItem.status` は変えない。存在しない Item は 404 |
+| POST | `/api/tutor/items/{item_id}/known/undo` | 既知指定を取り消して新規学習へ戻せるようにする。指定が無いときも冪等。存在しない Item は 404 |
+| GET | `/api/tutor/items/{item_id}/known` | explicit known の現在値と更新時刻。未指定でも Item があれば 200。存在しない Item は 404 |
 
 ### GET /api/tutor/sources クエリパラメータ
 
@@ -78,6 +81,8 @@ SQLite (初期) → PostgreSQL (将来)
 | `limit` | 1〜100 の整数 | `50` | 取得件数。`created_at` 昇順（同一時刻は `id` 昇順）。active のみ。不正値は 422 |
 
 0件でも 200 + `[]`。suspended / mastered は含めない。
+
+`POST /api/tutor/items/{item_id}/known` は explicit known を記録する。これは `mastered` とは別で、新規学習の候補から外すための指定である。due review と `LearningItem.status` は変えない。`POST .../known/undo` で戻せる。応答に習熟スコアや `mastered` は含めない。
 
 ### GET /api/tutor/reviews/queue
 

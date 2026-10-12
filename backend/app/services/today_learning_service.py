@@ -1,9 +1,11 @@
 """「今日の学習」Plan と Tutor Today Session の組み立て（Issue #178）。
 
 repository から Item / State / Schedule / Event / Source を読み、
-signal → admission → ranking → Daily Learning Plan を組み立てる。
-未学習の新規は admission policy（Issue #200）を通過したものだけを
-new_practice として Plan に渡す。復習の順位と max_new_count の配分は変えない。
+signal → known-item policy → admission → ranking → Daily Learning Plan
+を組み立てる。explicit known と auto-skip は new_practice だけを外し、
+due review は残す（Issue #201）。未学習の新規は admission policy（Issue #200）
+を通過したものだけを new_practice として Plan に渡す。
+復習の順位と max_new_count の配分は変えない。
 Session 自体は保存しない。router は HTTP 変換だけ行う。
 """
 
@@ -33,7 +35,15 @@ from app.domain.daily_learning_plan import (
     PlanConstraints,
     build_daily_learning_plan,
 )
-from app.domain.recommendation_ranking import rank_recommendations
+from app.domain.known_item_policy import (
+    decide_auto_skip,
+    should_drop_today_candidate,
+)
+from app.domain.recommendation_ranking import (
+    RankedRecommendation,
+    infer_activity_kind,
+    rank_recommendations,
+)
 from app.domain.recommendation_signal import (
     SKILL_DIRECTIONS,
     RecommendationSignalSnapshot,
@@ -48,10 +58,12 @@ from app.domain.today_session import (
 )
 from app.domain.tutor import (
     LearningItem,
+    SkillDirection,
     SourceDocument,
     utcnow,
 )
 from app.repositories.protocols import (
+    KnownItemRepository,
     LearnerStateRepository,
     LearningEventRepository,
     LearningItemRepository,
@@ -67,6 +79,7 @@ class _TodayStore(Protocol):
     learning_events: LearningEventRepository
     learner_states: LearnerStateRepository
     review_schedules: ReviewScheduleRepository
+    known_items: KnownItemRepository
 
 
 def build_today_learning_service(
@@ -81,6 +94,7 @@ def build_today_learning_service(
         events=store.learning_events,
         states=store.learner_states,
         schedules=store.review_schedules,
+        known=store.known_items,
         clock=clock,
     )
 
@@ -94,6 +108,7 @@ class TodayLearningService:
         events: LearningEventRepository,
         states: LearnerStateRepository,
         schedules: ReviewScheduleRepository,
+        known: KnownItemRepository,
         clock: Callable[[], datetime] = utcnow,
     ) -> None:
         self._sources = sources
@@ -101,6 +116,7 @@ class TodayLearningService:
         self._events = events
         self._states = states
         self._schedules = schedules
+        self._known = known
         self._clock = clock
 
     def get_plan(
@@ -171,6 +187,8 @@ class TodayLearningService:
         snapshots_by_id: dict[str, RecommendationSignalSnapshot] = {}
         unseen: list[UnseenBacklogItem] = []
         first_learned_at: dict[str, datetime] = {}
+        explicit_known_ids = self._known.list_active_ids()
+        auto_skipped: set[tuple[str, SkillDirection]] = set()
         for item in all_items:
             if item.status != "active":
                 continue
@@ -178,6 +196,14 @@ class TodayLearningService:
                 direction: self._events.list_by_item_and_direction(item.id, direction)
                 for direction in SKILL_DIRECTIONS
             }
+            for direction, events in events_by_direction.items():
+                decision = decide_auto_skip(
+                    skill_direction=direction,
+                    events=events,
+                    now=when,
+                )
+                if decision.skip_new:
+                    auto_skipped.add((item.id, direction))
             learned_at = [
                 event.occurred_at
                 for events in events_by_direction.values()
@@ -198,12 +224,16 @@ class TodayLearningService:
             )
             snapshots.append(snapshot)
             snapshots_by_id[item.id] = snapshot
+            if item.id in explicit_known_ids:
+                continue
             backlog_item = build_unseen_backlog_item(
                 item,
                 snapshot,
                 sources_by_id=sources_by_id,
             )
-            if backlog_item is not None:
+            if backlog_item is None:
+                continue
+            if _has_offerable_new_direction(snapshot, auto_skipped):
                 unseen.append(backlog_item)
         admission = decide_new_admissions(
             unseen,
@@ -214,7 +244,11 @@ class TodayLearningService:
             ),
             now=when,
         )
-        ranked = filter_ranked_new_practice(rank_recommendations(snapshots), admission)
+        ranked = _drop_blocked_new_practice(
+            filter_ranked_new_practice(rank_recommendations(snapshots), admission),
+            explicit_known_ids=explicit_known_ids,
+            auto_skipped=auto_skipped,
+        )
         plan = build_daily_learning_plan(
             ranked,
             items_by_id=items_by_id,
@@ -245,3 +279,37 @@ def _plan_constraints(question_count: int, max_new_count: int) -> PlanConstraint
         )
     except (ValidationError, InvalidPlanConstraintsError) as exc:
         raise InvalidTodayLearningError(str(exc)) from exc
+
+
+def _drop_blocked_new_practice(
+    ranked: tuple[RankedRecommendation, ...],
+    *,
+    explicit_known_ids: set[str],
+    auto_skipped: set[tuple[str, SkillDirection]],
+) -> tuple[RankedRecommendation, ...]:
+    """review は残し、known / auto-skip の new_practice だけを外す。"""
+
+    return tuple(
+        row
+        for row in ranked
+        if not should_drop_today_candidate(
+            activity_kind=row.activity_kind,
+            explicit_known=row.learning_item_id in explicit_known_ids,
+            auto_skip_new=(row.learning_item_id, row.skill_direction) in auto_skipped,
+        )
+    )
+
+
+def _has_offerable_new_direction(
+    snapshot: RecommendationSignalSnapshot,
+    auto_skipped: set[tuple[str, SkillDirection]],
+) -> bool:
+    """admission 在庫に残してよい新規 direction が残っているか。"""
+
+    for direction, signal in snapshot.by_direction.items():
+        if infer_activity_kind(signal) != "new_practice":
+            continue
+        if (snapshot.learning_item_id, direction) in auto_skipped:
+            continue
+        return True
+    return False

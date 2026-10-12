@@ -157,6 +157,16 @@ export function tutorCandidateFetchErrorMessage(error: unknown): string {
   return '学習候補の取得に失敗しました。通信環境を確認して再度お試しください'
 }
 
+export function tutorKnownItemErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 404) {
+    return '学習項目が見つかりません'
+  }
+  if (error instanceof ApiError && error.status >= 500) {
+    return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+  }
+  return '操作に失敗しました。通信環境を確認して再度お試しください'
+}
+
 export function tutorCandidateActionErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 404) {

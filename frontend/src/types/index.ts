@@ -202,6 +202,15 @@ export interface LearningItemCandidate {
   status: CandidateStatus
   extraction_version: string
   created_at: string
+  learning_item_id?: string | null
+  explicit_known?: boolean
+}
+
+export interface KnownItemState {
+  learning_item_id: string
+  explicit_known: boolean
+  updated_at: string | null
+  policy_version: string
 }
 
 export interface ExtractCandidatesResponse {

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  clearItemKnown,
   createPracticeSession,
   createReviewSession,
   createTodaySession,
   fetchTutorItem,
   fetchTutorItems,
+  markItemKnown,
   submitExerciseAnswer,
 } from '../api/tutor'
 import type {
@@ -19,6 +21,7 @@ import type {
 import {
   formatPracticeGiven,
   tutorExerciseAnswerErrorMessage,
+  tutorKnownItemErrorMessage,
   tutorPracticeSessionErrorMessage,
   tutorReviewSessionErrorMessage,
   tutorTodaySessionErrorMessage,
@@ -57,6 +60,9 @@ export interface PracticeSessionState {
   error: string | null
   correctCount: number
   wrongAnswers: PracticeWrongAnswer[]
+  knownByItemId: Record<string, boolean>
+  knownBusy: boolean
+  knownError: string | null
 }
 
 const ITEM_LIST_LIMIT = 100
@@ -82,6 +88,9 @@ function initialState(): PracticeSessionState {
     error: null,
     correctCount: 0,
     wrongAnswers: [],
+    knownByItemId: {},
+    knownBusy: false,
+    knownError: null,
   }
 }
 
@@ -178,6 +187,7 @@ export function usePracticeSession(
   stateRef.current = state
   const itemsRef = useRef<Record<string, LearningItem>>({})
   const submittingRef = useRef(false)
+  const knownBusyRef = useRef(false)
   const startGenerationRef = useRef<object | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const sourceIdRef = useRef(sourceId)
@@ -189,6 +199,7 @@ export function usePracticeSession(
 
   const start = useCallback(async () => {
     submittingRef.current = false
+    knownBusyRef.current = false
     itemsRef.current = {}
     setState({
       ...initialState(),
@@ -322,7 +333,7 @@ export function usePracticeSession(
     if (snapshot.phase !== 'result' || !snapshot.session) return
     const nextIndex = snapshot.questionIndex + 1
     if (nextIndex >= snapshot.session.exercises.length) {
-      setState(s => ({ ...s, phase: 'session-result' }))
+      setState(s => ({ ...s, phase: 'session-result', knownError: null }))
       return
     }
     setState(s => ({
@@ -334,6 +345,7 @@ export function usePracticeSession(
       reconstruction: [],
       submitting: false,
       submitError: null,
+      knownError: null,
     }))
     setTimeout(() => inputRef.current?.focus(), 50)
   }, [])
@@ -344,6 +356,59 @@ export function usePracticeSession(
 
   const setReconstruction = useCallback((indices: number[]) => {
     setState(s => ({ ...s, reconstruction: indices }))
+  }, [])
+
+  const changeKnown = useCallback(async (mark: boolean) => {
+    const snapshot = stateRef.current
+    const exercise = currentExercise(snapshot)
+    if (!exercise || knownBusyRef.current || submittingRef.current) return
+    if ((snapshot.knownByItemId[exercise.learning_item_id] === true) === mark) return
+    knownBusyRef.current = true
+    setState(s => ({ ...s, knownBusy: true, knownError: null }))
+    try {
+      const result = mark
+        ? await markItemKnown(exercise.learning_item_id)
+        : await clearItemKnown(exercise.learning_item_id)
+      setState(s => ({
+        ...s,
+        knownBusy: false,
+        knownError: null,
+        knownByItemId: {
+          ...s.knownByItemId,
+          [exercise.learning_item_id]: result.explicit_known,
+        },
+      }))
+    } catch (error) {
+      setState(s => ({
+        ...s,
+        knownBusy: false,
+        knownError: tutorKnownItemErrorMessage(error),
+      }))
+    } finally {
+      knownBusyRef.current = false
+    }
+  }, [])
+
+  const skipUnanswered = useCallback(() => {
+    const snapshot = stateRef.current
+    if (snapshot.phase !== 'answering' || !snapshot.session || submittingRef.current) return
+    const nextIndex = snapshot.questionIndex + 1
+    if (nextIndex >= snapshot.session.exercises.length) {
+      setState(s => ({ ...s, phase: 'session-result', knownError: null }))
+      return
+    }
+    setState(s => ({
+      ...s,
+      phase: 'answering',
+      questionIndex: nextIndex,
+      feedback: null,
+      input: '',
+      reconstruction: [],
+      submitting: false,
+      submitError: null,
+      knownError: null,
+    }))
+    setTimeout(() => inputRef.current?.focus(), 50)
   }, [])
 
   const currentItem = current
@@ -360,6 +425,13 @@ export function usePracticeSession(
     submit,
     submitChoice,
     nextQuestion,
+    skipUnanswered,
+    markKnown: () => {
+      void changeKnown(true)
+    },
+    undoKnown: () => {
+      void changeKnown(false)
+    },
     setInput,
     setReconstruction,
     retry: start,
