@@ -1,4 +1,5 @@
 import { useTutorSourceList } from '../hooks/useTutorSourceList'
+import { sourceTypeLabel } from '../utils/sourceIngestion'
 import { formatTutorDateTime } from '../utils/tutor'
 import type { SourceSummary } from '../types'
 import { TutorTodayLearningCard } from './TutorTodayLearningCard'
@@ -26,7 +27,7 @@ export function TutorSourceList({
   return (
     <div style={styles.container}>
       <h2 style={styles.heading}>自分の教材</h2>
-      <p style={styles.sub}>保存したフランス語テキストを読み返せます</p>
+      <p style={styles.sub}>保存した教材を読み返せます</p>
 
       {onStartToday && <TutorTodayLearningCard onStartToday={onStartToday} />}
       {onStartReview && <TutorTodayReviewCard onStartReview={onStartReview} />}
@@ -49,9 +50,9 @@ export function TutorSourceList({
       {status === 'empty' && (
         <div style={styles.emptyBox}>
           <p style={styles.emptyTitle}>まだ保存したテキストがありません</p>
-          <p style={styles.emptyHint}>読んだ文章を貼り付けて、あとから教材にできます</p>
+          <p style={styles.emptyHint}>テキスト、URL、PDF、字幕などから追加できます</p>
           <button type="button" style={styles.primaryBtn} onClick={onAdd}>
-            新しいテキストを追加
+            教材を追加
           </button>
         </div>
       )}
@@ -59,7 +60,7 @@ export function TutorSourceList({
       {status === 'success' && (
         <>
           <button type="button" style={styles.primaryBtn} onClick={onAdd}>
-            新しいテキストを追加
+            教材を追加
           </button>
           {onStartPractice && (
             <button type="button" style={styles.practiceBtn} onClick={onStartPractice}>
@@ -97,7 +98,10 @@ function SourceRow({
       onClick={() => onSelect(source.id)}
     >
       <span style={styles.rowTitle}>{source.title}</span>
-      <span style={styles.rowMeta}>{formatTutorDateTime(source.created_at)}</span>
+      <span style={styles.rowMetaLine}>
+        <span style={styles.typeBadge}>{sourceTypeLabel(source.source_type)}</span>
+        <span style={styles.rowMeta}>{formatTutorDateTime(source.created_at)}</span>
+      </span>
       {source.content_preview && (
         <span lang="fr" style={styles.rowPreview}>
           {source.content_preview}
@@ -224,6 +228,21 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#1a1a2e',
     overflowWrap: 'anywhere',
     lineHeight: 1.4,
+  },
+  rowMetaLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: '100%',
+  },
+  typeBadge: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#1a56d6',
+    background: '#e0e7ff',
+    borderRadius: 999,
+    padding: '2px 8px',
   },
   rowMeta: {
     fontSize: 13,

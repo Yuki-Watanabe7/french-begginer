@@ -58,7 +58,7 @@ describe('App — モード選択', () => {
     render(<App />)
     await userEvent.click(screen.getByText('自分の教材'))
     await screen.findByText('まだ保存したテキストがありません')
-    expect(screen.getByRole('button', { name: '新しいテキストを追加' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '教材を追加' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'モード選択に戻る' }))
     expect(screen.getByText('練習モードを選択')).toBeInTheDocument()
     expect(screen.getByText('動詞活用練習')).toBeInTheDocument()

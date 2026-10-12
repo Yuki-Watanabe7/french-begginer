@@ -390,7 +390,7 @@ function bindMemoryApi(store: MemoryStore) {
 }
 
 async function saveFixtureSource() {
-  await userEvent.click(screen.getByRole('button', { name: '新しいテキストを追加' }))
+  await userEvent.click(screen.getByRole('button', { name: '教材を追加' }))
   await userEvent.type(screen.getByLabelText(/タイトル/), SOURCE_TITLE, { delay: null })
   await userEvent.type(screen.getByLabelText(/本文/), SOURCE_CONTENT, { delay: null })
   await userEvent.type(screen.getByLabelText(/メモ/), SOURCE_NOTE, { delay: null })

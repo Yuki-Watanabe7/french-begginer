@@ -112,7 +112,7 @@ describe('Tutor Phase 1 vertical slice', () => {
     await userEvent.click(screen.getByText('自分の教材'))
     await screen.findByText('まだ保存したテキストがありません')
 
-    await userEvent.click(screen.getByRole('button', { name: '新しいテキストを追加' }))
+    await userEvent.click(screen.getByRole('button', { name: '教材を追加' }))
     expect(screen.getByLabelText(/本文/)).toHaveStyle({ minHeight: '40vh' })
     expect(screen.getByRole('button', { name: '保存する' })).toHaveStyle({ width: '100%' })
 

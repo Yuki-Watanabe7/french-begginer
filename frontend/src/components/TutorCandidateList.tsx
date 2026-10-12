@@ -1,9 +1,11 @@
 import { TutorCandidateCard } from './TutorCandidateCard'
 import { useTutorSourceCandidates } from '../hooks/useTutorSourceCandidates'
-import type { CandidateFilter } from '../types'
+import type { CandidateFilter, SourceSegment } from '../types'
+import { evidenceProvenanceLabel } from '../utils/sourceIngestion'
 
 interface Props {
   sourceId: string
+  segments?: readonly SourceSegment[] | null
 }
 
 const FILTERS: { id: CandidateFilter; label: string }[] = [
@@ -13,7 +15,7 @@ const FILTERS: { id: CandidateFilter; label: string }[] = [
   { id: 'rejected', label: '却下' },
 ]
 
-export function TutorCandidateList({ sourceId }: Props) {
+export function TutorCandidateList({ sourceId, segments }: Props) {
   const state = useTutorSourceCandidates(sourceId)
   const hasAny = state.candidates.length > 0
   const extractLabel = state.isExtracting
@@ -117,6 +119,7 @@ export function TutorCandidateList({ sourceId }: Props) {
             <li key={candidate.id} style={styles.listItem}>
               <TutorCandidateCard
                 candidate={candidate}
+                evidenceProvenance={evidenceProvenanceLabel(segments, candidate.evidence_span)}
                 isBusy={state.isExtracting || state.pendingIds.has(candidate.id)}
                 actionError={state.actionErrors[candidate.id] ?? null}
                 onAccept={() => state.accept(candidate.id)}

@@ -39,6 +39,9 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/sources/ingest/pdf` | テキスト PDF を multipart で取り込み、ページ位置付きの SourceDocument にする。同じファイルと本文は既存を返す。不正・破損は 400、サイズやページ数の超過は 413、PDF 以外は 415、パスワード付きとテキストレイヤー不足は 422、解析タイムアウトは 504。OCR はしない |
 | POST | `/api/tutor/sources/ingest/youtube` | YouTube URL または video ID の公開字幕を、時刻付き SourceDocument にする。同じ動画と本文は既存を返し、本文が変わったら版を追加する。ID 不正は 400、本文超過は 413、字幕が無い・無効・動画が取れない・時刻不正・本文空は 422、取得失敗は 502、タイムアウトは 504。音声 download と字幕翻訳はしない |
 | POST | `/api/tutor/sources/ingest/subtitle` | SRT / VTT を multipart で取り込み、時刻付き SourceDocument にする。同じファイルと本文は既存を返す。指定不正は 400、時刻不正は 400、サイズ超過は 413、形式不一致は 415、本文が空なら 422 |
+| POST | `/api/tutor/sources/ingest/audio` | 音声を multipart で文字起こし、時刻があれば時刻付きの SourceDocument にする。同じ音声と本文は既存を返す。指定不正・破損は 400、サイズ超過と読めた再生時間の上限超過は 413、形式不一致は 415、空本文・応答不正・翻訳結果は 422、provider の失敗は 502、未設定は 503、タイムアウトは 504。raw audio は保存しない |
+| POST | `/api/tutor/sources/ingest/text-file` | UTF-8 のテキスト / Markdown を multipart で取り込み、plain text の SourceDocument にする。同じファイルと本文は既存を返す。指定不正は 400、UTF-8 でない・HTML は 400、サイズ超過は 413、形式不一致は 415、本文が空なら 422。リンク先は取得しない |
+| POST | `/api/tutor/sources/ingest/conversation` | structured conversation JSON を multipart で取り込み、話者と発話時刻付きの SourceDocument にする。同じファイルと本文は既存を返す。指定不正・形式不正・未知フィールドは 400、サイズ超過は 413、JSON 以外は 415、本文が空なら 422。添付は取得しない |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`created_at` 降順）。全文ではなく SourceSummary を返す |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得する |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から学習候補を抽出し保存する。存在しない Source は 404。API key 未設定・一時障害は 503、LLM 応答不正は 502 |
@@ -66,7 +69,7 @@ SQLite (初期) → PostgreSQL (将来)
 
 レスポンスは全文ではなく `SourceSummary`（`content_preview` は先頭120文字）。0件でも 200 + `[]`。
 
-`POST /api/tutor/sources` は手入力のまま `content` を正規化せず保存する。`GET /api/tutor/sources/{source_id}` の `SourceDocument` は、Phase 6 の ingestion で作った Source について `content_hash` / `ingestion_version` / `provenance` / `segments` を返す。手入力の既存行ではこれらは空である。Web URL は `POST /api/tutor/sources/ingest/url`、テキスト PDF は `POST /api/tutor/sources/ingest/pdf`、YouTube の公開字幕は `POST /api/tutor/sources/ingest/youtube`、SRT / VTT は `POST /api/tutor/sources/ingest/subtitle`。音声の自動文字起こしはまだ無い。
+`POST /api/tutor/sources` は手入力のまま `content` を正規化せず保存する。`GET /api/tutor/sources/{source_id}` の `SourceDocument` は、Phase 6 の ingestion で作った Source について `content_hash` / `ingestion_version` / `provenance` / `segments` を返す。手入力の既存行ではこれらは空である。Web URL は `POST /api/tutor/sources/ingest/url`、テキスト PDF は `POST /api/tutor/sources/ingest/pdf`、YouTube の公開字幕は `POST /api/tutor/sources/ingest/youtube`、SRT / VTT は `POST /api/tutor/sources/ingest/subtitle`、音声の文字起こしは `POST /api/tutor/sources/ingest/audio`、テキスト / Markdown は `POST /api/tutor/sources/ingest/text-file`、会話 JSON は `POST /api/tutor/sources/ingest/conversation`。
 
 ### GET /api/tutor/items クエリパラメータ
 
@@ -265,7 +268,7 @@ backend/app/
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
 │   ├── today_session.py        # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   └── conjugation_adapter.py
-├── ingestion/    # Web URL と PDF の取得・本文抽出（Issue #190 / #191）。domain からは依存しない
+├── ingestion/    # Web URL、PDF、YouTube、字幕、テキスト / 会話 JSON（Issue #190 / #191 / #192 / #194）。domain からは依存しない
 │   ├── url_policy.py         # SSRF 向け URL / IP 判定（DNS はしない）
 │   ├── html_extract.py       # HTML 本文抽出（html.parser）
 │   ├── fetcher.py            # fetcher / transport の境界と redirect 再検証
@@ -287,6 +290,8 @@ backend/app/
     ├── source_ingestion_service.py  # ingestion 結果の再利用 / 版追加（Issue #189）
     ├── web_url_ingestion.py     # Web URL 取り込み（Issue #190）
     ├── pdf_ingestion.py         # テキスト PDF 取り込み（Issue #191）
+    ├── text_file_ingestion.py   # テキスト / Markdown 取り込み（Issue #194）
+    ├── conversation_ingestion.py  # 会話 JSON 取り込み（Issue #194）
     ├── extraction_service.py      # Source から Candidate を抽出し正規化する
     ├── candidate_service.py       # 抽出結果の保存と accept/reject（Issue #134）
     ├── exercise_service.py        # Exercise 取得・採点・LearningEvent 記録（Issue #149）
@@ -322,6 +327,9 @@ backend/app/
 > Phase 5 の Signal → Ranking → 今日の学習 → 履歴更新 vertical slice は
 > `backend/tests/test_tutor_phase5_vertical_slice.py` と
 > `frontend/src/test/TutorPhase5Flow.test.tsx` で統合テストする。
+> Phase 6 の外部 Source → Candidate → 今日の学習 vertical slice は
+> `backend/tests/test_tutor_phase6_vertical_slice.py` と
+> `frontend/src/test/TutorPhase6Flow.test.tsx` で統合テストする。
 
 ## 動詞データ管理方針
 

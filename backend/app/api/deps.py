@@ -9,6 +9,8 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from app.ingestion.audio import TranscriptionProvider
+from app.ingestion.audio_api import OpenAITranscriptionProvider
 from app.ingestion.fetcher import WebPageFetcher
 from app.ingestion.pdf_parser import PypdfTextParser
 from app.ingestion.pdf_text import PdfTextParser
@@ -16,7 +18,9 @@ from app.ingestion.stdlib_http import build_web_page_fetcher
 from app.ingestion.youtube import YoutubeTranscriptProvider
 from app.ingestion.youtube_api import YoutubeTranscriptApiProvider
 from app.repositories.sqlite import TutorSqliteStore
+from app.services.audio_ingestion import AudioIngestionService
 from app.services.candidate_service import CandidateService, build_candidate_service
+from app.services.conversation_ingestion import ConversationIngestionService
 from app.services.exercise_service import ExerciseService, build_exercise_service
 from app.services.extraction_service import ExtractionService
 from app.services.extractors import LearningItemExtractor
@@ -31,6 +35,7 @@ from app.services.review_session_service import (
     build_review_session_service,
 )
 from app.services.subtitle_ingestion import SubtitleIngestionService
+from app.services.text_file_ingestion import TextFileIngestionService
 from app.services.today_learning_service import (
     TodayLearningService,
     build_today_learning_service,
@@ -139,3 +144,28 @@ def get_subtitle_ingestion_service(
     store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
 ) -> SubtitleIngestionService:
     return SubtitleIngestionService(store.source_documents)
+
+
+def get_text_file_ingestion_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+) -> TextFileIngestionService:
+    return TextFileIngestionService(store.source_documents)
+
+
+def get_conversation_ingestion_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+) -> ConversationIngestionService:
+    return ConversationIngestionService(store.source_documents)
+
+
+def get_transcription_provider() -> TranscriptionProvider:
+    """本番の文字起こし。テストは fake provider で上書きし、API key も使わない。"""
+
+    return OpenAITranscriptionProvider()
+
+
+def get_audio_ingestion_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+    provider: Annotated[TranscriptionProvider, Depends(get_transcription_provider)],
+) -> AudioIngestionService:
+    return AudioIngestionService(store.source_documents, provider)
