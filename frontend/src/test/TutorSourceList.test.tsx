@@ -72,7 +72,7 @@ describe('TutorSourceList', () => {
     )
 
     await screen.findByText('まだ保存したテキストがありません')
-    await userEvent.click(screen.getByRole('button', { name: '新しいテキストを追加' }))
+    await userEvent.click(screen.getByRole('button', { name: '教材を追加' }))
     expect(onAdd).toHaveBeenCalledTimes(1)
   })
 
@@ -170,6 +170,22 @@ describe('TutorSourceList', () => {
 
     await screen.findByRole('heading', { name: '今日の復習' })
     expect(screen.getByText('今すぐ復習する項目はありません')).toBeInTheDocument()
+  })
+
+  it('一覧で Source の形式を軽いラベルにする', async () => {
+    mockList.mockResolvedValueOnce([
+      { ...NEWER, id: 'src-web', source_type: 'web_url', title: 'Article web' },
+      { ...OLDER, id: 'src-video', source_type: 'youtube_transcript', title: 'Vidéo' },
+    ])
+    render(
+      <TutorSourceList onSelect={() => {}} onAdd={() => {}} onBack={() => {}} />,
+    )
+
+    expect(await screen.findByText('Web')).toBeInTheDocument()
+    expect(screen.getByText('YouTube')).toBeInTheDocument()
+    expect(screen.queryByText('web_url')).not.toBeInTheDocument()
+    expect(screen.queryByText('youtube_transcript')).not.toBeInTheDocument()
+    expect(screen.getByText('Article web')).toHaveStyle({ overflowWrap: 'anywhere' })
   })
 
   it('onStartToday があるとき今日の学習カードを出す', async () => {

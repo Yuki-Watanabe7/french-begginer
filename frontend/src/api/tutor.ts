@@ -5,6 +5,10 @@ import type {
   CreateTodaySessionInput,
   CreateTutorSourceInput,
   ExerciseFeedback,
+  IngestFileInput,
+  IngestSourceResponse,
+  IngestUrlInput,
+  IngestVideoInput,
   ExerciseType,
   ExtractCandidatesResponse,
   FetchReviewQueueOptions,
@@ -72,6 +76,100 @@ export async function createTutorSource(
       }),
     }),
   )
+}
+
+function readIngestedSource(payload: IngestSourceResponse): SourceDocument {
+  if (!payload?.source) {
+    throw new Error('ingest response missing source')
+  }
+  return payload.source
+}
+
+function ingestJsonBody(fields: {
+  title?: string
+  note?: string
+  language?: string
+}): Record<string, string> {
+  const body: Record<string, string> = {
+    language: fields.language?.trim() || 'fr',
+  }
+  const title = fields.title?.trim()
+  const note = fields.note?.trim()
+  if (title) body.title = title
+  if (note) body.note = note
+  return body
+}
+
+async function postIngestJson(
+  path: string,
+  body: Record<string, string>,
+): Promise<SourceDocument> {
+  return readIngestedSource(
+    await parseJson<IngestSourceResponse>(
+      await fetch(`${BASE}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    ),
+  )
+}
+
+function ingestFormData(input: IngestFileInput): FormData {
+  const form = new FormData()
+  form.append('file', input.file, input.file.name)
+  const title = input.title?.trim()
+  const note = input.note?.trim()
+  if (title) form.append('title', title)
+  if (note) form.append('note', note)
+  form.append('language', input.language?.trim() || 'fr')
+  return form
+}
+
+async function postIngestFile(path: string, input: IngestFileInput): Promise<SourceDocument> {
+  return readIngestedSource(
+    await parseJson<IngestSourceResponse>(
+      await fetch(`${BASE}${path}`, {
+        method: 'POST',
+        body: ingestFormData(input),
+      }),
+    ),
+  )
+}
+
+export async function ingestTutorUrl(input: IngestUrlInput): Promise<SourceDocument> {
+  return postIngestJson('/api/tutor/sources/ingest/url', {
+    ...ingestJsonBody(input),
+    url: input.url.trim(),
+  })
+}
+
+export async function ingestTutorPdf(input: IngestFileInput): Promise<SourceDocument> {
+  return postIngestFile('/api/tutor/sources/ingest/pdf', input)
+}
+
+export async function ingestTutorYoutube(input: IngestVideoInput): Promise<SourceDocument> {
+  return postIngestJson('/api/tutor/sources/ingest/youtube', {
+    ...ingestJsonBody(input),
+    video: input.video.trim(),
+  })
+}
+
+export async function ingestTutorSubtitle(input: IngestFileInput): Promise<SourceDocument> {
+  return postIngestFile('/api/tutor/sources/ingest/subtitle', input)
+}
+
+export async function ingestTutorTextFile(input: IngestFileInput): Promise<SourceDocument> {
+  return postIngestFile('/api/tutor/sources/ingest/text-file', input)
+}
+
+export async function ingestTutorConversation(input: IngestFileInput): Promise<SourceDocument> {
+  return postIngestFile('/api/tutor/sources/ingest/conversation', input)
+}
+
+/** 音声文字起こし API（Issue #193）。未設定や未配備の 404 / 501 は呼び出し側が案内する。 */
+export async function ingestTutorAudio(input: IngestFileInput): Promise<SourceDocument> {
+  return postIngestFile('/api/tutor/sources/ingest/audio', input)
 }
 
 export async function fetchTutorSources(

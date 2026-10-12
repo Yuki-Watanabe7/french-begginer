@@ -5,6 +5,7 @@ import { TutorFlow } from '../components/TutorFlow'
 import {
   createTutorSource,
   fetchCandidates,
+  ingestTutorUrl,
   fetchReviewQueue,
   fetchTodayPlan,
   createTodaySession,
@@ -23,6 +24,7 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorSource: vi.fn(),
     createTutorSource: vi.fn(),
     fetchCandidates: vi.fn(),
+    ingestTutorUrl: vi.fn(),
     fetchReviewQueue: vi.fn(),
     fetchTodayPlan: vi.fn(),
     createTodaySession: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock('../api/tutor', async importOriginal => {
 const mockList = vi.mocked(fetchTutorSources)
 const mockGet = vi.mocked(fetchTutorSource)
 const mockCreate = vi.mocked(createTutorSource)
+const mockIngestUrl = vi.mocked(ingestTutorUrl)
 const mockFetchCandidates = vi.mocked(fetchCandidates)
 const mockQueue = vi.mocked(fetchReviewQueue)
 const mockPlan = vi.mocked(fetchTodayPlan)
@@ -64,7 +67,7 @@ describe('TutorFlow', () => {
     mockList.mockResolvedValue([])
     render(<TutorFlow onBack={() => {}} />)
 
-    await userEvent.click(await screen.findByRole('button', { name: '新しいテキストを追加' }))
+    await userEvent.click(await screen.findByRole('button', { name: '教材を追加' }))
     expect(screen.getByLabelText(/タイトル/)).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: '一覧に戻る' }))
@@ -85,12 +88,43 @@ describe('TutorFlow', () => {
     await screen.findByRole('button', { name: /Le Monde/ })
   })
 
+  it('URLの取り込み後は既存の候補抽出へ進む', async () => {
+    mockList.mockResolvedValue([])
+    mockIngestUrl.mockResolvedValue({
+      ...SOURCE,
+      id: 'src-web',
+      source_type: 'web_url',
+      title: 'Le Web',
+      content: 'Bonjour le web.',
+    })
+    render(<TutorFlow onBack={() => {}} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: '教材を追加' }))
+    await userEvent.click(screen.getByRole('radio', { name: 'Web URL' }))
+    await userEvent.type(
+      screen.getByRole('textbox', { name: /ページのURL/ }),
+      'https://example.com/a',
+    )
+    await userEvent.click(screen.getByRole('button', { name: '取り込む' }))
+
+    await screen.findByText('取り込みました')
+    expect(screen.getByRole('heading', { name: 'Le Web' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '学習候補を抽出' })).toBeInTheDocument()
+    expect(mockIngestUrl).toHaveBeenCalledWith({
+      url: 'https://example.com/a',
+      title: undefined,
+      note: undefined,
+      language: 'fr',
+    })
+    expect(mockGet).not.toHaveBeenCalled()
+  })
+
   it('保存成功後は詳細画面を再利用する', async () => {
     mockList.mockResolvedValue([])
     mockCreate.mockResolvedValue(SOURCE)
     render(<TutorFlow onBack={() => {}} />)
 
-    await userEvent.click(await screen.findByRole('button', { name: '新しいテキストを追加' }))
+    await userEvent.click(await screen.findByRole('button', { name: '教材を追加' }))
     await userEvent.type(screen.getByLabelText(/タイトル/), 'Le Monde')
     await userEvent.type(screen.getByLabelText(/本文/), "Il s'agit d'un article.")
     await userEvent.click(screen.getByRole('button', { name: '保存する' }))

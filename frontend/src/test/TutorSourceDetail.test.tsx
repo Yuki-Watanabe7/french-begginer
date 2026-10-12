@@ -117,6 +117,100 @@ describe('TutorSourceDetail', () => {
     expect(body).toHaveStyle({ whiteSpace: 'pre-wrap' })
   })
 
+  it('PDFの出典と候補のページを表示し、内部情報は出さない', async () => {
+    const pdf: SourceDocument = {
+      id: 'src-pdf',
+      source_type: 'pdf',
+      title: 'Leçon',
+      content: 'Bonjour.\n\nAu revoir.',
+      language: 'fr',
+      created_at: '2026-08-23T12:00:00+00:00',
+      metadata: {
+        page_count: 2,
+        file_sha256: 'sha256:file',
+        parser_name: 'pypdf',
+        note: '授業',
+      },
+      content_hash: 'sha256:content',
+      ingestion_version: 'source-ingest-v1',
+      provenance: {
+        filename: 'lecon.pdf',
+        canonical_locator: 'sha256:locator',
+        original_content_hash: 'sha256:raw',
+        adapter_version: 'pdf-text-v1',
+        provider: 'secret-provider',
+        ingestion_version: 'source-ingest-v1',
+        ingested_at: '2026-08-23T12:00:00+00:00',
+      },
+      segments: [
+        { normalized_start: 0, normalized_end: 8, page_number: 1 },
+        { normalized_start: 10, normalized_end: 20, page_number: 2 },
+      ],
+    }
+    mockFetchCandidates.mockResolvedValue([
+      candidate({
+        evidence_span: { start: 10, end: 20 },
+        evidence_text: 'Au revoir.',
+      }),
+    ])
+    render(
+      <TutorSourceDetail sourceId="src-pdf" initialSource={pdf} onBackToList={() => {}} />,
+    )
+
+    expect(screen.getByText('PDF')).toBeInTheDocument()
+    expect(screen.getByText('lecon.pdf')).toHaveStyle({ overflowWrap: 'anywhere' })
+    expect(screen.getByText('ページ数')).toBeInTheDocument()
+    expect(screen.getByText('2')).toBeInTheDocument()
+    expect(screen.getByText('1ページ')).toBeInTheDocument()
+    expect(screen.getAllByText('2ページ').length).toBeGreaterThan(0)
+    expect(screen.getByText('授業')).toBeInTheDocument()
+    expect(screen.getAllByText('Au revoir.').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/sha256/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/secret-provider/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/pypdf/)).not.toBeInTheDocument()
+    expect(screen.queryByText('source-ingest-v1')).not.toBeInTheDocument()
+    expect(screen.queryByText('pdf-text-v1')).not.toBeInTheDocument()
+    await screen.findByRole('button', { name: '学習候補を抽出' })
+  })
+
+  it('YouTubeのURLと字幕の言語を表示し、providerは出さない', async () => {
+    const url = 'https://www.youtube.com/watch?v=abcdefghijk'
+    const video: SourceDocument = {
+      id: 'src-video',
+      source_type: 'youtube_transcript',
+      title: 'Dialogue',
+      content: 'Bonjour tout le monde.',
+      language: 'fr',
+      created_at: '2026-08-23T12:00:00+00:00',
+      metadata: {
+        original_url: url,
+        transcript_language: 'fr',
+        provider: 'youtube-transcript-api',
+        provider_version: '1.2.3',
+      },
+      provenance: {
+        canonical_locator: url,
+        provider: 'youtube-transcript-api',
+        provider_model: 'captions',
+        ingested_at: '2026-08-23T12:00:00+00:00',
+      },
+    }
+    render(
+      <TutorSourceDetail sourceId="src-video" initialSource={video} onBackToList={() => {}} />,
+    )
+
+    const link = screen.getByRole('link', { name: url })
+    expect(link).toHaveAttribute('href', url)
+    expect(link).toHaveStyle({ overflowWrap: 'anywhere' })
+    expect(screen.getByText('YouTube')).toBeInTheDocument()
+    expect(screen.getByText('字幕の言語')).toBeInTheDocument()
+    expect(screen.getByText('fr')).toBeInTheDocument()
+    expect(screen.queryByText('youtube-transcript-api')).not.toBeInTheDocument()
+    expect(screen.queryByText('captions')).not.toBeInTheDocument()
+    expect(screen.queryByText('1.2.3')).not.toBeInTheDocument()
+    await screen.findByRole('button', { name: '学習候補を抽出' })
+  })
+
   it('initialSource がある場合は再取得しない', async () => {
     renderDetail()
 
@@ -138,7 +232,7 @@ describe('TutorSourceDetail', () => {
     )
 
     expect(screen.getByText('保存しました')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: '続けてテキストを追加' }))
+    await userEvent.click(screen.getByRole('button', { name: '続けて教材を追加' }))
     expect(onAddAnother).toHaveBeenCalledTimes(1)
   })
 

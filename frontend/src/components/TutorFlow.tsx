@@ -18,6 +18,7 @@ export function TutorFlow({ onBack }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [savedSource, setSavedSource] = useState<SourceDocument | null>(null)
   const [justSaved, setJustSaved] = useState(false)
+  const [savedNotice, setSavedNotice] = useState('保存しました')
   const [practiceSourceId, setPracticeSourceId] = useState<string | undefined>(undefined)
   const [sessionKind, setSessionKind] = useState<TutorSessionKind>('practice')
   const [questionCount, setQuestionCount] = useState(5)
@@ -35,10 +36,16 @@ export function TutorFlow({ onBack }: Props) {
     setView('form')
   }
 
-  const openDetail = (sourceId: string, source?: SourceDocument, saved = false) => {
+  const openDetail = (
+    sourceId: string,
+    source?: SourceDocument,
+    saved = false,
+    notice = '保存しました',
+  ) => {
     setSelectedId(sourceId)
     setSavedSource(source ?? null)
     setJustSaved(saved)
+    setSavedNotice(notice)
     setView('detail')
   }
 
@@ -77,7 +84,14 @@ export function TutorFlow({ onBack }: Props) {
     return (
       <TutorSourceForm
         onBack={openList}
-        onSaved={source => openDetail(source.id, source, true)}
+        onSaved={source =>
+          openDetail(
+            source.id,
+            source,
+            true,
+            source.source_type === 'manual_text' ? '保存しました' : '取り込みました',
+          )
+        }
       />
     )
   }
@@ -88,6 +102,7 @@ export function TutorFlow({ onBack }: Props) {
         sourceId={selectedId}
         initialSource={savedSource}
         justSaved={justSaved}
+        savedNotice={savedNotice}
         onBackToList={openList}
         onAddAnother={openForm}
         onStartPractice={() => openPracticeSettings(selectedId)}

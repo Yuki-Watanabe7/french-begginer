@@ -37,7 +37,9 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）、
 「今日の学習」Plan API と Tutor Session 生成（Issue #178）、
 「今日の学習」Tutor UI と推薦理由の可視化（Issue #179）、
 Tutor 推薦品質の固定 fixture・反実仮想テスト（Issue #180）、
-Phase 5 vertical slice と Exit Criteria（Issue #181）
+Phase 5 vertical slice と Exit Criteria（Issue #181）、
+Phase 6 の外部 Source ingestion（Issue #189、#190、#191、#192、#193、#194、#195）、
+Phase 6 vertical slice と Exit Criteria（Issue #196）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -140,6 +142,9 @@ Phase 5 vertical slice と Exit Criteria（Issue #181）
   / `frontend/src/test/TutorPhase5Flow.test.tsx`
   / `frontend/src/test/TutorTodayLearningCard.test.tsx`
   （Issue #181）
+- Phase 6 vertical slice: `backend/tests/test_tutor_phase6_vertical_slice.py`
+  / `frontend/src/test/TutorPhase6Flow.test.tsx`
+  （Issue #196）
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -3156,6 +3161,8 @@ Phase 5 の ranking / Daily Learning Plan / 今日の学習 Session は、
 
 Phase 6 へ進む前提は、Phase 0〜5 が `bash scripts/quality-check.sh` で
 継続して通ることである。
+Phase 6 自体の完了条件と Phase 7 への引継ぎは、下記
+「Phase 6 Exit Criteria」と「Phase 7 への引き継ぎ」を正とする。
 
 ## Phase 6 — Source ingestion 共通契約（Issue #189）
 
@@ -3177,6 +3184,13 @@ external input
 保存時の再利用 / 履歴追加は `SourceIngestionService`。
 Issue #189 では HTTP の取得エンドポイントは追加しない。
 Web URL の取り込みは下記「Phase 6 — Web URL から SourceDocument を取り込む」。
+テキスト PDF の取り込みは下記「Phase 6 — PDF から SourceDocument を取り込む」。
+YouTube の公開字幕と SRT / VTT は下記
+「Phase 6 — YouTube transcript / SRT / VTT を時刻付きで取り込む」。
+音声の文字起こしは下記
+「Phase 6 — 音声を文字起こしして SourceDocument にする」。
+テキスト / Markdown と structured conversation JSON は下記
+「Phase 6 — 会話ログとテキストファイルを取り込む」。
 `POST /api/tutor/sources` はこれまでどおり、投稿された本文を正規化せず保存する。
 
 ### SourceType
@@ -3211,8 +3225,10 @@ span はその文字列上のオフセットと一致する。schema upgrade は
 
 `SourceSegment.normalized_start` / `normalized_end` は EvidenceSpan と
 同じ半開区間である。page / `start_seconds` / `end_seconds` / speaker /
-`external_locator` へ、正規化後の span から戻れる。区間は content 内で
-重ならない。隙間（segment 同士の段落区切り）は span の帰属先にしない。
+`timestamp` / `external_locator` へ、正規化後の span から戻れる。
+`timestamp` は会話ログの発話時刻で、メディアの秒数区間とは別である。
+区間は content 内で重ならない。隙間（segment 同士の段落区切り）は
+span の帰属先にしない。
 
 HTML 文書と PDF の raw payload（`%PDF`）は `content` にしない。
 adapter は本文抽出のあとで `assemble_ingestion_result` を通す。
@@ -3245,7 +3261,7 @@ web_url のホスト正規化と SSRF 対策は、adapter が `canonical_locator
 | `input_too_large` | しない | 本文が 200_000 コードポイントを超える |
 | `timeout` | する | `provider_timeout` |
 | `provider` | する | `provider_failure` |
-| `not_implemented` | しない | PDF 等、まだ接続していない adapter |
+| `not_implemented` | しない | 音声文字起こしの provider 未設定。API は `transcription_not_configured` として 503 を返す |
 
 metadata のキーに secret（`api_key` / `token` / `password` など）や
 raw payload 用のキーは保存しない。本文中の「token」という語は拒否しない。
@@ -3352,6 +3368,637 @@ canonical が安全な http(s) のときだけ `metadata.canonical_url` を残�
 | 手入力 API を壊さない | `test_ingest_url_api_returns_source_detail_and_keeps_manual_create` |
 | HTTP client を domain / service / 抽出 adapter に置かない | `test_adapter_boundary_does_not_import_an_http_client` |
 
+## Phase 6 — PDF から SourceDocument を取り込む（Issue #191）
+
+テキストレイヤーを持つ PDF を、ページ位置を残した plain text の
+`SourceDocument` にする。画像スキャンの OCR、手書き、表の復元、
+PDF ビューアは扱わない。
+
+```text
+POST /api/tutor/sources/ingest/pdf
+  multipart/form-data（file, 任意の title / note / language）
+  -> サイズ / ファイル名 / MIME / マジック
+  -> text layer 抽出（adapter 内、OCR なし）
+  -> normalize_source_text
+  -> SourceSegment（page_number）
+  -> SourceDocument(source_type=pdf)
+  -> 既存 Candidate extraction
+```
+
+実装は `backend/app/ingestion/`。`PdfIngestionService` は `PdfTextParser` にだけ依存し、
+pypdf は `pdf_parser.py` に閉じる。domain は `app.ingestion` を import しない。
+raw PDF は SQLite に保存しない。
+
+### 境界
+
+- ファイルは 8_000_000 バイトまで、ページは 50 まで
+- `%PDF-` が先頭 1024 バイト以内に無いファイルは壊れた PDF として拒否する。拡張子だけでは通さない
+- 宣言された Content-Type があるときは `application/pdf`、`application/x-pdf`、`application/octet-stream` だけを受ける
+- ファイル名は basename だけを残し、制御文字を除いて NFC にする。パスは保存しない
+- ユーザーパスワード付き PDF は拒否する。API にパスワード欄は無い
+- 空のユーザーパスワードで開く制限付き PDF は読み、`metadata.pdf_access` を `owner_restrictions` にする
+- 解析の区切り（開く前、開いた後、各ページの前）で 10 秒を超えたら止める。1 ページの抽出自体は、ファイルサイズとページ上限が処理量の境界になる
+- テキストレイヤーの Unicode 文字が 20 未満、または本文のあるページが無い場合は `ocr_required` で拒否する。OCR は実行しない
+- 空ページは segment にせず、`metadata.empty_page_numbers` に残す。後続ページの page number は詰めない
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_pdf` | 400 | 空ファイル、ファイル名、title / note / language |
+| `malformed_pdf` | 400 | マジック不一致、壊れた PDF |
+| `unsupported_media` | 415 | 宣言された MIME が PDF 系でない |
+| `file_too_large` | 413 | ファイルサイズ上限 |
+| `too_many_pages` | 413 | ページ数上限 |
+| `text_too_large` | 413 | 抽出本文が 200_000 文字超 |
+| `encrypted_pdf` | 422 | ユーザーパスワードが必要 |
+| `ocr_required` | 422 | 十分な text layer が無い。OCR はしない |
+| `parser_timeout` | 504 | 解析が時間内に終わらない |
+
+### 本文と provenance
+
+抽出は pypdf の plain モードに固定する。座標からの再レイアウト、
+ヘッダー / フッター除去、ハイフン改行の結合、合字の展開、
+アポストロフィの置換はしない。行内の連続空白だけを 1 つに畳み、
+その後で共有の `normalize_source_text`（`source-ingest-v1`）を一度だけ通す。
+
+各非空ページは 1 つの `SourceSegment` になる。`normalized_start` /
+`normalized_end` は保存済み `content` 上の半開区間で、`page_number` は
+PDF のページ番号（1 始まり）である。ページのあいだは LF 2 つで、
+その隙間はどのページにも属さない。EvidenceSpan が 1 ページの中にあれば
+`segment_for_span` で「PDF の p.N」へ戻せる。
+
+`canonical_locator` は生ファイルの `sha256:` ダイジェストである。
+同じバイト列から同じ本文が出たときは既存 Source を返す。
+バイト列が違えば別の Source を作る。既存行の content は書き換えない。
+filename、MIME、page count、parser name / version、adapter version
+`pdf-text-v1`、`ingestion_version` を provenance または metadata に残す。
+
+任意の `title` はファイル名の stem より優先する。`note` は `metadata.note` に置く。
+成功応答は Web URL と同じく `source` に SourceDocument を載せ、新規は 201、再利用は 200。
+
+### テスト
+
+| 確認 | 自動テスト |
+|------|------------|
+| 固定 PDF のアクセント、アポストロフィ、段落、ページ順 | `test_lesson_pdf_saves_pages_in_order_with_provenance` |
+| ページ segment の offset と空ページの page number | `test_lesson_pdf_saves_pages_in_order_with_provenance` / `test_empty_page_keeps_later_page_numbers` |
+| EvidenceSpan からページへ戻り、Candidate 抽出へ渡せる | `test_evidence_span_maps_to_page_for_candidate_extraction` / `test_ingest_pdf_api_returns_source_and_keeps_manual_create` |
+| 破損、暗号化、サイズ、ページ数、テキストなしを保存しない | `test_rejects_bad_files_without_saving_or_leaking_bytes` |
+| OCR が必要な PDF を変換しない | `test_rejects_bad_files_without_saving_or_leaking_bytes` / `test_short_text_needs_ocr_and_unicode_is_preserved` |
+| 合字とアポストロフィを壊さない | `test_page_text_keeps_ligatures_apostrophes_and_line_breaks` / `test_short_text_needs_ocr_and_unicode_is_preserved` |
+| 同じファイルは再利用、別バイト列は別 Source | `test_same_bytes_reuse_and_other_bytes_create_a_new_source` |
+| DB を開き直しても page mapping が残る | `test_pdf_source_survives_database_reopen` |
+| 拡張子だけを信用しない | `test_txt_extension_is_accepted_when_magic_is_pdf` / `test_rejects_bad_files_without_saving_or_leaking_bytes` |
+| パーサを adapter の外へ出さない。外部 API も OCR も import しない | `test_adapter_boundary_does_not_import_parser_or_ocr` |
+| 手入力 API を壊さない | `test_ingest_pdf_api_returns_source_and_keeps_manual_create` |
+
+## Phase 6 — YouTube transcript / SRT / VTT を時刻付きで取り込む（Issue #192）
+
+YouTube の公開字幕と、SRT / VTT ファイルを、同じ時刻付き plain text の
+`SourceDocument` にする。動画の download、自動音声文字起こし、字幕の翻訳、
+playlist の一括取り込みは扱わない。
+
+```text
+YouTube URL / video ID または SRT / VTT
+  -> timed cue（入力順を維持）
+  -> normalize_source_text
+  -> SourceSegment（start_seconds / end_seconds）
+  -> SourceDocument
+  -> 既存 Candidate extraction
+```
+
+YouTube は `POST /api/tutor/sources/ingest/youtube`（JSON の `video` に
+URL または 11 文字の video ID）。字幕ファイルは
+`POST /api/tutor/sources/ingest/subtitle`（multipart の `file` と、任意の
+`title` / `note` / `language`）。
+
+実装は `backend/app/ingestion/`。`YoutubeIngestionService` は
+`YoutubeTranscriptProvider` にだけ依存し、`youtube-transcript-api` は
+`youtube_api.py` に閉じる。通常のテストは fake provider で完結し、
+DNS も TCP も呼ばない。SRT / VTT の解析は標準ライブラリだけである。
+domain は `app.ingestion` を import しない。
+
+### YouTube
+
+- `youtube.com` / `m.youtube.com` / `music.youtube.com` /
+  `youtube-nocookie.com` の watch、embed、shorts、live と、`youtu.be` を受ける
+- playlist だけの URL、チャンネル URL、認証情報つき URL は拒否する
+- `canonical_locator` は `youtube:{video_id}`。URL の形が違っても同じ動画は同じ locator
+- 希望言語はリクエストの `language`（既定 `fr`）。別言語へは落とさない
+- 同じ言語では、翻訳でない手動字幕、翻訳でない自動字幕、翻訳字幕の順。
+  同点は language code と track id の辞書順
+- 翻訳字幕を選んだときは `transcript_is_translation` と `translated_from` を残し、
+  発話言語としては扱わない
+- 発話言語 `speech_language` は、翻訳でない自動字幕が 1 言語だけのときだけ書く
+- 公開済みの caption track だけを読む。翻訳 API で字幕を作らない
+- 字幕が無い、無効、動画を取れない、のときは音声 download に切り替えない
+- 取得の timeout は 10 秒
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_video` | 400 | URL / video ID が不正、または playlist |
+| `text_too_large` | 413 | 抽出本文が 200_000 文字超 |
+| `transcript_unavailable` | 422 | 希望言語の公開字幕が無い。`available_languages` を付けることがある |
+| `transcript_disabled` | 422 | 字幕が無効 |
+| `video_unavailable` | 422 | 動画の公開字幕を取得できない |
+| `malformed_transcript` | 422 | 時刻が負、または数値でない |
+| `transcript_empty` | 422 | cue の本文が空 |
+| `transcript_provider_error` | 502 | 取得先の失敗。再試行してよい |
+| `transcript_timeout` | 504 | 時間内に取得できない |
+
+### SRT / VTT
+
+- ファイルは 2_000_000 バイトまで。拡張子は `.srt` / `.vtt`
+- 宣言された Content-Type があるときは、SRT なら `application/x-subrip`、
+  `application/x-srt`、`text/plain`、`application/octet-stream`。
+  VTT なら `text/vtt`、`text/plain`、`application/octet-stream`
+- `.vtt` は先頭が `WEBVTT` であること。`.srt` が `WEBVTT` で始まるときは拒否する
+- ファイル名は basename だけを残し、制御文字を除いて NFC にする。パスは保存しない
+- 時刻は `HH:MM:SS,mmm` または `MM:SS.mmm`。終了が開始以下、分秒が範囲外、
+  ミリ秒が 3 桁でない cue はファイルごと拒否する
+- 時刻が重なっても、ファイルに書かれた順のまま両方残す。並べ替えない
+- `<i>` などの装飾、`{\an8}`、VTT の `<v Speaker>` を除く。
+  cue 全体が一人の話者なら `speaker` に残す
+- NOTE / STYLE / REGION と `X-TIMESTAMP-MAP` は本文にしない。時刻は cue の値のまま
+- アポストロフィは置換しない。NFC は共有正規化が一度だけ行う
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_subtitle` | 400 | 空ファイル、ファイル名、title / note / language |
+| `malformed_subtitle` | 400 | 時刻不正、UTF-8 でない、拡張子と中身の不一致 |
+| `unsupported_media` | 415 | 拡張子または宣言された MIME が SRT / VTT でない |
+| `file_too_large` | 413 | ファイルサイズ上限 |
+| `text_too_large` | 413 | 抽出本文が 200_000 文字超 |
+| `subtitle_empty` | 422 | cue の本文が空 |
+
+### 本文と provenance
+
+空でない cue は 1 つの `SourceSegment` になる。隣接 cue は結合しない。
+cue のあいだは LF 2 つで、その隙間はどちらの時刻にも属さない。
+`normalized_start` / `normalized_end` は保存済み `content` 上の半開区間なので、
+EvidenceSpan が 1 cue の中にあれば `segment_for_span` で
+`start_seconds` / `end_seconds` へ戻せる。
+
+YouTube の provenance は video id、元の URL（`metadata.original_url`）、
+選んだ字幕の言語、provider、`fetched_at`、adapter version
+`youtube-transcript-v1`、`ingestion_version` を持つ。
+duration が 0 の cue は終了を開始の 0.001 秒後にして、本文は捨てない。
+
+字幕ファイルの `canonical_locator` は生ファイルの `sha256:` ダイジェストである。
+同じバイト列から同じ本文が出たときは既存 Source を返す。
+filename、形式（`srt` / `vtt`）、cue 数、adapter version `subtitle-v1`、
+`ingestion_version` を provenance または metadata に残す。
+`content_hash` は正規化後本文のダイジェストで、ファイルのダイジェストとは別である。
+
+任意の `title` は、YouTube では `YouTube {video_id}` より、字幕ではファイル名の
+stem より優先する。`note` は `metadata.note` に置く。
+成功応答は Web URL と同じく `source` に SourceDocument を載せ、新規は 201、再利用は 200。
+既存行の content は書き換えない。
+
+### テスト
+
+| 確認 | 自動テスト |
+|------|------------|
+| fake transcript の本文、時刻、provenance | `test_fake_youtube_transcript_saves_timed_segments` |
+| 字幕が無いときは cue を取得しない | `test_transcript_unavailable_does_not_fetch_cues` |
+| 字幕無効を別コードにする | `test_transcript_disabled_is_explicit` |
+| フランス語の手動字幕を優先し、翻訳を原文の発話にしない | `test_language_selection_prefers_original_french_and_records_translation` / `test_translation_is_not_treated_as_original_speech` |
+| SRT / VTT のアクセント、アポストロフィ、話者 | `test_srt_and_vtt_keep_accents_apostrophes_speakers_and_order` / `test_combining_accent_is_normalized_without_replacing_apostrophes` |
+| 壊れた時刻を保存しない | `test_malformed_timestamps_are_rejected_without_saving` / `test_malformed_transcript_and_empty_cues_are_not_saved` |
+| 重なる cue をファイル順のまま残す | `test_overlapping_cues_keep_file_order_and_timecodes` / `test_youtube_cues_keep_provider_order_when_times_overlap` |
+| 文字位置から時刻へ戻す | `test_character_offset_maps_to_timestamp` / `test_character_offset_maps_to_youtube_timestamp` |
+| Candidate の evidence から時刻を取る | `test_candidate_evidence_maps_to_timecode` |
+| 同じ動画・同じファイルは再利用する | `test_same_video_reuses_and_changed_transcript_appends` / `test_same_subtitle_reuses_and_other_bytes_create_a_new_source` |
+| ネットワークなし。翻訳 API も音声 download もしない | `test_youtube_ingestion_does_not_use_network` / `test_subtitle_ingestion_does_not_use_network` / `test_provider_reads_published_captions_without_translating` / `test_youtube_modules_do_not_download_audio` |
+| 手入力 API を壊さない | `test_ingest_youtube_api_returns_source_and_keeps_manual_create` / `test_ingest_subtitle_api_returns_source_and_keeps_manual_create` |
+
+## Phase 6 — 音声を文字起こしして SourceDocument にする（Issue #193）
+
+アップロードされた音声を文字起こし、plain text の `SourceDocument` にする。
+発音採点、streaming、長時間録音の非同期 job、話者分離、音声の翻訳は扱わない。
+raw audio は保存しない。学習 pipeline の source of truth は正規化後の本文である。
+
+```text
+POST /api/tutor/sources/ingest/audio
+  multipart/form-data（file, 任意の title / note / language）
+  -> サイズ / ファイル名 / MIME / コンテナ
+  -> TranscriptionProvider（検証のあと）
+  -> timed segment、または時刻なしの本文
+  -> normalize_source_text
+  -> SourceDocument(source_type=audio_transcript)
+  -> 既存 Candidate extraction
+```
+
+実装は `backend/app/ingestion/`。`AudioIngestionService` は
+`TranscriptionProvider` にだけ依存し、OpenAI SDK は `audio_api.py` に閉じる。
+通常のテストは fake provider で完結し、DNS も TCP も呼ばない。
+API key が無いときは TTS を呼ばず、`transcription_not_configured` を返す。
+domain は `app.ingestion` を import しない。
+
+### 境界
+
+- ファイルは 25_000_000 バイトまで。再生時間を読めたときは 600 秒まで。
+  分割と再開アップロードはしない
+- 拡張子は `.mp3` / `.mpeg` / `.wav` / `.m4a` / `.mp4` / `.webm` / `.ogg` / `.flac`
+- 宣言された Content-Type があるときは、その拡張子の音声 MIME か
+  `application/octet-stream` だけを受ける。未指定はコンテナの判定に任せる
+- `.wav` は RIFF/WAVE、`.mp4` / `.m4a` は先頭の `ftyp`、`.mp3` は ID3 または
+  frame sync、`.flac` / `.ogg` / `.webm` はそれぞれのマジックが必要
+- 再生時間は WAV の fmt/data と、MP4/M4A の `mvhd` からだけ読む。
+  読めない形式は時間を作らず、ファイルサイズだけを上限にする
+- ファイル名は basename だけを残し、制御文字を除いて NFC にする。パスは保存しない
+- provider へ渡すのは、ここまで通ったバイト列だけである
+- 既定の language hint は `fr`。検出言語は metadata に残す
+- 検出言語が hint と違うときは、Source の `language` を検出側にする。
+  本文は provider が返した原文のままにする
+- `is_translation` の結果、または応答の task が `translate` のときは保存しない。
+  翻訳 API は呼ばない
+- 一時障害の呼び出しは 2 回まで。同じ音声と同じ本文の再送は既存 Source を返す
+- 文字起こしの timeout は 120 秒。SDK 自身の retry は使わない
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_audio` | 400 | 空ファイル、ファイル名、title / note / language |
+| `malformed_audio` | 400 | マジック不一致、壊れたコンテナ、再生時間 0 |
+| `unsupported_media` | 415 | 拡張子または宣言された MIME が音声形式でない |
+| `file_too_large` | 413 | ファイルサイズ上限 |
+| `audio_too_long` | 413 | 読めた再生時間が 600 秒を超える |
+| `text_too_large` | 413 | 文字起こし本文が 200_000 文字超 |
+| `transcript_empty` | 422 | 文字起こし本文が空 |
+| `invalid_transcript` | 422 | 時刻が片側だけ、負、または数値でない |
+| `translated_transcript` | 422 | 自動翻訳なので原文として保存しない |
+| `transcription_provider_error` | 502 | 接続失敗、rate limit、上流 5xx。再試行してよい |
+| `transcription_not_configured` | 503 | API key が無い、または認証に失敗した。再試行しない |
+| `transcription_timeout` | 504 | 時間内に文字起こしが終わらない。再試行してよい |
+
+### 本文と provenance
+
+時刻付きの segment は 1 つの `SourceSegment` になる。隣接 segment は結合しない。
+あいだは LF 2 つで、その隙間はどちらの時刻にも属さない。
+`normalized_start` / `normalized_end` は保存済み `content` 上の半開区間なので、
+EvidenceSpan が 1 segment の中にあれば `segment_for_span` で
+`start_seconds` / `end_seconds` へ戻せる。
+
+provider が時刻を返さないときは `start_seconds` / `end_seconds` を null にする。
+単語時刻から segment 時刻を作らない。終了が開始と同じときだけ、
+YouTube 字幕と同じく終了を 0.001 秒後にして本文は捨てない。
+
+`canonical_locator` は生ファイルの `sha256:` ダイジェストである。
+同じバイト列から同じ本文が出たときは既存 Source を返す。
+本文が変わったときは新しい Source を追加し、`metadata.prior_source_id` で先行を指す。
+既存行の content は書き換えない。
+
+provenance には filename、audio MIME、provider、model、`fetched_at`
+（文字起こし時刻）、adapter version `audio-transcript-v1`、`ingestion_version`
+を置く。metadata には `original_filename`、`audio_mime`、`audio_sha256`、
+`transcription_version`、`transcribed_at`、`language_hint`、`language_status` を置く。
+検出できたときは `detected_language` も残す。
+`content_hash` は正規化後本文のダイジェストで、ファイルのダイジェストとは別である。
+API key や raw audio は metadata に入れない。
+
+任意の `title` はファイル名の stem より優先する。`note` は `metadata.note` に置く。
+成功応答は Web URL と同じく `source` に SourceDocument を載せ、新規は 201、再利用は 200。
+
+### テスト
+
+| 確認 | 自動テスト |
+|------|------------|
+| fake 文字起こしの本文、時刻、provenance | `test_fake_transcription_saves_timed_french_transcript` |
+| 時刻が無いとき null のままにする | `test_timestamps_are_not_invented_when_provider_omits_them` |
+| アクセントとアポストロフィを保つ | `test_combining_accent_and_apostrophe_are_preserved` |
+| 不正 MIME、破損、サイズ、再生時間を provider の前に拒否する | `test_invalid_media_size_and_duration_never_reach_the_provider` |
+| provider 未設定は文字起こし固有の 503 | `test_missing_provider_config_is_transcription_specific` |
+| 一時障害は上限付きで、保存しない | `test_transient_errors_are_bounded_and_do_not_save` |
+| 空本文、不正応答、翻訳結果を保存しない | `test_empty_invalid_and_translated_transcripts_are_not_saved` |
+| 同じ音声は再利用し、本文が変わったら版を追加する | `test_same_audio_reuses_source_and_changed_transcript_appends` |
+| API key なし、ネットワークなし。secret と raw audio を残さない | `test_audio_ingestion_does_not_require_api_key_or_network` / `test_raw_audio_and_secrets_are_not_retained` |
+| Candidate の evidence から時刻を取る | `test_candidate_evidence_maps_to_audio_timestamp` |
+| 手入力 API を壊さない | `test_ingest_audio_api_returns_source_and_keeps_manual_create` |
+| SDK を adapter と service の外へ出さない。翻訳 API も TTS も呼ばない | `test_audio_modules_keep_the_sdk_behind_the_provider` |
+
+## Phase 6 — 会話ログとテキストファイルを取り込む（Issue #194）
+
+すでにテキストとしてある学習素材を、手入力の全文コピペ以外の経路で
+`SourceDocument` にする。Slack / Discord / LINE、Gmail、ChatGPT export の
+専用変換、添付の取得、要約、チャット UI は扱わない。
+
+```text
+POST /api/tutor/sources/ingest/text-file
+  multipart/form-data（file, 任意の title / note / language）
+  -> UTF-8 テキスト、または Markdown の最小 plain text 化
+  -> normalize_source_text
+  -> SourceDocument(source_type=conversation_log)
+
+POST /api/tutor/sources/ingest/conversation
+  multipart/form-data（file, 任意の title / note / language）
+  -> 固定 schema の conversation JSON
+  -> 発話ごとの SourceSegment（speaker / timestamp）
+  -> SourceDocument(source_type=conversation_log)
+  -> 既存 Candidate extraction
+```
+
+実装は `backend/app/ingestion/`。解析は標準ライブラリだけで、URL は取得しない。
+domain は `app.ingestion` を import しない。`POST /api/tutor/sources` の
+手入力は、これまでどおり投稿本文を正規化せず保存する。
+
+### テキスト / Markdown
+
+- ファイルは 2_000_000 バイトまで。拡張子は `.txt` / `.log` / `.md` / `.markdown`
+- `.txt` と `.log` は plain text のままにする。中身が Markdown や会話 JSON に
+  見えても記法としては解釈しない
+- `.md` と `.markdown` だけ、見出し・強調・リスト・引用・コードフェンスを外す。
+  リンクと画像は見える文字だけを残し、URL は本文にも metadata にも残さない
+- 参照定義の URL 行は捨てる。コードフェンスの中は記法として読まない
+- 宣言された Content-Type があるときは、plain text なら `text/plain` か
+  `application/octet-stream`。Markdown ならそれらに加えて `text/markdown` と
+  `text/x-markdown`。未指定は拡張子に任せる
+- UTF-8（BOM 可）以外は拒否する。文字コードは推測しない
+- ファイル名は basename だけを残し、制御文字を除いて NFC にする。パスは保存しない
+- HTML 文書と PDF の raw payload は本文にしない
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_text_file` | 400 | 空ファイル、ファイル名、title / note / language |
+| `malformed_text` | 400 | UTF-8 でない、HTML / PDF、NUL |
+| `unsupported_media` | 415 | 拡張子または宣言された MIME がテキスト / Markdown でない |
+| `file_too_large` | 413 | ファイルサイズ上限 |
+| `text_too_large` | 413 | 本文が 200_000 文字超 |
+| `text_empty` | 422 | 正規化後の本文が空 |
+
+### 会話 JSON
+
+受け付ける形はこれだけである。キーの別名や、配列だけの JSON、他サービスの
+export からは発話を推測しない。未知のキーがある文書は保存しない。
+
+```json
+{
+  "title": "会話練習",
+  "messages": [
+    {"speaker": "user", "text": "Bonjour.", "timestamp": "2026-04-01T12:00:00Z"}
+  ]
+}
+```
+
+- `messages` は必須。`title`、`speaker`、`timestamp` は任意
+- `timestamp` はタイムゾーン付きの ISO-8601。UTC の `...Z` に揃えて
+  `SourceSegment.timestamp` へ置く。秒数の `start_seconds` は作らない
+- タイムゾーンが無い時刻、日付だけ、相対表現は文書ごと拒否する
+- 空の `text` は飛ばす。すべて空なら 422。順番は配列のまま並び替えない
+- 話者名は本文に足さない。EvidenceSpan は発話本文に張れる
+- 日本語や英語の発話が混ざっても Source 全体は拒否しない
+- ファイル名は任意。無いときは Content-Type が `application/json` であること。
+  あるときは拡張子 `.json`。宣言された MIME は `application/json`、
+  `text/plain`、`application/octet-stream` だけ
+- `account_id` や `email`、`api_key`、添付 URL は metadata にコピーしない
+
+| code | HTTP | 意味 |
+|------|------|------|
+| `invalid_conversation` | 400 | 空ファイル、ファイル名が無いのに JSON と宣言されていない、title / note / language |
+| `malformed_conversation` | 400 | JSON でない、schema 不一致、未知フィールド、時刻が不正、UTF-8 でない |
+| `unsupported_media` | 415 | 拡張子または宣言された MIME が JSON でない |
+| `file_too_large` | 413 | ファイルサイズ上限 |
+| `text_too_large` | 413 | 本文が 200_000 文字超 |
+| `conversation_empty` | 422 | 残る発話が無い |
+
+### 本文と provenance
+
+テキストファイルは本文全体が 1 つの `SourceSegment` になる。会話は空でない
+発話が 1 つの `SourceSegment` になり、あいだは LF 2 つである。その隙間は
+どちらの発話にも属さない。`normalized_start` / `normalized_end` は保存済み
+`content` 上の半開区間なので、EvidenceSpan が 1 発話の中にあれば
+`segment_for_span` で `speaker` と `timestamp` へ戻せる。
+
+`canonical_locator` は生ファイルの `sha256:` ダイジェストである。
+同じバイト列から同じ本文が出たときは既存 Source を返す。
+ファイル名が違ってもバイト列が同じなら再利用する。別のバイト列は新しい Source になる。
+既存行の content は書き換えない。
+
+provenance には filename（無いことがある）、MIME、`ingested_at`、
+adapter version（`text-file-v1` または `conversation-log-v1`）、
+`ingestion_version` を置く。metadata には `source_format`
+（`plain_text` / `markdown` / `conversation_json`）と `file_sha256` を置く。
+会話では加えて `message_count` と `empty_message_count` を置く。
+`content_hash` は正規化後本文のダイジェストで、ファイルのダイジェストとは別である。
+
+任意の `title` は、テキストではファイル名の stem より、会話では JSON の
+`title` とファイル名の stem より優先する。`note` は `metadata.note` に置く。
+成功応答は Web URL と同じく `source` に SourceDocument を載せ、新規は 201、再利用は 200。
+`GET /api/tutor/sources/{source_id}` で、保存した本文・話者・発話時刻・provenance を確認できる。
+
+### テスト
+
+| 確認 | 自動テスト |
+|------|------------|
+| txt / Markdown の本文と provenance | `test_txt_and_markdown_import_keep_provenance_and_plain_text` / `test_markdown_to_plain_drops_links_and_keeps_french_text` |
+| plain text は Markdown として解釈しない | `test_plain_text_does_not_strip_markdown_syntax` |
+| 正規化と content hash が決定的 | `test_markdown_normalization_is_deterministic` |
+| 会話 JSON の話者・時刻・順序 | `test_conversation_json_keeps_speaker_time_and_message_order` |
+| 壊れた JSON、未知フィールド、他サービスの形を保存しない | `test_unknown_and_malformed_conversation_json_is_not_saved` |
+| 空発話を飛ばし、全部空なら拒否する | `test_empty_messages_are_skipped_and_all_empty_is_rejected` |
+| 同じファイルは再利用する | `test_same_conversation_reuses_source_and_other_bytes_create_a_new_one` / `test_markdown_normalization_is_deterministic` |
+| DB を開き直しても残る | `test_text_and_conversation_sources_survive_database_reopen` |
+| Candidate の evidence から話者と時刻を取る | `test_candidate_evidence_maps_to_conversation_speaker` / `test_ingest_text_file_api_returns_source_and_keeps_manual_create` |
+| 不正なファイルと個人 metadata を残さない | `test_invalid_text_and_conversation_inputs_are_rejected` / `test_ingest_conversation_api_distinguishes_errors_and_keeps_manual_create` |
+| ネットワークも Markdown ライブラリも使わない | `test_text_modules_do_not_fetch` |
+| 手入力 API を壊さない | `test_ingest_text_file_api_returns_source_and_keeps_manual_create` / `test_ingest_conversation_api_distinguishes_errors_and_keeps_manual_create` |
+
+## Phase 6 — 複数Source形式の追加UIとingestion状態・provenance表示（Issue #195）
+
+既存の「教材を追加」から、手入力以外の Source も同じ流れで追加する。
+形式ごとに Candidate UI は作らない。音声は `POST /api/tutor/sources/ingest/audio`
+（Issue #193）を呼ぶ。未設定、provider 失敗、未配備の 404 / 501 は分けて表示する。
+ジョブ一覧は作らない。
+
+```text
+教材を追加
+  -> テキストを貼り付ける / Web URL / PDF / YouTube・字幕 / 音声 / 会話ログ・テキストファイル
+  -> 取り込み中
+  -> Source 詳細（URL・ファイル名、ページ、字幕の言語、時刻・話者）
+  -> 学習候補を抽出
+  -> 既存の accept / reject と Today Learning
+```
+
+実装:
+
+- 追加: `TutorSourceForm` と `useTutorSourceForm`。種別は
+  `TutorSourceKindPicker`、ファイルは `TutorSourceFileField`
+- 送信状態は hook に閉じ、失敗しても URL・ファイル・メモは残す
+- 一覧の種別は `sourceTypeLabel`。hash / provider / adapter version は出さない
+- 詳細の出典は `sourceProvenanceFacts`。本文の page / time / speaker は
+  `sourceContentBlocks`、候補の根拠は `evidenceProvenanceLabel`
+- API client: `ingestTutorUrl` / `ingestTutorPdf` / `ingestTutorYoutube` /
+  `ingestTutorSubtitle` / `ingestTutorTextFile` / `ingestTutorConversation` /
+  `ingestTutorAudio`
+
+| 観点 | 自動テスト |
+|------|------------|
+| 種別の選択と手入力の維持 | `TutorSourceIngestionForm.test.tsx` / `TutorSourceForm.test.tsx` |
+| URL 送信と blocked URL | `TutorSourceIngestionForm.test.tsx` / `tutorApi.test.ts` |
+| PDF / 字幕 / テキスト / 会話の upload | `TutorSourceIngestionForm.test.tsx` |
+| 形式・サイズエラーと再選択 | `sourceIngestion.test.ts` / `TutorSourceIngestionForm.test.tsx` |
+| YouTube の字幕なし | `TutorSourceIngestionForm.test.tsx` |
+| 音声の設定不足と provider 失敗 | `TutorSourceIngestionForm.test.tsx` |
+| 失敗時に入力を残す | `TutorSourceIngestionForm.test.tsx` |
+| 一覧の種別 | `TutorSourceList.test.tsx` |
+| 詳細の provenance と候補のページ | `TutorSourceDetail.test.tsx` / `sourceIngestion.test.ts` |
+| 取り込み後の候補抽出 | `TutorFlow.test.tsx` |
+| スマホ幅で折れ、長い URL / ファイル名が折り返す | `TutorSourceIngestionForm.test.tsx` / `TutorSourceDetail.test.tsx` |
+| 手入力の回帰 | `TutorSourceForm.test.tsx` / `TutorPhase1Flow.test.tsx` |
+
+## Phase 6 vertical slice（Issue #196）
+
+Issue #189〜#195 で追加した外部 Source の取り込みを、Candidate 抽出から
+今日の学習の回答記録まで一本の vertical slice として検証する。
+
+Phase 6 のゴールは、**Source 形式が変わっても、SourceDocument 以降の学習
+pipeline が同じであること**である。許容される差分は provenance の表示だけ。
+
+```text
+external source
+  -> ingestion adapter
+  -> normalized SourceDocument + provenance
+  -> Candidate extraction（SourceDocument.content）
+  -> accept
+  -> LearningItem
+  -> recommendation signal / ranking
+  -> Today Learning Plan
+  -> Exercise
+  -> answer
+  -> LearningEvent / LearnerState / ReviewSchedule
+```
+
+実ネットワーク、外部の文字起こし API、実 LLM は使わない。
+通常 CI は fake fetcher / fake TranscriptionProvider / fake extractor で通す。
+
+### 必須 fixture
+
+| Fixture | 入力 | 確認すること |
+|---------|------|----------------|
+| A. Web URL | network なしの固定 HTML | 本文抽出、URL provenance、evidence、Today |
+| B. PDF | 固定 text PDF | 複数ページ、evidence span から page |
+| C. timed transcript | SRT | 正規化本文、evidence span から時刻 |
+| D. audio | fake TranscriptionProvider | provider 出力が Source になる。時刻を残す。raw audio は保存しない |
+| E. conversation | 話者と時刻のある JSON。日本語が混ざる | フランス語候補を抽出できる。不要な metadata は保存しない |
+
+テキストファイルも同じ Candidate → accept → Today の経路に載せる。
+同じ canonical form は Source type が違っても 1 つの LearningItem に統合する。
+
+### ingestion 共通品質
+
+- 同じ入力と同じ ingestion version から同じ本文と `content_hash` が出る。再送は既存 Source
+- segment の範囲は保存済み `content` 上で有効
+- evidence span は `content[start:end]` で再構成できる
+- page / time / speaker は、その span を含む segment と矛盾しない
+- oversized / malformed は拒否し、Source を残さない
+- raw HTML、raw PDF、raw audio、provider の生応答を Source 本文にしない
+
+### security
+
+URL は localhost、loopback、private IP、link-local / metadata、
+blocked destination への redirect を拒否する。応答本文や内部 IP は利用者向け
+メッセージに出さない。
+
+file は拡張子だけで MIME を信用しない。サイズとページ数の上限、壊れた入力、
+HTML をテキスト本文にしないこと、未知フィールド付きの会話 JSON を検証する。
+
+### downstream
+
+- Candidate 抽出の入力は保存済み `SourceDocument.content`
+- accept / reject は既存の Candidate API
+- `LearningItem` に `source_type` は無い。ranking / Daily Learning Plan /
+  Today Session も `SourceType` を必須 feature にしない
+- Today Session は既存の Exercise 基盤を使う
+
+### failure isolation
+
+取り込みに失敗したときは `SourceDocument` を保存しない。
+既存 Source、LearningEvent、LearnerState、ReviewSchedule は残る。
+不完全な本文は学習 pipeline に流さない。
+
+対象は URL fetch failure、PDF parse failure、transcript unavailable、
+transcription provider failure。
+
+### DB
+
+file DB を dispose して開き直しても、provenance、segments、採用済み Item、
+回答後の state / schedule が残る。
+
+### Frontend
+
+教材追加の形式選択、URL 入力、file picker、取り込み中、詳細の provenance、
+候補抽出、採用、一覧へ戻ったあとの今日の学習までを `TutorFlow` でつなぐ。
+スマホ相当幅は、形式が折り返し、URL とファイル名が `overflow-wrap` し、
+主要ボタンが全幅かつ `minHeight` 48 であること。
+
+### Phase 6 ではまだ行わないこと
+
+- OCR、login / paywall の突破、full browser crawler、batch connector sync
+- embeddings / vector DB、ML ranking、自由会話 Tutor
+- 新規項目の過剰投入抑止、既知項目の自動 skip、苦手文法の横断検出
+- source 由来の学習成果表示、推薦説明の改善、学習負荷の自動調整
+
+| 観点 | 自動テスト |
+|------|------------|
+| A〜E とテキスト → 抽出 → 採否 → ranking → Today → 回答 → DB 再 open | `test_phase6_external_source_to_today_learning_vertical_slice` |
+| 同じ入力の再利用と content hash | 同上 |
+| evidence と page / time / speaker の対応 | 同上 |
+| raw payload を本文にしない | 同上 |
+| 失敗が既存の学習履歴を壊さない | `test_phase6_failed_ingestion_does_not_persist_or_damage_history` |
+| blocked URL、redirect、MIME、上限、壊れた入力 | `test_phase6_blocks_unsafe_urls_and_malformed_files` |
+| Candidate / Item / ranking / Today が SourceType に分岐しない | `test_phase6_downstream_pipeline_does_not_branch_on_source_type` |
+| 手入力 / Practice / 今日の復習 / quiz / TTS | `test_phase6_manual_practice_review_quiz_and_tts_remain` |
+| 形式選択から今日の学習まで | `TutorPhase6Flow.test.tsx` |
+| 取り込み中、ページ provenance、全幅ボタン | `TutorPhase6Flow.test.tsx` |
+| 音声 adapter 単体。外部 API なし | `test_audio_ingestion.py` |
+| 各 adapter の network 禁止 | 各 ingestion テストの autouse |
+
+## Phase 6 Exit Criteria（Issue #107）との対応
+
+Issue #107 の Phase 6 は、Source の入口が増えても、SourceDocument 以降の
+学習 pipeline が同じ契約のまま動くことである。
+
+| Exit Criteria | 満たした実装 | 自動テスト |
+|---------------|--------------|------------|
+| 外部 Source を共通 ingestion contract へ正規化できる | `assemble_ingestion_result` と各 adapter | `test_phase6_external_source_to_today_learning_vertical_slice` |
+| Web URL を安全に取り込める | `GuardedWebFetcher` / `POST .../ingest/url` | 同上 / `test_phase6_blocks_unsafe_urls_and_malformed_files` / `test_web_url_ingestion.py` |
+| text-based PDF を page provenance 付きで取り込める | `POST .../ingest/pdf` | 同上 / `test_pdf_ingestion.py` |
+| YouTube transcript / SRT / VTT を time provenance 付きで取り込める | `POST .../ingest/youtube` / `.../ingest/subtitle` | 同上（SRT）/ `test_youtube_ingestion.py` / `test_subtitle_ingestion.py` |
+| 音声を transcription して SourceDocument へ取り込める | fake `TranscriptionProvider` と `POST .../ingest/audio` | 同上 / `test_audio_ingestion.py` |
+| text file / conversation log を取り込める | `POST .../ingest/text-file` / `.../ingest/conversation` | 同上 / `test_text_conversation_ingestion.py` |
+| EvidenceSpan の character offset 契約が全 Source で維持される | 正規化後 content の半開区間 | `test_phase6_external_source_to_today_learning_vertical_slice` |
+| page / time / speaker 等の provenance を再構成できる | `segment_for_span` | 同上 |
+| invalid / oversized / blocked input を安全に拒否できる | adapter ごとの code と HTTP status | `test_phase6_blocks_unsafe_urls_and_malformed_files` |
+| 通常 CI が network / external API なしで通る | fake fetcher / provider / extractor。socket を禁止 | 同上 / 各 ingestion テスト |
+| external Source から Candidate を抽出・採否できる | 既存 extract / accept API | `test_phase6_external_source_to_today_learning_vertical_slice` |
+| accepted Item が既存 ranking / Today Learning へそのまま流れる | `rank_recommendations` / `GET /api/tutor/today` | 同上 |
+| Candidate / LearningItem / ranking を Source type 別に複製していない | 共通モデル。`source_type` を ranking の feature にしない | `test_phase6_downstream_pipeline_does_not_branch_on_source_type` |
+| 既存 manual_text / Practice / Review / Today / quiz / TTS に回帰がない | 既存 API は独立 | `test_phase6_manual_practice_review_quiz_and_tts_remain` / `TutorPhase6Flow.test.tsx` |
+| DB 再 open 後も provenance を含め保持される | SQLite file DB | `test_phase6_external_source_to_today_learning_vertical_slice` |
+| スマホ相当幅で教材追加から学習まで実用的 | 折り返し、全幅、`minHeight` 48 | `TutorPhase6Flow.test.tsx` |
+| `bash scripts/quality-check.sh` が通る | ruff / pytest / lint / frontend test / build | 作業完了時に実行 |
+| Phase 6 境界と Phase 7 への引継ぎを記載する | 本セクション | 本ドキュメント |
+
+スマホ実機の使用感は自動 style test だけでは完全代替しない。
+実機未確認の場合は PR に残す。
+
+## Phase 7 への引き継ぎ
+
+Phase 6 で Source の入口が増え、教材を作れることは共通契約で閉じた。
+次の問題は、**学習量と品質をどう制御するか**である。
+
+Phase 7 では、例えば以下を扱う。
+
+- 新規項目の過剰投入抑止
+- 既知項目の自動 skip
+- 同一表現の別文脈再提示
+- 苦手文法の横断検出
+- source 由来の学習成果表示
+- tutor recommendation 説明の改善
+- 学習負荷の自動調整
+
+Phase 7 へ進む前提は、Phase 0〜6 が `bash scripts/quality-check.sh` で
+継続して通ることである。OCR、login / paywall の突破、crawler、
+embeddings、ML ranking、自由会話 Tutor は Phase 7 の前提にしない。
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -3407,3 +4054,15 @@ Source ingestion の共通契約は上記
 「Phase 6 — Source ingestion 共通契約」を正とする。
 Web URL 取り込みは上記
 「Phase 6 — Web URL から SourceDocument を取り込む」を正とする。
+PDF 取り込みは上記
+「Phase 6 — PDF から SourceDocument を取り込む」を正とする。
+YouTube transcript と SRT / VTT の取り込みは上記
+「Phase 6 — YouTube transcript / SRT / VTT を時刻付きで取り込む」を正とする。
+音声の文字起こしは上記
+「Phase 6 — 音声を文字起こしして SourceDocument にする」を正とする。
+会話ログとテキストファイルの取り込みは上記
+「Phase 6 — 会話ログとテキストファイルを取り込む」を正とする。
+複数 Source 形式の追加 UI は上記
+「Phase 6 — 複数Source形式の追加UIとingestion状態・provenance表示」を正とする。
+Phase 6 自体の完了条件と Phase 7 への引継ぎは、上記
+「Phase 6 Exit Criteria」と「Phase 7 への引き継ぎ」を正とする。
