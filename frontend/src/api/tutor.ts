@@ -167,7 +167,7 @@ export async function ingestTutorConversation(input: IngestFileInput): Promise<S
   return postIngestFile('/api/tutor/sources/ingest/conversation', input)
 }
 
-/** 音声文字起こし API（Issue #193）。未実装の間は 404 / 501 を呼び出し側が案内する。 */
+/** 音声文字起こし API（Issue #193）。未設定や未配備の 404 / 501 は呼び出し側が案内する。 */
 export async function ingestTutorAudio(input: IngestFileInput): Promise<SourceDocument> {
   return postIngestFile('/api/tutor/sources/ingest/audio', input)
 }

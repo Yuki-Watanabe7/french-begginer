@@ -5,12 +5,13 @@ Review Practice Session（Issue #164）、今日の学習 Plan / Session（Issue
 Web URL からの Source 取り込み（Issue #190）、
 テキスト PDF からの Source 取り込み（Issue #191）、
 YouTube transcript と SRT / VTT からの Source 取り込み（Issue #192）、
+音声の文字起こしからの Source 取り込み（Issue #193）、
 テキスト / Markdown と会話 JSON からの Source 取り込み（Issue #194）。
 
 business rule は TutorService / CandidateService / ExerciseService /
 PracticeSessionService / ReviewSessionService / TodayLearningService /
 WebUrlIngestionService / PdfIngestionService / YoutubeIngestionService /
-SubtitleIngestionService / TextFileIngestionService /
+SubtitleIngestionService / AudioIngestionService / TextFileIngestionService /
 ConversationIngestionService に任せ、このモジュールは
 request/response schema と HTTP status 変換だけを持つ。
 """
@@ -31,6 +32,7 @@ from fastapi import (
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.deps import (
+    get_audio_ingestion_service,
     get_candidate_service,
     get_conversation_ingestion_service,
     get_exercise_service,
@@ -93,6 +95,7 @@ from app.domain.tutor import (
     SourceType,
     UtcDatetime,
 )
+from app.ingestion.audio_errors import AudioIngestErrorCode, AudioIngestionError
 from app.ingestion.conversation_errors import (
     ConversationIngestErrorCode,
     ConversationIngestionError,
@@ -108,6 +111,7 @@ from app.ingestion.text_file_errors import (
     TextFileIngestionError,
 )
 from app.ingestion.youtube_errors import YoutubeIngestErrorCode, YoutubeIngestionError
+from app.services.audio_ingestion import AudioIngestionService
 from app.services.candidate_service import CandidateService, CandidateView
 from app.services.conversation_ingestion import ConversationIngestionService
 from app.services.exceptions import (
@@ -163,6 +167,9 @@ YoutubeIngestionServiceDep = Annotated[
 ]
 SubtitleIngestionServiceDep = Annotated[
     SubtitleIngestionService, Depends(get_subtitle_ingestion_service)
+]
+AudioIngestionServiceDep = Annotated[
+    AudioIngestionService, Depends(get_audio_ingestion_service)
 ]
 TextFileIngestionServiceDep = Annotated[
     TextFileIngestionService, Depends(get_text_file_ingestion_service)
@@ -563,6 +570,23 @@ _YOUTUBE_CODE_HTTP: dict[YoutubeIngestErrorCode, int] = {
     YoutubeIngestErrorCode.transcript_provider_error: status.HTTP_502_BAD_GATEWAY,
 }
 
+_AUDIO_CODE_HTTP: dict[AudioIngestErrorCode, int] = {
+    AudioIngestErrorCode.invalid_audio: status.HTTP_400_BAD_REQUEST,
+    AudioIngestErrorCode.malformed_audio: status.HTTP_400_BAD_REQUEST,
+    AudioIngestErrorCode.unsupported_media: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    AudioIngestErrorCode.file_too_large: status.HTTP_413_CONTENT_TOO_LARGE,
+    AudioIngestErrorCode.audio_too_long: status.HTTP_413_CONTENT_TOO_LARGE,
+    AudioIngestErrorCode.text_too_large: status.HTTP_413_CONTENT_TOO_LARGE,
+    AudioIngestErrorCode.transcript_empty: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    AudioIngestErrorCode.invalid_transcript: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    AudioIngestErrorCode.translated_transcript: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    AudioIngestErrorCode.transcription_not_configured: (
+        status.HTTP_503_SERVICE_UNAVAILABLE
+    ),
+    AudioIngestErrorCode.transcription_timeout: status.HTTP_504_GATEWAY_TIMEOUT,
+    AudioIngestErrorCode.transcription_provider_error: status.HTTP_502_BAD_GATEWAY,
+}
+
 _SUBTITLE_CODE_HTTP: dict[SubtitleIngestErrorCode, int] = {
     SubtitleIngestErrorCode.invalid_subtitle: status.HTTP_400_BAD_REQUEST,
     SubtitleIngestErrorCode.malformed_subtitle: status.HTTP_400_BAD_REQUEST,
@@ -627,6 +651,11 @@ def _ingestion_http(exc: SourceIngestionError) -> HTTPException:
     if isinstance(exc, SubtitleIngestionError):
         return HTTPException(
             status_code=_SUBTITLE_CODE_HTTP[exc.code],
+            detail={"code": exc.code.value, "message": str(exc)},
+        )
+    if isinstance(exc, AudioIngestionError):
+        return HTTPException(
+            status_code=_AUDIO_CODE_HTTP[exc.code],
             detail={"code": exc.code.value, "message": str(exc)},
         )
     if isinstance(exc, TextFileIngestionError):
@@ -814,6 +843,56 @@ def ingest_subtitle_source(
 
     try:
         committed = service.ingest_subtitle(
+            source=file.file,
+            filename=file.filename,
+            declared_media_type=file.content_type,
+            title=title,
+            note=note,
+            language=language,
+        )
+    except SourceIngestionError as exc:
+        raise _ingestion_http(exc) from exc
+    response.status_code = (
+        status.HTTP_201_CREATED if committed.created else status.HTTP_200_OK
+    )
+    return IngestUrlResponse(
+        action=committed.action,
+        created=committed.created,
+        source=committed.document,
+    )
+
+
+@router.post(
+    "/sources/ingest/audio",
+    response_model=IngestUrlResponse,
+    responses={
+        200: {"description": "同じ音声と本文の再取り込み。既存 Source を返す"},
+        201: {"description": "新しい Source、または本文が変わった版を追加する"},
+        400: {"description": "invalid_audio または malformed_audio"},
+        413: {"description": "file_too_large、audio_too_long、または text_too_large"},
+        415: {"description": "unsupported_media"},
+        422: {
+            "description": (
+                "transcript_empty、invalid_transcript、または translated_transcript"
+            )
+        },
+        502: {"description": "transcription_provider_error"},
+        503: {"description": "transcription_not_configured"},
+        504: {"description": "transcription_timeout"},
+    },
+)
+def ingest_audio_source(
+    service: AudioIngestionServiceDep,
+    response: Response,
+    file: Annotated[UploadFile, File()],
+    title: Annotated[str | None, Form()] = None,
+    note: Annotated[str | None, Form()] = None,
+    language: Annotated[str, Form()] = "fr",
+) -> IngestUrlResponse:
+    """音声を文字起こしして SourceDocument にする。raw audio は保存しない。"""
+
+    try:
+        committed = service.ingest_audio(
             source=file.file,
             filename=file.filename,
             declared_media_type=file.content_type,
