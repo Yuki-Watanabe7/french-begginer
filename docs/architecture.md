@@ -267,6 +267,7 @@ backend/app/
 │   ├── recommendation_ranking.py  # 説明可能な ranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
 │   ├── admission_policy.py     # 新規LearningItemの流入制御（Issue #200）
+│   ├── weakness_pattern.py     # 横断の苦手パターン検出（Issue #203）
 │   ├── today_session.py        # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   └── conjugation_adapter.py
 ├── ingestion/    # Web URL、PDF、YouTube、字幕、テキスト / 会話 JSON（Issue #190 / #191 / #192 / #194）。domain からは依存しない
@@ -298,7 +299,8 @@ backend/app/
     ├── exercise_service.py        # Exercise 取得・採点・LearningEvent 記録（Issue #149）
     ├── practice_session_service.py  # Practice Session 組み立て（Issue #150）
     ├── review_session_service.py  # Review Practice Session 組み立て（Issue #164）
-    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。新規は admission 通過後
+    ├── weakness_pattern_service.py  # LearningEvent 横断の苦手パターン（Issue #203）
+    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。新規は admission 通過後。苦手パターンは補助 signal
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。

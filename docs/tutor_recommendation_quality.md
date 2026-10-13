@@ -76,8 +76,8 @@ score の絶対値を大量に golden 固定しない。見るのは **順位・
 
 評価結果に残す:
 
-- `feature_version`（signal-v1）
-- ranking `policy_version`（ranking-v1）
+- `feature_version`（signal-v2。横断苦手 hint を足した版。空なら従来の特徴量）
+- ranking `policy_version`（ranking-v2。`pattern_weakness` は独立 component）
 - plan `policy_version`（plan-v1）
 - fixture name
 - ranked IDs / reason codes（必要なら plan entries）
