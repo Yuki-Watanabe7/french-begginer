@@ -32,6 +32,7 @@ from app.services.extraction_prompt import EXTRACTION_VERSION
 from app.services.extraction_schema import ExtractedCandidate, ExtractedEvidenceSpan
 from app.services.extraction_service import ExtractionService
 from app.services.extractors import ExtractorResult
+from app.services.tutor_service import build_tutor_service
 
 CONTENT = "Je me suis rendu compte qu'il fallait changer de stratégie."
 
@@ -453,6 +454,29 @@ def test_accept_merge_fills_missing_conjugation_metadata(
     assert result.item.metadata["lemma"] == "parler"
     assert result.item.metadata["tense"] == "présent"
     assert result.item.meaning_ja == "話す（手入力）"
+
+
+def test_accepted_candidate_exposes_explicit_known(
+    store: TutorSqliteStore, service: CandidateService
+):
+    source = _create_source(store)
+    created = service.extract_for_source(source.id).created[0]
+    assert created.learning_item_id is None
+    assert created.explicit_known is False
+
+    accepted = service.accept(created.candidate.id)
+    assert accepted.candidate.learning_item_id == accepted.item.id
+    assert accepted.candidate.explicit_known is False
+
+    tutor = build_tutor_service(store)
+    tutor.mark_known(accepted.item.id)
+    listed = service.list_for_source(source.id)
+    assert listed[0].learning_item_id == accepted.item.id
+    assert listed[0].explicit_known is True
+
+    tutor.clear_known(accepted.item.id)
+    restored = service.list_for_source(source.id)
+    assert restored[0].explicit_known is False
 
 
 def test_extract_config_error_does_not_save(

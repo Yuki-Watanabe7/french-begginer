@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.domain.known_item_policy import KnownItemEvent, KnownItemOverride
 from app.domain.review_scheduler import DIRECTION_ORDER, DUE_ITEM_STATUS
 from app.domain.tutor import (
     SKILL_DIRECTION_BY_EXERCISE_TYPE,
@@ -26,6 +27,8 @@ from app.domain.tutor import (
 from app.persistence.datetime_codec import dump_utc, require_aware
 from app.persistence.db import create_initialized_engine
 from app.persistence.models import (
+    KnownItemEventRow,
+    KnownItemOverrideRow,
     LearnerStateRow,
     LearningEventRow,
     LearningItemCandidateRow,
@@ -390,6 +393,53 @@ class SqliteReviewScheduleRepository:
         return _sort_schedules_for_item(schedule_list)
 
 
+class SqliteKnownItemRepository:
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    def get(self, item_id: str) -> KnownItemOverride | None:
+        with self._sessions() as session:
+            row = session.get(KnownItemOverrideRow, item_id)
+            return row.to_domain() if row is not None else None
+
+    def list_events(self, item_id: str) -> list[KnownItemEvent]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(KnownItemEventRow)
+                .where(KnownItemEventRow.learning_item_id == item_id)
+                .order_by(KnownItemEventRow.occurred_at, KnownItemEventRow.id)
+            ).all()
+            return [row.to_domain() for row in rows]
+
+    def list_active_ids(self) -> set[str]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(KnownItemOverrideRow.learning_item_id).where(
+                    KnownItemOverrideRow.active == 1
+                )
+            ).all()
+            return set(rows)
+
+    def append_event_and_upsert(
+        self, event: KnownItemEvent, override: KnownItemOverride
+    ) -> tuple[KnownItemEvent, KnownItemOverride]:
+        if event.learning_item_id != override.learning_item_id:
+            raise ValueError(
+                "KnownItemEvent と KnownItemOverride の learning_item_id が一致しない: "
+                f"event={event.learning_item_id}, override={override.learning_item_id}"
+            )
+        with self._sessions() as session:
+            _require_learning_item(session, event.learning_item_id)
+            try:
+                session.add(KnownItemEventRow.from_domain(event))
+                session.merge(KnownItemOverrideRow.from_domain(override))
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                raise DuplicateEntityError("KnownItemEvent", event.id) from exc
+        return event, override
+
+
 @dataclass(frozen=True)
 class TutorRepositories:
     source_documents: SqliteSourceDocumentRepository
@@ -400,6 +450,7 @@ class TutorRepositories:
     learner_states: SqliteLearnerStateRepository
     learning_progress: SqliteLearningProgressRepository
     review_schedules: SqliteReviewScheduleRepository
+    known_items: SqliteKnownItemRepository
 
 
 class TutorSqliteStore:
@@ -420,6 +471,7 @@ class TutorSqliteStore:
         self.learner_states = SqliteLearnerStateRepository(self._sessions)
         self.learning_progress = SqliteLearningProgressRepository(self._sessions)
         self.review_schedules = SqliteReviewScheduleRepository(self._sessions)
+        self.known_items = SqliteKnownItemRepository(self._sessions)
 
     def repositories(self) -> TutorRepositories:
         return TutorRepositories(
@@ -431,6 +483,7 @@ class TutorSqliteStore:
             learner_states=self.learner_states,
             learning_progress=self.learning_progress,
             review_schedules=self.review_schedules,
+            known_items=self.known_items,
         )
 
     @classmethod

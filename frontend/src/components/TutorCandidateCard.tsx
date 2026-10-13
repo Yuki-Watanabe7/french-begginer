@@ -1,4 +1,5 @@
 import type { LearningItemCandidate } from '../types'
+import { KnownItemControl } from './KnownItemControl'
 import {
   CANDIDATE_STATUS_LABELS,
   formatCandidateConfidence,
@@ -12,6 +13,13 @@ interface Props {
   actionError: string | null
   onAccept: () => void
   onReject: () => void
+  known?: {
+    explicitKnown: boolean
+    busy: boolean
+    error: string | null
+    onMark: () => void
+    onUndo: () => void
+  } | null
 }
 
 export function TutorCandidateCard({
@@ -21,6 +29,7 @@ export function TutorCandidateCard({
   actionError,
   onAccept,
   onReject,
+  known = null,
 }: Props) {
   const typeLabel = LEARNING_ITEM_TYPE_LABELS[candidate.item_type]
   const statusLabel = CANDIDATE_STATUS_LABELS[candidate.status]
@@ -83,6 +92,16 @@ export function TutorCandidateCard({
             却下する
           </button>
         </div>
+      )}
+      {candidate.status === 'accepted' && known && (
+        <KnownItemControl
+          key={candidate.id}
+          explicitKnown={known.explicitKnown}
+          busy={known.busy}
+          error={known.error}
+          onMark={known.onMark}
+          onUndo={known.onUndo}
+        />
       )}
     </article>
   )

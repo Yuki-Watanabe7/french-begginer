@@ -4079,6 +4079,81 @@ admission 在庫がそれより広くても Plan は `max_new_count` を超え�
 | `max_new_count` と矛盾しない | `test_max_new_count_still_bounds_the_plan` |
 | OpenAI / LLM 非依存 | `test_module_does_not_import_llm` |
 
+## Phase 7 — 既知項目の known-item policy（Issue #201）
+
+ユーザーがすでに知っている項目を新規学習枠から外し、あとから戻せるようにする。
+判定を LLM には渡さない。`LearningItem.status` の `mastered` とは別の情報である。
+
+| 概念 | 役割 | 新規学習 | due review | 永続 status |
+|------|------|----------|------------|-------------|
+| `mastered` | 既存の定着状態 | 対象外（inactive） | 出題しない | `LearningItem.status` を変える |
+| explicit known | ユーザーが「知っている」と宣言 | 外す | 残す | 変えない。undo できる |
+| auto-skip | direction ごとの十分な履歴 | その direction だけ外す | 残す | 変えない。毎回計算する |
+
+「知っている」は新規導入を skip する情報であり、将来の再確認を禁止しない。
+due の Item を known にしても ReviewSchedule は消さず、Phase 4 の純 Review Session
+と今日の復習枠には残る。外れるのは `new_practice` だけである。
+
+```text
+active LearningItem
+  -> explicit known / direction auto-skip
+  -> new_practice だけを除外
+  -> unseen backlog
+  -> admission policy
+  -> ranking / Daily Learning Plan
+due review はこの除外を通さず、従来どおり ranking へ残る
+```
+
+### explicit known
+
+`POST /api/tutor/items/{item_id}/known` が宣言、`POST .../known/undo` が取り消し。
+同じ状態への再操作は履歴を足さない。変化したときだけ append-only の
+`known_item_events` と、現在値の `known_item_overrides` を同一トランザクションで書く。
+`updated_at` は最後に変化した操作時刻。LearningEvent / LearnerState / ReviewSchedule
+は更新しない。
+
+### auto-skip
+
+`decide_auto_skip` はその direction の LearningEvent だけを見る。次をすべて満たすときだけ
+新規学習を不要とする。
+
+| 条件 | 初期値 |
+|------|--------|
+| 正解回数 | 3 回以上。1 回では不可 |
+| 正答率 | 0.8 以上 |
+| 確認の期間 | 最初の正解から最後の正解まで 2 日以上 |
+| 最近の誤答 | 14 日以内の誤答があると不可 |
+
+recognition が高くても production の履歴が足りなければ production は skip しない。
+結果は保存しない。`policy_version` は `known-item-v1`。
+
+### UI
+
+採用済みの候補と、新規の練習問題の回答前後に「これは知っている」を出す。
+一度押しただけでは外れず、確認のあとで新規学習から外す。表示は
+「知っているので、新しい学習には出しません」と「元に戻す」。
+技術用語 `mastered` は見せない。純復習の問題にはこの操作を出さない。
+
+### スコープ外
+
+- 既知判定の LLM 委任
+- placement test
+- adaptive CEFR 推定
+- 学習項目の自動削除
+
+| 観点 | 自動テスト |
+|------|------------|
+| explicit known で new plan から除外 | `test_explicit_known_excludes_new_plan_and_undo_restores` |
+| undo で復帰 | 同上 / `test_mark_known_is_idempotent_and_undo_restores` |
+| 1 回正解では auto-skip しない | `test_one_correct_answer_does_not_auto_skip` / `test_one_correct_does_not_auto_skip_the_other_direction` |
+| 十分な履歴で auto-skip | `test_sufficient_history_auto_skips_only_that_direction` / `test_sufficient_history_does_not_consume_a_new_slot` |
+| recent incorrect では auto-skip しない | `test_recent_incorrect_blocks_auto_skip` / `test_recent_incorrect_does_not_auto_skip` |
+| recognition が高くても production は残す | `test_high_recognition_does_not_skip_low_production` |
+| DB reopen | `test_explicit_known_survives_reopen` |
+| Phase 4 review を壊さない | `test_known_due_item_stays_in_review_and_leaves_new_plan` / `test_known_due_item_stays_in_review_queue` |
+| known と mastered を混ぜない | `test_mark_known_keeps_status_history_and_schedule` / `test_mark_known_does_not_change_mastered_status` |
+| Frontend | `PracticeExerciseCard.test.tsx` / `KnownItemControl.test.tsx` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -4148,3 +4223,5 @@ Phase 6 自体の完了条件と Phase 7 への引継ぎは、上記
 「Phase 6 Exit Criteria」と「Phase 7 への引き継ぎ」を正とする。
 新規 LearningItem の流入制御は、上記
 「Phase 7 — 新規LearningItemのadmission policy」を正とする。
+既知項目の skip は、上記
+「Phase 7 — 既知項目の known-item policy」を正とする。
