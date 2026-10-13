@@ -26,6 +26,7 @@ from app.domain.admission_policy import (
     decide_new_admissions,
     filter_ranked_new_practice,
 )
+from app.domain.context_selection import context_usages_from_events
 from app.domain.daily_learning_plan import (
     DEFAULT_MAX_NEW_COUNT,
     DEFAULT_PLAN_SEED,
@@ -162,12 +163,18 @@ class TodayLearningService:
             seed=session_seed,
             now=now,
         )
+        item_ids = dict.fromkeys(entry.learning_item_id for entry in plan.entries)
+        usages = {
+            item_id: context_usages_from_events(self._events.list_by_item(item_id))
+            for item_id in item_ids
+        }
         return build_today_learning_session(
             plan,
             items_by_id=context.items_by_id,
             snapshots_by_id=context.snapshots_by_id,
             sources=context.sources_by_id,
             seed=session_seed,
+            context_usages_by_item=usages,
         )
 
     def _build_plan(

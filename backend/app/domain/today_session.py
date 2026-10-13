@@ -7,7 +7,7 @@ plan entry から既存 Exercise 基盤への解決を担う。
 このモジュールが依存してよいのは Python 標準ライブラリ、Pydantic、
 `domain.tutor`、`domain.exercise`、`domain.exercise_generation`、
 `domain.daily_learning_plan`、`domain.recommendation_ranking`、
-`domain.recommendation_signal` のみ。
+`domain.recommendation_signal`、`domain.context_selection` のみ。
 DB / FastAPI / OpenAI には依存しない。wall clock は呼ばない。
 Phase 3 の Practice Session / Phase 4 の純 Review Session は書き換えない。
 
@@ -29,6 +29,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.domain.context_selection import ContextUsage
 from app.domain.daily_learning_plan import (
     PLAN_EXERCISE_PRIORITY,
     POLICY_VERSION,
@@ -297,6 +298,7 @@ def build_today_learning_session(
     sources: Mapping[str, SourceDocument] | Sequence[SourceDocument] = (),
     seed: str | int = DEFAULT_TODAY_SESSION_SEED,
     session_id: str | None = None,
+    context_usages_by_item: Mapping[str, Sequence[ContextUsage]] | None = None,
 ) -> TodayLearningSession:
     """plan entry を既存 Exercise へ解決する。stale は skip し、Event は作らない。
 
@@ -306,6 +308,7 @@ def build_today_learning_session(
     呼び出し側が plan を再計算して行う。
     """
     sources_by_id = _as_source_map(sources)
+    usages_by_item = context_usages_by_item or {}
     snapshots = snapshots_by_id or {}
     active_pool = tuple(
         item for item in items_by_id.values() if item.status == "active"
@@ -323,6 +326,7 @@ def build_today_learning_session(
             pool=active_pool,
             sources_by_id=sources_by_id,
             used_keys=used_keys,
+            context_usages=usages_by_item.get(entry.learning_item_id, ()),
         )
         if skip is not None:
             skipped.append(skip)
@@ -367,6 +371,7 @@ def _resolve_entry(
     pool: Sequence[LearningItem],
     sources_by_id: Mapping[str, SourceDocument],
     used_keys: set[tuple[str, ExerciseType]],
+    context_usages: Sequence[ContextUsage] = (),
 ) -> tuple[GeneratedExercise | None, SkippedTodayEntry | None]:
     item = items_by_id.get(entry.learning_item_id)
     stale = _stale_reason(entry, item, snapshots.get(entry.learning_item_id))
@@ -386,6 +391,7 @@ def _resolve_entry(
         pool=pool,
         sources_by_id=sources_by_id,
         used_keys=used_keys,
+        context_usages=context_usages,
     )
     if generation_skip is not None:
         return None, generation_skip
@@ -445,6 +451,7 @@ def _generate_for_entry(
     pool: Sequence[LearningItem],
     sources_by_id: Mapping[str, SourceDocument],
     used_keys: set[tuple[str, ExerciseType]],
+    context_usages: Sequence[ContextUsage] = (),
 ) -> tuple[GeneratedExercise | None, SkippedTodayEntry | None]:
     """plan の direction を守り、hint の ExerciseType を優先して生成する。"""
     ordered = _exercise_types_for(entry)
@@ -461,6 +468,7 @@ def _generate_for_entry(
             pool=pool,
             seed=DEFAULT_GENERATION_SEED,
             sources=sources_by_id,
+            context_usages=context_usages,
         )
         if result.eligible and result.exercise is not None:
             if result.exercise.spec.skill_direction != entry.skill_direction:

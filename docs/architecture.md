@@ -84,6 +84,8 @@ SQLite (初期) → PostgreSQL (将来)
 
 `POST /api/tutor/items/{item_id}/known` は explicit known を記録する。これは `mastered` とは別で、新規学習の候補から外すための指定である。due review と `LearningItem.status` は変えない。`POST .../known/undo` で戻せる。応答に習熟スコアや `mastered` は含めない。
 
+Exercise の取得と回答は、同じ LearningEvent 履歴から cloze の出典文脈を再構成する。複数の有効な SourceRef があるときは直近の cloze 文脈を避け、履歴が空なら最も古い Source を使う。選択理由と `context-rotation-v1` は LearningEvent.metadata に残る。エンドポイントは増えない。
+
 ### GET /api/tutor/reviews/queue
 
 recognition / production 別の due review queue。既存 `GET /api/tutor/reviews/due` の Phase 0 契約は維持する。
@@ -272,6 +274,7 @@ backend/app/
 │   ├── recommendation_ranking.py  # 説明可能な ranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
 │   ├── admission_policy.py     # 新規LearningItemの流入制御（Issue #200）
+│   ├── context_selection.py    # 複数Source文脈の context rotation（Issue #202）
 │   ├── today_session.py        # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   └── conjugation_adapter.py
 ├── ingestion/    # Web URL、PDF、YouTube、字幕、テキスト / 会話 JSON（Issue #190 / #191 / #192 / #194）。domain からは依存しない
