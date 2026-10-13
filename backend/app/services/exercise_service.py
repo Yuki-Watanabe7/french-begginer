@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.domain.context_selection import context_usages_from_events
 from app.domain.exercise import exercise_event_metadata
 from app.domain.exercise_evaluation import (
     ExerciseEvaluation,
@@ -31,6 +32,7 @@ from app.domain.tutor import (
     UtcDatetime,
 )
 from app.repositories.protocols import (
+    LearningEventRepository,
     LearningItemRepository,
     SourceDocumentRepository,
 )
@@ -45,6 +47,7 @@ from app.services.tutor_service import ReviewRecord, TutorService
 class _ExerciseStore(Protocol):
     source_documents: SourceDocumentRepository
     learning_items: LearningItemRepository
+    learning_events: LearningEventRepository
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,7 @@ def build_exercise_service(
     return ExerciseService(
         sources=store.source_documents,
         items=store.learning_items,
+        events=store.learning_events,
         tutor=tutor,
     )
 
@@ -76,10 +80,12 @@ class ExerciseService:
         *,
         sources: SourceDocumentRepository,
         items: LearningItemRepository,
+        events: LearningEventRepository,
         tutor: TutorService,
     ) -> None:
         self._sources = sources
         self._items = items
+        self._events = events
         self._tutor = tutor
 
     def get_exercise(
@@ -132,6 +138,9 @@ class ExerciseService:
             pool=self._items.list(),
             seed=DEFAULT_GENERATION_SEED,
             sources=self._sources_for(item),
+            context_usages=context_usages_from_events(
+                self._events.list_by_item(item.id)
+            ),
         )
         if not result.eligible or result.exercise is None:
             raise TutorUnsupportedExerciseError(

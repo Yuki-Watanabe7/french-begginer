@@ -1533,7 +1533,8 @@ Je me suis ____ qu'il fallait changer de stratégie.
 ### SourceRef が複数ある場合
 
 有効な evidence（Source が存在し、span が本文内で空でなく、
-context を切れる）だけを候補にし、**oldest-source** で1件選ぶ。
+context を切れる）だけを候補にする。履歴が無いときの順位は
+**oldest-source** のままである。
 
 - `SourceDocument.created_at` 昇順
 - 同刻なら `source_document_id` 昇順
@@ -1541,6 +1542,8 @@ context を切れる）だけを候補にし、**oldest-source** で1件選ぶ�
 
 暗黙の random は使わない。invalid な ref は出題に使わず、
 valid な別 ref があればそちらを使う。
+同じ Item を別の出典文脈で再提示する規則は、下記
+「Phase 7 — 複数Source文脈の context rotation」を正とする。
 
 ### invalid / unavailable
 
@@ -1703,7 +1706,11 @@ Exercise 自体は永続化しない。
 - `response_kind`
 - `generation_method`（`deterministic` / `source_cloze` / `conjugation_adapter`）
 - `reconstruction_key`
-- cloze のとき `source_document_id`
+- cloze / 補助 context のとき `source_document_id`、`source_evidence_id`、
+  `evidence_start` / `evidence_end`、`context_policy_version`、
+  `context_selection_reason`
+- 該当 segment があるとき `page_number` または `timestamp` /
+  `start_seconds` / `end_seconds`
 
 正解は含めない。`exercise_type` は LearningEvent の既存フィールド。
 `LearnerState.by_direction` の更新は Issue #161。source of truth は
@@ -4154,6 +4161,50 @@ recognition が高くても production の履歴が足りなければ production
 | known と mastered を混ぜない | `test_mark_known_keeps_status_history_and_schedule` / `test_mark_known_does_not_change_mastered_status` |
 | Frontend | `PracticeExerciseCard.test.tsx` / `KnownItemControl.test.tsx` |
 
+## Phase 7 — 複数Source文脈の context rotation（Issue #202）
+
+同じ LearningItem を、毎回同じ例文だけで出さない。有効な SourceRef が複数あるとき、
+その ExerciseType の直近利用を避けて別の出典文脈を選ぶ。正解の根拠は変えない。
+cloze の正解は選ばれた Source 本文の slice のままである。`ja_to_fr` の正解は
+`canonical_form` のままで、出典には依存させない。
+
+```text
+有効な SourceRef（span が本文内、空でない、前後 context を切れる）
+  -> 同じ ExerciseType の LearningEvent で未使用の文脈を優先
+  -> すべて使用済みなら、最後に使った時刻が古い文脈
+  -> created_at / source id / evidence start / end で安定順
+  -> ContextSelection（reason / policy_version）
+```
+
+`policy_version` は `context-rotation-v1`。理由は `single_valid_context` /
+`unused_context` / `least_recent_context`。候補が1件なら直近でもそれを使う。
+invalid な span や欠落した Source は候補にせず、残った文脈で Session を続ける。
+別 Item の表現は、この Item の `source_refs` に無い限り混ぜない。
+
+LearningEvent.metadata には `source_document_id`、`source_evidence_id`、
+evidence の start / end、`exercise_version` を残す。span の無い既存 Event は
+その Source 全体を使った履歴として復元する。PDF の page と字幕の timestamp は、
+選んだ span を含む segment から metadata に写す。
+
+meaning recognition は、同じ選択で切り出した文を `source_context` に載せる。
+選択肢と正解は `meaning_ja` のままである。この補助文脈の履歴は
+meaning recognition の Event だけを見る。cloze の再構成は cloze の Event
+だけを見るので、片方の回答がもう片方の採点根拠をずらさない。
+
+LLM による例文生成、embeddings、random な選択はしない。
+
+| 観点 | 自動テスト |
+|------|------------|
+| 2 SourceRef の rotation | `test_two_source_refs_rotate_away_from_the_recent_context` |
+| 3件以上で直近を避ける | `test_three_source_refs_avoid_the_most_recent_context` |
+| 1 SourceRef は従来どおり | `test_single_source_ref_stays_on_that_context` |
+| invalid evidence を skip | `test_invalid_evidence_is_not_selected` |
+| DB reopen 後も判断できる | `test_recent_context_survives_reopen_and_changes_the_cloze_answer` |
+| 同じ履歴で deterministic | `test_same_history_is_deterministic` |
+| page / timestamp を維持 | `test_pdf_page_and_transcript_timestamp_stay_on_the_selected_context` |
+| 欠落 Source で Session を壊さない | `test_missing_source_does_not_fail_the_session` |
+| ja_to_fr の正解を変えない | `test_ja_to_fr_answer_stays_canonical_form` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -4225,3 +4276,5 @@ Phase 6 自体の完了条件と Phase 7 への引継ぎは、上記
 「Phase 7 — 新規LearningItemのadmission policy」を正とする。
 既知項目の skip は、上記
 「Phase 7 — 既知項目の known-item policy」を正とする。
+複数 Source 文脈の再提示は、上記
+「Phase 7 — 複数Source文脈の context rotation」を正とする。

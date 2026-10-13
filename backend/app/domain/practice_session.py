@@ -6,7 +6,8 @@ Session 自体は永続化しない。学習履歴の source of truth は回答�
 LearningEvent（Issue #149）とする。
 
 このモジュールが依存してよいのは Python 標準ライブラリ、Pydantic、
-`domain.tutor`、`domain.exercise`、`domain.exercise_generation` のみ。
+`domain.tutor`、`domain.exercise`、`domain.exercise_generation`、
+`domain.context_selection` のみ。
 CONJUGATIONS（動詞活用表）は参照しない。DB / FastAPI / OpenAI には依存しない。
 
 ```text
@@ -33,6 +34,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.domain.context_selection import ContextUsage
 from app.domain.exercise import (
     EXERCISE_VERSION,
     ExerciseSkipReason,
@@ -131,6 +133,7 @@ def build_practice_session(
     question_count: int = DEFAULT_QUESTION_COUNT,
     seed: str | int = DEFAULT_SESSION_SEED,
     session_id: str | None = None,
+    context_usages_by_item: Mapping[str, Sequence[ContextUsage]] | None = None,
 ) -> PracticeSession:
     """Item 集合から Practice Session を deterministic に組み立てる。
 
@@ -154,11 +157,17 @@ def build_practice_session(
         # 全体練習では inactive を skipped に並べない。明示指定時だけ理由を返す。
         targets = [item for item in targets if item.status == "active"]
     pool = tuple(item for item in items if item.status == "active")
+    usages_by_item = context_usages_by_item or {}
     slots: list[_EligibleSlot] = []
     skipped: list[SkippedPracticeItem] = []
 
     for item in targets:
-        item_slots, skip = _enumerate_item(item, pool=pool, sources=sources)
+        item_slots, skip = _enumerate_item(
+            item,
+            pool=pool,
+            sources=sources,
+            context_usages=usages_by_item.get(item.id, ()),
+        )
         if skip is not None:
             skipped.append(skip)
             continue
@@ -210,6 +219,7 @@ def _enumerate_item(
     *,
     pool: Sequence[LearningItem],
     sources: Mapping[str, SourceDocument] | Sequence[SourceDocument],
+    context_usages: Sequence[ContextUsage] = (),
 ) -> tuple[list[_EligibleSlot], SkippedPracticeItem | None]:
     """1 Item から出せる Exercise を列挙する。1件も無ければ skip。"""
     types = SUPPORTED_ITEM_EXERCISE_TYPES[item.item_type]
@@ -222,6 +232,7 @@ def _enumerate_item(
             pool=pool,
             seed=DEFAULT_GENERATION_SEED,
             sources=sources,
+            context_usages=context_usages,
         )
         if result.eligible and result.exercise is not None:
             slots.append(_EligibleSlot(item=item, exercise=result.exercise))

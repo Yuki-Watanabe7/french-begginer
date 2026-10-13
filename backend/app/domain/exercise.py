@@ -440,10 +440,28 @@ def exercise_event_metadata(spec: ExerciseSpec) -> dict[str, Any]:
             spec.learning_item_id, spec.exercise_type, spec.exercise_version
         ),
     }
-    source_document_id = spec.metadata.get("source_document_id")
-    if isinstance(source_document_id, str) and source_document_id:
-        metadata["source_document_id"] = source_document_id
+    for key in _CONTEXT_EVENT_METADATA_KEYS:
+        value = spec.metadata.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        metadata[key] = value
     return metadata
+
+
+_CONTEXT_EVENT_METADATA_KEYS = (
+    "source_document_id",
+    "source_evidence_id",
+    "evidence_start",
+    "evidence_end",
+    "context_policy_version",
+    "context_selection_reason",
+    "page_number",
+    "start_seconds",
+    "end_seconds",
+    "timestamp",
+)
 
 
 def _skip_reason(
