@@ -58,10 +58,16 @@ from app.domain.today_session import (
     to_public_plan,
 )
 from app.domain.tutor import (
+    LearningEvent,
     LearningItem,
     SkillDirection,
     SourceDocument,
+    skill_direction_for_event,
     utcnow,
+)
+from app.domain.weakness_pattern import (
+    aggregate_weakness_patterns,
+    weakness_hints_for_item,
 )
 from app.repositories.protocols import (
     KnownItemRepository,
@@ -139,6 +145,7 @@ class TodayLearningService:
             plan,
             items_by_id=context.items_by_id,
             sources_by_id=context.sources_by_id,
+            snapshots_by_id=context.snapshots_by_id,
         )
 
     def create_session(
@@ -190,6 +197,14 @@ class TodayLearningService:
         all_items = self._items.list()
         items_by_id = {item.id: item for item in all_items}
         sources_by_id = {row.id: row for row in self._sources.list()}
+        events_by_item = {
+            item.id: self._events.list_by_item(item.id) for item in all_items
+        }
+        weakness_report = aggregate_weakness_patterns(
+            all_items,
+            [event for events in events_by_item.values() for event in events],
+            now=when,
+        )
         snapshots: list[RecommendationSignalSnapshot] = []
         snapshots_by_id: dict[str, RecommendationSignalSnapshot] = {}
         unseen: list[UnseenBacklogItem] = []
@@ -199,10 +214,14 @@ class TodayLearningService:
         for item in all_items:
             if item.status != "active":
                 continue
-            events_by_direction = {
-                direction: self._events.list_by_item_and_direction(item.id, direction)
-                for direction in SKILL_DIRECTIONS
+            events_by_direction: dict[SkillDirection, list[LearningEvent]] = {
+                direction: [] for direction in SKILL_DIRECTIONS
             }
+            for event in events_by_item[item.id]:
+                direction = skill_direction_for_event(event)
+                if direction is None:
+                    continue
+                events_by_direction[direction].append(event)
             for direction, events in events_by_direction.items():
                 decision = decide_auto_skip(
                     skill_direction=direction,
@@ -227,6 +246,7 @@ class TodayLearningService:
                 },
                 events_by_direction=events_by_direction,
                 sources_by_id=sources_by_id,
+                weakness_patterns=weakness_hints_for_item(item.id, weakness_report),
                 now=when,
             )
             snapshots.append(snapshot)

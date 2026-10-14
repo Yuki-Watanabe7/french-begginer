@@ -2643,15 +2643,16 @@ seen かつ future / unscheduled の direction は今日の候補にしない。
 | `source_recency` | source_recency_days | 補助 signal。Source なしは 0 |
 | `interest` | interest_weight | 補助。未設定（1.0）は 0 寄与 |
 | `importance` | importance_weight | 補助。未設定（1.0）は 0 寄与 |
+| `pattern_weakness` | 検出済み WeaknessPattern hint | 補助。hint が無い direction は 0。Issue #203 |
 
 weights / 飽和定数は `COMPONENT_WEIGHTS` ほかモジュール定数に一元管理する。
-`policy_version`（初期値 `ranking-v1`）で後から A/B 比較できる。
+`policy_version` の初期値は `ranking-v1`。横断苦手パターンの component を足した現行は `ranking-v2`。
 
 ### due review を軽視しない
 
 `overdue` を最大 weight にし、ちょうど due の寄与が
-interest + recency + importance + level_fit の最大合計を超える。
-interest だけで overdue を押しのけない。
+interest + recency + importance + level_fit + pattern_weakness の最大合計を超える。
+interest や苦手パターンだけでは overdue を押しのけない。
 
 ### direction imbalance
 
@@ -3123,7 +3124,7 @@ Issue #107 の Phase 5 は、学習履歴・弱点・Source・レベルを使っ
 | missing data を根拠なく苦手・低関心等と推測しない | unseen ≠ low mastery、unknown level は中立 | 同上 / `test_phase5_ranking_explanations_match_signals_and_stay_deterministic` |
 | signal から deterministic な ranking を生成できる | `rank_recommendations` | 同上 |
 | ranking の各主要寄与を説明できる | `RecommendationScore.components` + reason code | 同上 |
-| policy / feature version を追跡できる | `signal-v1` / `ranking-v1` / `plan-v1` | 同上 / `test_tutor_recommendation_quality.py` |
+| policy / feature version を追跡できる | `signal-v2` / `ranking-v2` / `plan-v1` | 同上 / `test_tutor_recommendation_quality.py` |
 | due review が新規項目に埋もれない | overdue 最大 weight | 同上 / fixture A |
 | 新規学習数に上限を設けられる | `max_new_count` | `test_phase5_new_review_mix_under_and_over_capacity` |
 | capacity 不足の due 件数を deferred として明示できる | `deferred_due_count` | 同上 |
@@ -4205,6 +4206,84 @@ LLM による例文生成、embeddings、random な選択はしない。
 | 欠落 Source で Session を壊さない | `test_missing_source_does_not_fail_the_session` |
 | ja_to_fr の正解を変えない | `test_ja_to_fr_answer_stays_canonical_form` |
 
+## Phase 7 — 苦手文法・表現パターンの検出（Issue #203）
+
+個別 LearningItem の recent error ではなく、同じ metadata / tag を持つ
+複数 Item の誤答が閾値を超えたときだけ `WeaknessPattern` にする。
+embeddings や LLM クラスタリングは source of truth にしない。
+書いていない gender、動詞 group、代名動詞は表記や辞書から推測しない。
+
+```text
+LearningItem.item_type / metadata + LearningEvent
+  -> aggregate_weakness_patterns()
+  -> direction 別の WeaknessPattern
+  -> 根拠 Item だけを snapshot の補助 hint にする
+  -> ranking の pattern_weakness（独立 component、小さい weight）
+```
+
+実装は `domain.weakness_pattern.aggregate_weakness_patterns`。
+`WeaknessPatternService.detect` は保存せず、同じ DB と now から再計算する。
+`TodayLearningService` は active Item の snapshot に、直近誤答の根拠になっている
+検出済み pattern だけを載せる。hint が空の Item の score は pattern 寄与 0 のまま。
+
+### taxonomy
+
+| dimension | 出典 | 例 |
+|-----------|------|----|
+| `item_type` | `LearningItem.item_type` | 語彙 / 表現 / 文法 / 動詞活用 |
+| `grammar_feature` | metadata または `tags` | 冠詞付き名詞、il faut 系 |
+| `verb_group` | metadata `verb_group` | `-er` / `-ir` / `-re` / 不規則 |
+| `tense` / `mood` | metadata | 半過去、直説法 |
+| `noun_gender` | metadata `noun_gender` または `gender` | 男性名詞 / 女性名詞。矛盾時は使わない |
+| `pronominal` | metadata `pronominal: true` | 代名動詞 |
+
+`tags` は `dimension:value` だけを読む。未知 dimension は捨てる。
+`item_type` は Item のフィールドを使い、tag では上書きしない。
+
+### 検出閾値
+
+定数は `weakness_pattern` にまとめ、`version` は `weakness-pattern-v1`。
+判定は direction ごと、直近 `RECENT_WINDOW_DAYS`（14日）の attempt だけを使う。
+窓の外の誤答は `attempt_count` に残るが、それだけでは `is_weakness` にしない。
+
+| 定数 | 初期値 | 意味 |
+|------|--------|------|
+| `MIN_ATTEMPTS` | 4 | 直近 attempt がこれ未満なら断定しない |
+| `MIN_DISTINCT_ITEMS` | 2 | 1 Item の誤答はパターンにしない |
+| `MIN_RECENT_INCORRECT` | 2 | 直近の誤答件数がこれ未満なら断定しない |
+| `ERROR_RATE_THRESHOLD` | 0.5 | 直近 error rate がこれ未満なら断定しない |
+
+SkillDirection は `exercise_type` から決める。event metadata では上書きしない。
+
+### ranking と説明
+
+`pattern_weakness` の weight は `0.03`。interest / recency / importance /
+level_fit と合わせても、ちょうど due の overdue 寄与を超えない。
+reason code は recognition が `PATTERN_RECENT_ERRORS`、
+production が `PRODUCTION_PATTERN_WEAKNESS`。
+ユーザー向け文は「最近、代名動詞の自力回答で間違いが続いています」のように
+pattern の label を含む。定型文も残し、label が無いときは定型文だけにする。
+
+### スコープ外
+
+- embeddings clustering
+- LLM だけでの pattern 発見
+- 自動カリキュラムの全面再設計
+- WeaknessPattern の永続化と専用 HTTP API
+
+| 観点 | 自動テスト |
+|------|------------|
+| 同じ pattern の複数 Item 誤答で検出 | `test_shared_pattern_across_items_is_detected` |
+| 1 Item だけでは検出しない | `test_single_item_is_not_called_a_weakness` |
+| attempt 不足では断定しない | `test_too_few_attempts_are_not_a_weakness` |
+| recognition / production を分ける | `test_recognition_and_production_are_separate` |
+| 窓の外の古い誤答だけでは断定しない | `test_old_errors_outside_the_window_do_not_define_a_weakness` |
+| metadata 欠損は推測しない | `test_missing_metadata_is_not_inferred` |
+| 同じ入力で同じ集計 | `test_aggregation_is_deterministic` |
+| DB 再 open 後も再計算が一致 | `test_patterns_recompute_the_same_after_db_reopen` |
+| due 優先を壊さない補助 signal | `test_quality_fixtures_pass` / `test_today_plan_uses_pattern_reason_without_burying_due` |
+| OpenAI / LLM 非依存 | `test_modules_do_not_import_llm_or_fastapi` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -4278,3 +4357,5 @@ Phase 6 自体の完了条件と Phase 7 への引継ぎは、上記
 「Phase 7 — 既知項目の known-item policy」を正とする。
 複数 Source 文脈の再提示は、上記
 「Phase 7 — 複数Source文脈の context rotation」を正とする。
+苦手文法・表現パターンの検出は、上記
+「Phase 7 — 苦手文法・表現パターンの検出」を正とする。

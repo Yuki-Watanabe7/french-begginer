@@ -19,6 +19,7 @@ import {
   tutorSaveErrorMessage,
   tutorTodayPlanErrorMessage,
   tutorTodaySessionErrorMessage,
+  visibleEntryReasons,
   visibleReasonLabels,
 } from '../utils/tutor'
 
@@ -214,6 +215,35 @@ describe('visibleReasonLabels', () => {
     expect(
       visibleReasonLabels(['OVERDUE_REVIEW', 'RECENT_ERROR', 'LOW_MASTERY', 'LEVEL_FIT']),
     ).toEqual(['復習時期を迎えています', '最近この表現で間違えています'])
+  })
+})
+
+describe('visibleEntryReasons', () => {
+  it('苦手パターンは項目名を含む explanation を出す', () => {
+    expect(
+      visibleEntryReasons({
+        reason_codes: ['PRODUCTION_PATTERN_WEAKNESS'],
+        explanation: '最近、代名動詞の自力回答で間違いが続いています。',
+      }),
+    ).toEqual(['最近、代名動詞の自力回答で間違いが続いています。'])
+  })
+
+  it('パターン以外は短いラベルのまま', () => {
+    expect(
+      visibleEntryReasons({
+        reason_codes: ['OVERDUE_REVIEW'],
+        explanation: '復習時期を迎えています。',
+      }),
+    ).toEqual(['復習時期を迎えています'])
+  })
+
+  it('reason が無ければ explanation を理由として捏造しない', () => {
+    expect(
+      visibleEntryReasons({
+        reason_codes: [],
+        explanation: '今日の学習候補です',
+      }),
+    ).toEqual([])
   })
 })
 

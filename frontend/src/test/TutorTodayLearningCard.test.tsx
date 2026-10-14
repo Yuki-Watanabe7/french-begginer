@@ -81,6 +81,35 @@ describe('TutorTodayLearningCard', () => {
     expect(screen.queryByLabelText('今日の学習の理由')).not.toBeInTheDocument()
   })
 
+  it('苦手パターンの説明は項目名を含めて表示する', async () => {
+    mockPlan.mockResolvedValue(
+      todayPlanFixture({
+        entries: [
+          todayPlanEntryFixture({
+            canonical_form: 'se lever',
+            skill_direction: 'production',
+            selected_exercise_type: 'ja_to_fr',
+            reason_codes: ['PRODUCTION_PATTERN_WEAKNESS'],
+            explanation:
+              '最近、同じ種類の項目の自力回答で間違いが続いています。最近、代名動詞の自力回答で間違いが続いています。',
+          }),
+        ],
+        summary_reason_codes: ['PRODUCTION_PATTERN_WEAKNESS'],
+      }),
+    )
+    render(<TutorTodayLearningCard onStartToday={() => {}} />)
+
+    await screen.findByLabelText('今日の学習の一部')
+    expect(
+      screen.getByText(
+        '最近、同じ種類の項目の自力回答で間違いが続いています。最近、代名動詞の自力回答で間違いが続いています。',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('最近、同じ種類の項目の自力回答で間違いが続いています'),
+    ).toBeInTheDocument()
+  })
+
   it('preview は上位数項目に留める', async () => {
     mockPlan.mockResolvedValue(
       todayPlanFixture({

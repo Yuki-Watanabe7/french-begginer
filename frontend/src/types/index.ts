@@ -399,6 +399,8 @@ export type ReasonCode =
   | 'LEVEL_FIT'
   | 'HIGH_INTEREST'
   | 'HIGH_IMPORTANCE'
+  | 'PATTERN_RECENT_ERRORS'
+  | 'PRODUCTION_PATTERN_WEAKNESS'
 
 export interface TodayPlanEntryView {
   learning_item_id: string

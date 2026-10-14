@@ -4,7 +4,7 @@ import { PracticeExerciseCard } from './PracticeExerciseCard'
 import { PracticeSessionResult } from './PracticeSessionResult'
 import { usePracticeSession } from '../hooks/usePracticeSession'
 import type { ActivityKind, TutorSessionKind } from '../types'
-import { todayActivityLabel, visibleReasonLabels } from '../utils/tutor'
+import { todayActivityLabel, visibleEntryReasons } from '../utils/tutor'
 
 interface Props {
   sourceId?: string
@@ -134,7 +134,7 @@ export function PracticeSessionFlow({
         activityLabel={
           currentTodayEntry ? todayActivityLabel(currentTodayEntry.activity_kind) : null
         }
-        reasonLabels={visibleReasonLabels(currentTodayEntry?.reason_codes)}
+        reasonLabels={visibleEntryReasons(currentTodayEntry)}
         onInputChange={setInput}
         onReconstructionChange={setReconstruction}
         onSubmit={() => {

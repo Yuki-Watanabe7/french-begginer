@@ -54,6 +54,7 @@ backend/app/
 │   ├── admission_policy.py  # 新規LearningItemの流入制御 admission policy（Issue #200）
 │   ├── known_item_policy.py # 既知項目の explicit known と conservative auto-skip（Issue #201）
 │   ├── context_selection.py # 複数Source文脈の context rotation（Issue #202）
+│   ├── weakness_pattern.py  # 複数Item横断の苦手パターン（Issue #203）
 │   ├── today_session.py  # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 │   ├── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
@@ -85,6 +86,7 @@ backend/app/
     ├── exercise_service.py  # Exercise 取得・採点・LearningEvent 記録
     ├── practice_session_service.py  # Practice Session 組み立て
     ├── review_session_service.py  # Review Practice Session 組み立て
+    ├── weakness_pattern_service.py  # 苦手パターンの算出（Issue #203）
     └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）
 ```
 

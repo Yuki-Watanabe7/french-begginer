@@ -61,6 +61,7 @@ from app.domain.tutor import (
     SourceDocument,
     new_id,
 )
+from app.domain.weakness_pattern import pattern_reason_notes
 
 DEFAULT_TODAY_SESSION_SEED = "today-session-v1"
 """未指定時の Session シード。Exercise 生成自体は DEFAULT_GENERATION_SEED。"""
@@ -76,6 +77,10 @@ REASON_EXPLANATIONS: dict[ReasonCode, str] = {
     "LEVEL_FIT": "今の学習レベルに合っています",
     "HIGH_INTEREST": "関心の高い教材に出てきた表現です",
     "HIGH_IMPORTANCE": "優先して覚えたい項目です",
+    "PATTERN_RECENT_ERRORS": "最近、同じ種類の項目で間違いが続いています",
+    "PRODUCTION_PATTERN_WEAKNESS": (
+        "最近、同じ種類の項目の自力回答で間違いが続いています"
+    ),
 }
 """reason code → 短い日本語説明。LLM では生成しない。"""
 
@@ -207,14 +212,25 @@ class TodayLearningSession(BaseModel):
         return tuple(to_public_exercise(row.spec) for row in self.exercises)
 
 
-def explain_reason_codes(codes: Sequence[ReasonCode]) -> str:
+def explain_reason_codes(
+    codes: Sequence[ReasonCode],
+    *,
+    pattern_notes: Mapping[str, str] | None = None,
+) -> str:
     """reason code から短い説明文を deterministic に生成する。
 
     LLM は使わない。code が無ければ中立な一文にする。
+    pattern_notes がある code は、定型文のあとにパターン名入りの文を足す。
     """
     if not codes:
         return EMPTY_REASON_EXPLANATION
-    parts = [REASON_EXPLANATIONS[code] for code in codes]
+    notes = pattern_notes or {}
+    parts: list[str] = []
+    for code in codes:
+        parts.append(REASON_EXPLANATIONS[code])
+        note = notes.get(code)
+        if note:
+            parts.append(note)
     text = "。".join(parts)
     return text if text.endswith("。") else f"{text}。"
 
@@ -239,8 +255,12 @@ def to_public_entry(
     item: LearningItem,
     *,
     sources_by_id: Mapping[str, SourceDocument] | None = None,
+    snapshot: RecommendationSignalSnapshot | None = None,
 ) -> TodayPlanEntryView:
     """1 plan entry を公開 DTO にする。rank_score は載せない。"""
+    notes = (
+        pattern_reason_notes(snapshot.weakness_patterns) if snapshot is not None else {}
+    )
     return TodayPlanEntryView(
         learning_item_id=item.id,
         canonical_form=item.canonical_form,
@@ -250,7 +270,7 @@ def to_public_entry(
         skill_direction=entry.skill_direction,
         selected_exercise_type=entry.selected_exercise_type,
         reason_codes=entry.reason_codes,
-        explanation=explain_reason_codes(entry.reason_codes),
+        explanation=explain_reason_codes(entry.reason_codes, pattern_notes=notes),
         source_titles=_source_titles(item, sources_by_id or {}),
     )
 
@@ -260,6 +280,7 @@ def to_public_plan(
     *,
     items_by_id: Mapping[str, LearningItem],
     sources_by_id: Mapping[str, SourceDocument] | None = None,
+    snapshots_by_id: Mapping[str, RecommendationSignalSnapshot] | None = None,
 ) -> TodayLearningPlanView:
     """DailyLearningPlan を公開 DTO にする。欠けた Item は落とさない。
 
@@ -267,6 +288,7 @@ def to_public_plan(
     例外にし、空の公開 plan へ黙って丸めない。
     """
     sources = sources_by_id or {}
+    snapshots = snapshots_by_id or {}
     views: list[TodayPlanEntryView] = []
     for entry in plan.entries:
         item = items_by_id.get(entry.learning_item_id)
@@ -275,7 +297,14 @@ def to_public_plan(
                 "plan entry に対応する LearningItem が見つからない: "
                 f"id={entry.learning_item_id}"
             )
-        views.append(to_public_entry(entry, item, sources_by_id=sources))
+        views.append(
+            to_public_entry(
+                entry,
+                item,
+                sources_by_id=sources,
+                snapshot=snapshots.get(item.id),
+            )
+        )
     return TodayLearningPlanView(
         generated_at=_require_aware_utc(plan.generated_at),
         requested_count=plan.requested_count,
@@ -340,6 +369,7 @@ def build_today_learning_session(
             ),
             item,
             sources_by_id=sources_by_id,
+            snapshot=snapshots.get(item.id),
         )
         exercises.append(exercise)
         kept.append(public_entry)
