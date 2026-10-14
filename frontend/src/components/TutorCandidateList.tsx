@@ -1,11 +1,35 @@
 import { TutorCandidateCard } from './TutorCandidateCard'
-import { useTutorSourceCandidates } from '../hooks/useTutorSourceCandidates'
+import {
+  useTutorSourceCandidates,
+  type CandidateKnownUi,
+} from '../hooks/useTutorSourceCandidates'
 import type { CandidateFilter, SourceSegment } from '../types'
 import { evidenceProvenanceLabel } from '../utils/sourceIngestion'
 
 interface Props {
   sourceId: string
   segments?: readonly SourceSegment[] | null
+}
+
+function knownControl(
+  state: ReturnType<typeof useTutorSourceCandidates>,
+  candidateId: string,
+): {
+  explicitKnown: boolean
+  busy: boolean
+  error: string | null
+  onMark: () => void
+  onUndo: () => void
+} | null {
+  const known: CandidateKnownUi | undefined = state.knownByCandidate[candidateId]
+  if (!known) return null
+  return {
+    explicitKnown: known.explicitKnown,
+    busy: known.busy || state.pendingIds.has(candidateId),
+    error: known.error,
+    onMark: () => state.markKnown(candidateId),
+    onUndo: () => state.undoKnown(candidateId),
+  }
 }
 
 const FILTERS: { id: CandidateFilter; label: string }[] = [
@@ -34,6 +58,7 @@ export function TutorCandidateList({ sourceId, segments }: Props) {
       </h3>
       <p style={styles.help}>
         本文から覚える候補を取り出します。採用したものだけが学習項目になります。
+        すでに知っているものは、新しい学習から外せます。あとから戻せます。
       </p>
       {(hasAny || state.hasExtracted) && (
         <p style={styles.reextractHint}>すでに採用・却下した候補はそのまま残ります</p>
@@ -124,6 +149,7 @@ export function TutorCandidateList({ sourceId, segments }: Props) {
                 actionError={state.actionErrors[candidate.id] ?? null}
                 onAccept={() => state.accept(candidate.id)}
                 onReject={() => state.reject(candidate.id)}
+                known={knownControl(state, candidate.id)}
               />
             </li>
           ))}

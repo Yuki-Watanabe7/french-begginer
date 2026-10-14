@@ -6,6 +6,7 @@ import {
   EXERCISE_TYPE_LABELS,
   practiceFrenchTtsTargets,
 } from '../utils/tutor'
+import { KnownItemControl } from './KnownItemControl'
 import { PracticeReconstructionBoard } from './PracticeReconstructionBoard'
 
 interface Props {
@@ -26,6 +27,14 @@ interface Props {
   onSubmit: () => void
   onChoice: (option: string) => void
   onNext: () => void
+  knownAction?: {
+    explicitKnown: boolean
+    busy: boolean
+    error: string | null
+    onMark: () => void
+    onUndo: () => void
+  } | null
+  onSkipUnanswered?: () => void
 }
 
 function choiceStyle(
@@ -64,8 +73,11 @@ export function PracticeExerciseCard({
   onSubmit,
   onChoice,
   onNext,
+  knownAction = null,
+  onSkipUnanswered,
 }: Props) {
   const answered = feedback !== null
+  const suppressAnswer = Boolean(knownAction?.explicitKnown) && !answered
   const { play, isLoading: ttsLoading, error: ttsError, clearError: ttsClearError } = useTTS()
   const ttsTargets = practiceFrenchTtsTargets(
     exercise,
@@ -155,7 +167,7 @@ export function PracticeExerciseCard({
         </span>
       )}
 
-      {exercise.response_kind === 'choice' && (
+      {exercise.response_kind === 'choice' && !suppressAnswer && (
         <>
           <div style={styles.choiceList} role="group" aria-label="選択肢">
             {options.map(option => (
@@ -180,7 +192,7 @@ export function PracticeExerciseCard({
         </>
       )}
 
-      {exercise.response_kind === 'text' && (
+      {exercise.response_kind === 'text' && !suppressAnswer && (
         <input
           ref={inputRef}
           style={styles.input}
@@ -197,7 +209,7 @@ export function PracticeExerciseCard({
         />
       )}
 
-      {exercise.response_kind === 'reconstruction' && (
+      {exercise.response_kind === 'reconstruction' && !suppressAnswer && (
         <PracticeReconstructionBoard
           options={options}
           selectedIndices={reconstruction}
@@ -206,7 +218,7 @@ export function PracticeExerciseCard({
         />
       )}
 
-      {exercise.response_kind === 'text' && !answered && (
+      {exercise.response_kind === 'text' && !answered && !suppressAnswer && (
         <button
           type="button"
           style={styles.primaryBtn}
@@ -217,7 +229,7 @@ export function PracticeExerciseCard({
         </button>
       )}
 
-      {exercise.response_kind === 'reconstruction' && !answered && (
+      {exercise.response_kind === 'reconstruction' && !answered && !suppressAnswer && (
         <button
           type="button"
           style={styles.primaryBtn}
@@ -266,6 +278,21 @@ export function PracticeExerciseCard({
             {nextLabel}
           </button>
         </div>
+      )}
+      {knownAction && (
+        <KnownItemControl
+          key={`${exercise.learning_item_id}:${exercise.exercise_type}`}
+          explicitKnown={knownAction.explicitKnown}
+          busy={knownAction.busy}
+          error={knownAction.error}
+          onMark={knownAction.onMark}
+          onUndo={knownAction.onUndo}
+        />
+      )}
+      {knownAction?.explicitKnown && !answered && onSkipUnanswered && (
+        <button type="button" style={styles.nextBtn} onClick={onSkipUnanswered}>
+          {nextLabel}
+        </button>
       )}
     </div>
   )

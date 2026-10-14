@@ -20,6 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.domain.known_item_policy import KnownItemEvent, KnownItemOverride
 from app.domain.tutor import (
     LearnerState,
     LearningEvent,
@@ -386,4 +387,71 @@ class ReviewScheduleRow(Base):
             lapse_count=self.lapse_count,
             scheduler_version=self.scheduler_version,
             metadata=self.extra_metadata,
+        )
+
+
+class KnownItemOverrideRow(Base):
+    """explicit known の現在値。LearningItem.status とは別テーブル。"""
+
+    __tablename__ = "known_item_overrides"
+
+    learning_item_id: Mapped[str] = mapped_column(
+        ForeignKey("learning_items.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    active: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+    @classmethod
+    def from_domain(cls, override: KnownItemOverride) -> KnownItemOverrideRow:
+        return cls(
+            learning_item_id=override.learning_item_id,
+            active=1 if override.active else 0,
+            updated_at=dump_utc(override.updated_at),
+        )
+
+    def to_domain(self) -> KnownItemOverride:
+        return KnownItemOverride(
+            learning_item_id=self.learning_item_id,
+            active=bool(self.active),
+            updated_at=load_utc(self.updated_at),
+        )
+
+
+class KnownItemEventRow(Base):
+    """explicit known の操作履歴。append-only。"""
+
+    __tablename__ = "known_item_events"
+    __table_args__ = (
+        Index(
+            "ix_known_item_events_item_occurred",
+            "learning_item_id",
+            "occurred_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    learning_item_id: Mapped[str] = mapped_column(
+        ForeignKey("learning_items.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    occurred_at: Mapped[str] = mapped_column(String, nullable=False)
+
+    @classmethod
+    def from_domain(cls, event: KnownItemEvent) -> KnownItemEventRow:
+        return cls(
+            id=event.id,
+            learning_item_id=event.learning_item_id,
+            action=event.action,
+            occurred_at=dump_utc(event.occurred_at),
+        )
+
+    def to_domain(self) -> KnownItemEvent:
+        return KnownItemEvent(
+            id=self.id,
+            learning_item_id=self.learning_item_id,
+            action=self.action,
+            occurred_at=load_utc(self.occurred_at),
         )

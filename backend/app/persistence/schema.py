@@ -19,13 +19,15 @@ from app.domain.tutor import LearningEvent, utcnow
 from app.persistence.datetime_codec import dump_utc, load_utc
 from app.persistence.models import (
     Base,
+    KnownItemEventRow,
+    KnownItemOverrideRow,
     LearningEventRow,
     LearningItemCandidateRow,
     ReviewScheduleRow,
     SchemaMigrationRow,
 )
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 UpgradeFn = Callable[[Connection], None]
 
@@ -184,10 +186,21 @@ def _upgrade_to_4(conn: Connection) -> None:
     )
 
 
+def _upgrade_to_5(conn: Connection) -> None:
+    """Phase 7: explicit known の現在値と操作履歴を追加する。
+
+    LearningItem.status は変えない。既存の mastered 行もそのまま残す。
+    """
+
+    KnownItemOverrideRow.__table__.create(conn, checkfirst=True)
+    KnownItemEventRow.__table__.create(conn, checkfirst=True)
+
+
 # (target_version, upgrade) 。初期スキーマは create_all で作るため、
-# 新規DBは version 4 として作成される。既存の version 1/2/3 DB は upgrade する。
+# 新規DBは version 5 として作成される。既存の version 1〜4 DB は upgrade する。
 UPGRADE_STEPS: list[tuple[int, UpgradeFn]] = [
     (2, _upgrade_to_2),
     (3, _upgrade_to_3),
     (4, _upgrade_to_4),
+    (5, _upgrade_to_5),
 ]

@@ -15,6 +15,7 @@ import type {
   FetchTodayPlanOptions,
   FetchTutorItemsOptions,
   FetchTutorSourcesOptions,
+  KnownItemState,
   LearningItem,
   LearningItemCandidate,
   PracticeSession,
@@ -241,6 +242,29 @@ export async function fetchTutorItems(
   }
   const query = params.size > 0 ? `?${params.toString()}` : ''
   return parseJson(await fetch(`${BASE}/api/tutor/items${query}`))
+}
+
+export async function fetchItemKnown(itemId: string): Promise<KnownItemState> {
+  return parseJson(
+    await fetch(`${BASE}/api/tutor/items/${encodeURIComponent(itemId)}/known`),
+  )
+}
+
+export async function markItemKnown(itemId: string): Promise<KnownItemState> {
+  return parseJson(
+    await fetch(`${BASE}/api/tutor/items/${encodeURIComponent(itemId)}/known`, {
+      method: 'POST',
+    }),
+  )
+}
+
+export async function clearItemKnown(itemId: string): Promise<KnownItemState> {
+  return parseJson(
+    await fetch(
+      `${BASE}/api/tutor/items/${encodeURIComponent(itemId)}/known/undo`,
+      { method: 'POST' },
+    ),
+  )
 }
 
 export async function fetchTutorItem(itemId: string): Promise<LearningItem> {

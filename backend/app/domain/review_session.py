@@ -8,7 +8,8 @@ LearningEvent（Issue #149）とする。未回答 / skip では ReviewSchedule 
 
 このモジュールが依存してよいのは Python 標準ライブラリ、Pydantic、
 `domain.tutor`、`domain.exercise`、`domain.exercise_generation`、
-`domain.review_queue` のみ。DB / FastAPI / OpenAI には依存しない。
+`domain.review_queue`、`domain.context_selection` のみ。
+DB / FastAPI / OpenAI には依存しない。
 wall clock は呼ばない。
 
 ```text
@@ -35,6 +36,7 @@ from collections.abc import Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.domain.context_selection import ContextUsage
 from app.domain.exercise import (
     ExerciseSkipReason,
     PublicExercise,
@@ -137,6 +139,7 @@ def build_review_practice_session(
     question_count: int = DEFAULT_QUESTION_COUNT,
     seed: str | int = DEFAULT_REVIEW_SESSION_SEED,
     session_id: str | None = None,
+    context_usages_by_item: Mapping[str, Sequence[ContextUsage]] | None = None,
 ) -> ReviewPracticeSession:
     """due queue entry から Review Practice Session を deterministic に組み立てる。
 
@@ -153,6 +156,7 @@ def build_review_practice_session(
         )
 
     active_pool = tuple(item for item in pool if item.status == "active")
+    usages_by_item = context_usages_by_item or {}
     selected: list[GeneratedExercise] = []
     skipped: list[SkippedReviewEntry] = []
     used_keys: set[tuple[str, ExerciseType]] = set()
@@ -165,6 +169,7 @@ def build_review_practice_session(
             pool=active_pool,
             sources=sources,
             used_keys=used_keys,
+            context_usages=usages_by_item.get(entry.item.id, ()),
         )
         if skip is not None:
             skipped.append(skip)
@@ -190,6 +195,7 @@ def _select_exercise_for_entry(
     pool: Sequence[LearningItem],
     sources: Mapping[str, SourceDocument] | Sequence[SourceDocument],
     used_keys: set[tuple[str, ExerciseType]],
+    context_usages: Sequence[ContextUsage] = (),
 ) -> tuple[GeneratedExercise | None, SkippedReviewEntry | None]:
     """1 due entry から、その direction の Exercise を1件選ぶ。"""
     first_skip: tuple[ExerciseSkipReason, str] | None = None
@@ -204,6 +210,7 @@ def _select_exercise_for_entry(
             pool=pool,
             seed=DEFAULT_GENERATION_SEED,
             sources=sources,
+            context_usages=context_usages,
         )
         if result.eligible and result.exercise is not None:
             if result.exercise.spec.skill_direction != entry.skill_direction:

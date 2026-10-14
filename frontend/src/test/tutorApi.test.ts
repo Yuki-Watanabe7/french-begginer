@@ -18,6 +18,8 @@ import {
   fetchTutorSource,
   fetchTutorSources,
   isNotFoundError,
+  clearItemKnown,
+  markItemKnown,
   rejectCandidate,
   submitExerciseAnswer,
 } from '../api/tutor'
@@ -675,6 +677,42 @@ describe('fetchTodayPlan', () => {
       name: 'ApiError',
       status: 500,
     })
+  })
+})
+
+describe('markItemKnown / clearItemKnown', () => {
+  const known = {
+    learning_item_id: 'item/あ',
+    explicit_known: true,
+    updated_at: '2026-10-12T12:00:00+00:00',
+    policy_version: 'known-item-v1',
+  }
+
+  it('POST /api/tutor/items/{id}/known で既知にする', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(known))
+
+    const result = await markItemKnown('item/あ')
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      `/api/tutor/items/${encodeURIComponent('item/あ')}/known`,
+      { method: 'POST' },
+    )
+    expect(result).toEqual(known)
+    expect(result).not.toHaveProperty('mastered')
+  })
+
+  it('undo は known/undo へ送る', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      mockJsonResponse({ ...known, explicit_known: false, updated_at: null }),
+    )
+
+    const result = await clearItemKnown('item-1')
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      '/api/tutor/items/item-1/known/undo',
+      { method: 'POST' },
+    )
+    expect(result.explicit_known).toBe(false)
   })
 })
 

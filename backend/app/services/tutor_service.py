@@ -14,6 +14,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
+from app.domain.known_item_policy import (
+    POLICY_VERSION,
+    KnownItemAction,
+    KnownItemOverride,
+    next_explicit_known,
+)
 from app.domain.review_queue import (
     DEFAULT_QUEUE_LIMIT,
     MissingReviewQueueItemError,
@@ -34,11 +40,13 @@ from app.domain.tutor import (
     SourceDocument,
     SourceRef,
     apply_review_event,
+    new_id,
     skill_direction_for_event,
     utcnow,
 )
 from app.repositories.exceptions import DuplicateEntityError
 from app.repositories.protocols import (
+    KnownItemRepository,
     LearnerStateRepository,
     LearningEventRepository,
     LearningItemRepository,
@@ -77,6 +85,14 @@ class DueReview:
     review_schedule: ReviewSchedule
 
 
+@dataclass(frozen=True)
+class KnownItemRecord:
+    learning_item_id: str
+    explicit_known: bool
+    updated_at: datetime | None
+    policy_version: str
+
+
 class _TutorStore(Protocol):
     source_documents: SourceDocumentRepository
     learning_items: LearningItemRepository
@@ -84,6 +100,7 @@ class _TutorStore(Protocol):
     learner_states: LearnerStateRepository
     learning_progress: LearningProgressRepository
     review_schedules: ReviewScheduleRepository
+    known_items: KnownItemRepository
 
 
 def build_tutor_service(
@@ -98,6 +115,7 @@ def build_tutor_service(
         states=store.learner_states,
         schedules=store.review_schedules,
         progress=store.learning_progress,
+        known=store.known_items,
         reviews=ReviewService(
             learning_items=store.learning_items,
             review_schedules=store.review_schedules,
@@ -115,6 +133,7 @@ class TutorService:
         states: LearnerStateRepository,
         schedules: ReviewScheduleRepository,
         progress: LearningProgressRepository,
+        known: KnownItemRepository,
         reviews: ReviewService,
         clock: Callable[[], datetime] = utcnow,
     ) -> None:
@@ -123,6 +142,7 @@ class TutorService:
         self._states = states
         self._schedules = schedules
         self._progress = progress
+        self._known = known
         self._reviews = reviews
         self._clock = clock
 
@@ -315,7 +335,66 @@ class TutorService:
                 "ReviewSchedule に対応する LearningItem が存在しない",
             ) from exc
 
+    def get_known(self, item_id: str) -> KnownItemRecord:
+        """explicit known の現在値。未指定なら explicit_known は False。"""
+
+        self._require_item(item_id)
+        return _known_record(item_id, self._known.get(item_id))
+
+    def mark_known(self, item_id: str) -> KnownItemRecord:
+        """「知っている」を記録する。status / 復習予定 / 学習履歴は変えない。
+
+        すでに known なら履歴を足さない。
+        """
+
+        return self._apply_known(item_id, "mark_known")
+
+    def clear_known(self, item_id: str) -> KnownItemRecord:
+        """explicit known を取り消す。未指定なら何も書かない。"""
+
+        return self._apply_known(item_id, "clear_known")
+
+    def _apply_known(self, item_id: str, action: KnownItemAction) -> KnownItemRecord:
+        self._require_item(item_id)
+        current = self._known.get(item_id)
+        event, override = next_explicit_known(
+            current,
+            learning_item_id=item_id,
+            action=action,
+            occurred_at=self._clock(),
+            event_id=new_id(),
+        )
+        if event is None or override is None:
+            return _known_record(item_id, current)
+        try:
+            _, saved = self._known.append_event_and_upsert(event, override)
+        except DuplicateEntityError as exc:
+            raise TutorConflictError(exc.entity_type, exc.entity_id) from exc
+        return _known_record(item_id, saved)
+
+    def _require_item(self, item_id: str) -> LearningItem:
+        item = self._items.get(item_id)
+        if item is None:
+            raise TutorNotFoundError("LearningItem", item_id)
+        return item
+
     def _require_existing_sources(self, source_refs: list[SourceRef]) -> None:
         for ref in source_refs:
             if self._sources.get(ref.source_document_id) is None:
                 raise InvalidSourceRefError(ref.source_document_id)
+
+
+def _known_record(item_id: str, override: KnownItemOverride | None) -> KnownItemRecord:
+    if override is None:
+        return KnownItemRecord(
+            learning_item_id=item_id,
+            explicit_known=False,
+            updated_at=None,
+            policy_version=POLICY_VERSION,
+        )
+    return KnownItemRecord(
+        learning_item_id=item_id,
+        explicit_known=override.active,
+        updated_at=override.updated_at,
+        policy_version=POLICY_VERSION,
+    )

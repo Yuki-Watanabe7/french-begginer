@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   acceptCandidate,
+  clearItemKnown,
   extractCandidates,
   fetchCandidates,
+  markItemKnown,
   rejectCandidate,
 } from '../api/tutor'
 import type {
@@ -14,7 +16,15 @@ import {
   tutorCandidateActionErrorMessage,
   tutorCandidateFetchErrorMessage,
   tutorExtractErrorMessage,
+  tutorKnownItemErrorMessage,
 } from '../utils/tutor'
+
+export interface CandidateKnownUi {
+  itemId: string
+  explicitKnown: boolean
+  busy: boolean
+  error: string | null
+}
 
 export type CandidateListStatus = 'loading' | 'error' | 'success'
 
@@ -54,8 +64,29 @@ export function useTutorSourceCandidates(sourceId: string) {
   const [filter, setFilter] = useState<CandidateFilter>('all')
   const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set())
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({})
+  const [knownByCandidate, setKnownByCandidate] = useState<
+    Record<string, CandidateKnownUi>
+  >({})
   const extractingRef = useRef(false)
   const pendingRef = useRef(new Set<string>())
+  const knownRef = useRef(knownByCandidate)
+  const knownPendingRef = useRef(new Set<string>())
+  knownRef.current = knownByCandidate
+
+  const setKnown = useCallback(
+    (
+      updater: (
+        prev: Record<string, CandidateKnownUi>,
+      ) => Record<string, CandidateKnownUi>,
+    ) => {
+      setKnownByCandidate(prev => {
+        const next = updater(prev)
+        knownRef.current = next
+        return next
+      })
+    },
+    [],
+  )
 
   const load = useCallback(async (signal?: { cancelled: boolean }) => {
     setListStatus('loading')
@@ -64,13 +95,14 @@ export function useTutorSourceCandidates(sourceId: string) {
       const rows = await fetchCandidates(sourceId)
       if (signal?.cancelled) return
       setCandidates(groupByStatus(rows))
+      setKnown(prev => mergeKnown(rows, prev))
       setListStatus('success')
     } catch (error) {
       if (signal?.cancelled) return
       setListError(tutorCandidateFetchErrorMessage(error))
       setListStatus('error')
     }
-  }, [sourceId])
+  }, [setKnown, sourceId])
 
   useEffect(() => {
     const signal = { cancelled: false }
@@ -90,6 +122,7 @@ export function useTutorSourceCandidates(sourceId: string) {
       const result = await extractCandidates(sourceId)
       const rows = await fetchCandidates(sourceId)
       setCandidates(groupByStatus(rows))
+      setKnown(prev => mergeKnown(rows, prev))
       setListStatus('success')
       setListError(null)
       setHasExtracted(true)
@@ -102,7 +135,7 @@ export function useTutorSourceCandidates(sourceId: string) {
       extractingRef.current = false
       setIsExtracting(false)
     }
-  }, [sourceId])
+  }, [setKnown, sourceId])
 
   const runAction = useCallback(
     async (
@@ -139,10 +172,63 @@ export function useTutorSourceCandidates(sourceId: string) {
     (candidateId: string) => {
       void runAction(candidateId, async () => {
         const result = await acceptCandidate(candidateId)
+        setKnown(prev => ({
+          ...prev,
+          [candidateId]: {
+            itemId: result.item.id,
+            explicitKnown: result.candidate.explicit_known === true,
+            busy: false,
+            error: null,
+          },
+        }))
         return result.candidate
       })
     },
-    [runAction],
+    [runAction, setKnown],
+  )
+
+  const changeKnown = useCallback(
+    async (candidateId: string, mark: boolean) => {
+      if (knownPendingRef.current.has(candidateId)) return
+      const current = knownRef.current[candidateId]
+      if (!current || current.explicitKnown === mark) return
+      knownPendingRef.current.add(candidateId)
+      const itemId = current.itemId
+      setKnown(prev => ({
+        ...prev,
+        [candidateId]: { ...prev[candidateId], busy: true, error: null },
+      }))
+      try {
+        const result = mark
+          ? await markItemKnown(itemId)
+          : await clearItemKnown(itemId)
+        setKnown(prev => ({
+          ...prev,
+          [candidateId]: {
+            itemId,
+            explicitKnown: result.explicit_known,
+            busy: false,
+            error: null,
+          },
+        }))
+      } catch (error) {
+        setKnown(prev => {
+          const row = prev[candidateId]
+          if (!row) return prev
+          return {
+            ...prev,
+            [candidateId]: {
+              ...row,
+              busy: false,
+              error: tutorKnownItemErrorMessage(error),
+            },
+          }
+        })
+      } finally {
+        knownPendingRef.current.delete(candidateId)
+      }
+    },
+    [setKnown],
   )
 
   const reject = useCallback(
@@ -181,6 +267,13 @@ export function useTutorSourceCandidates(sourceId: string) {
     setFilter,
     pendingIds,
     actionErrors,
+    knownByCandidate,
+    markKnown: (candidateId: string) => {
+      void changeKnown(candidateId, true)
+    },
+    undoKnown: (candidateId: string) => {
+      void changeKnown(candidateId, false)
+    },
     retryList: () => {
       void load()
     },
@@ -188,4 +281,35 @@ export function useTutorSourceCandidates(sourceId: string) {
     accept,
     reject,
   }
+}
+
+function knownFromCandidate(row: LearningItemCandidate): CandidateKnownUi | null {
+  if (!row.learning_item_id) return null
+  return {
+    itemId: row.learning_item_id,
+    explicitKnown: row.explicit_known === true,
+    busy: false,
+    error: null,
+  }
+}
+
+function mergeKnown(
+  rows: LearningItemCandidate[],
+  previous: Record<string, CandidateKnownUi>,
+): Record<string, CandidateKnownUi> {
+  const next: Record<string, CandidateKnownUi> = {}
+  for (const row of rows) {
+    const fromRow = knownFromCandidate(row)
+    const existing = previous[row.id]
+    if (existing?.busy) {
+      next[row.id] = existing
+      continue
+    }
+    if (fromRow) {
+      next[row.id] = fromRow
+    } else if (existing) {
+      next[row.id] = { ...existing, busy: false }
+    }
+  }
+  return next
 }

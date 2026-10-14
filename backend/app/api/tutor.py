@@ -2,6 +2,7 @@
 Candidate 抽出・採否（Issue #134）、Exercise 取得・回答判定（Issue #149）、
 Practice Session 組み立て（Issue #150）、due review queue（Issue #163）、
 Review Practice Session（Issue #164）、今日の学習 Plan / Session（Issue #178）、
+既知項目の known-item policy（Issue #201）、
 Web URL からの Source 取り込み（Issue #190）、
 テキスト PDF からの Source 取り込み（Issue #191）、
 YouTube transcript と SRT / VTT からの Source 取り込み（Issue #192）、
@@ -138,7 +139,7 @@ from app.services.review_session_service import ReviewSessionService
 from app.services.subtitle_ingestion import SubtitleIngestionService
 from app.services.text_file_ingestion import TextFileIngestionService
 from app.services.today_learning_service import TodayLearningService
-from app.services.tutor_service import TutorService
+from app.services.tutor_service import KnownItemRecord, TutorService
 from app.services.web_url_ingestion import WebUrlIngestionService
 from app.services.youtube_ingestion import YoutubeIngestionService
 
@@ -308,6 +309,15 @@ class LearningItemDetailResponse(BaseModel):
     review_schedules: list[ReviewSchedule] = Field(default_factory=list)
 
 
+class KnownItemResponse(BaseModel):
+    """explicit known。mastered や習熟スコアは返さない。"""
+
+    learning_item_id: str
+    explicit_known: bool
+    updated_at: UtcDatetime | None = None
+    policy_version: str
+
+
 class ReviewResponse(BaseModel):
     event: LearningEvent
     learner_state: LearnerState
@@ -347,6 +357,8 @@ class CandidateResponse(BaseModel):
     status: CandidateStatus
     extraction_version: str
     created_at: UtcDatetime
+    learning_item_id: str | None = None
+    explicit_known: bool = False
 
 
 class ExtractCandidatesResponse(BaseModel):
@@ -482,6 +494,17 @@ def _to_candidate_response(view: CandidateView) -> CandidateResponse:
         status=candidate.status,
         extraction_version=candidate.extraction_version,
         created_at=candidate.created_at,
+        learning_item_id=view.learning_item_id,
+        explicit_known=view.explicit_known,
+    )
+
+
+def _known_response(record: KnownItemRecord) -> KnownItemResponse:
+    return KnownItemResponse(
+        learning_item_id=record.learning_item_id,
+        explicit_known=record.explicit_known,
+        updated_at=record.updated_at,
+        policy_version=record.policy_version,
     )
 
 
@@ -1141,6 +1164,39 @@ def get_item(item_id: str, service: TutorServiceDep) -> LearningItemDetailRespon
         review_schedule=detail.review_schedule,
         review_schedules=detail.review_schedules,
     )
+
+
+@router.get("/items/{item_id}/known", response_model=KnownItemResponse)
+def get_item_known(item_id: str, service: TutorServiceDep) -> KnownItemResponse:
+    """explicit known の現在値。未指定でも Item があれば 200。"""
+
+    try:
+        record = service.get_known(item_id)
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    return _known_response(record)
+
+
+@router.post("/items/{item_id}/known", response_model=KnownItemResponse)
+def mark_item_known(item_id: str, service: TutorServiceDep) -> KnownItemResponse:
+    """既知として新規学習から外す。再指定は冪等。status は変えない。"""
+
+    try:
+        record = service.mark_known(item_id)
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    return _known_response(record)
+
+
+@router.post("/items/{item_id}/known/undo", response_model=KnownItemResponse)
+def clear_item_known(item_id: str, service: TutorServiceDep) -> KnownItemResponse:
+    """explicit known を取り消す。未指定でも冪等。"""
+
+    try:
+        record = service.clear_known(item_id)
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+    return _known_response(record)
 
 
 @router.get(
