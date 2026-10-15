@@ -1,0 +1,23 @@
+---
+description: 実装ブランチは origin/main から切る
+alwaysApply: true
+---
+
+# 実装前に origin/main を取り込む
+
+Cloud Agent の作業ツリーは起動時のスナップショットであり、リモートの main より遅れていることがある。ブランチ作成や実装の前に、リポジトリルートで次を実行する。
+
+```bash
+bash scripts/ensure_branch_includes_main.sh
+```
+
+失敗したときは、進行中の変更を残したまま次で取り込む。
+
+```bash
+git fetch origin main
+git merge origin/main
+```
+
+新しい作業ブランチは、取得した `origin/main` から切る。ローカルの `main` や、スナップショットの HEAD からは切らない。
+
+`scripts/quality-check.sh` は同じ確認を最初に行う。ここが失敗したまま完了報告や PR 作成をしない。
