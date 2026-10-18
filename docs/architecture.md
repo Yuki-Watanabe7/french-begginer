@@ -161,11 +161,14 @@ queue entry の skill_direction に合う Exercise だけを出す。新規 / �
 
 説明可能な ranking と Daily Learning Plan から、今日の学習 Plan を返す。
 Plan 自体は DB に保存しない。Session は開始しない。
+`question_count` と `max_new_count` を省略したフィールドは、復習の滞りと直近の誤答から
+自動で決める。指定したフィールドはその件数を優先する。安定しているときの自動値は
+総数 10、新規 3 である。配分そのもの（due 優先）は変えない。
 
 | パラメータ | 型 | デフォルト | 説明 |
 |------------|-----|------------|------|
-| `question_count` | 1〜20 の整数 | `10` | 要求する総件数。候補が少なければ短く返す |
-| `max_new_count` | 0〜20 の整数 | `3` | 新規 LearningItem の上限 |
+| `question_count` | 1〜20 の整数 | 省略時は自動 | 要求する総件数。候補が少なければ短く返す |
+| `max_new_count` | 0〜20 の整数 | 省略時は自動 | 新規 LearningItem の上限 |
 
 任意時刻の `now` は受け取らない。due 判定はサーバー時刻。0件でも 200。
 
@@ -180,8 +183,8 @@ Plan 自体は DB に保存しない。Session は開始しない。
 | `deferred_due_count` | capacity 不足や skip で入れられなかった due 件数 |
 | `entries` | item 要約、`activity_kind`、`skill_direction`、reason codes / 説明文。内部 score は含めない |
 | `summary_reason_codes` | plan 全体の reason code（初出順） |
-| `policy_version` | 配分規則の版 |
-| `explanation_summary` | 内部 score を出さない短い配分説明 |
+| `policy_version` | Daily Learning Plan の版（`plan-v1`）。負荷調整の版とは別 |
+| `explanation_summary` | 内部 score を出さない短い配分説明。件数を自動で減らしたときは、その理由を続ける |
 
 reason の説明文は code から deterministic に生成する。LLM は使わない。
 
@@ -194,8 +197,8 @@ Phase 3 の Practice Session と Phase 4 の「今日の復習」は維持する
 
 | フィールド | 型 | デフォルト | 説明 |
 |------------|-----|------------|------|
-| `question_count` | 1〜20 の整数 | `10` | 要求する総件数 |
-| `max_new_count` | 0〜20 の整数 | `3` | 新規 LearningItem の上限 |
+| `question_count` | 1〜20 の整数 | 省略時は自動 | 要求する総件数。指定すると自動調整より優先する |
+| `max_new_count` | 0〜20 の整数 | 省略時は自動 | 新規 LearningItem の上限。指定すると自動調整より優先する |
 | `seed` | string optional | サーバー既定 | 再現用。Exercise 本文の再構成には使わない |
 
 任意時刻の `now` は受け取らない。0件でも 200。正解は問題提示時に返さない。
@@ -273,6 +276,7 @@ backend/app/
 │   ├── recommendation_signal.py  # 推薦入力の signal snapshot（Issue #175）
 │   ├── recommendation_ranking.py  # 説明可能な ranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
+│   ├── adaptive_plan.py        # 復習負債・誤答率に応じた今日の件数調整（Issue #204）
 │   ├── admission_policy.py     # 新規LearningItemの流入制御（Issue #200）
 │   ├── known_item_policy.py    # 既知項目の explicit known と auto-skip（Issue #201）
 │   ├── context_selection.py    # 複数Source文脈の context rotation（Issue #202）
@@ -309,7 +313,7 @@ backend/app/
     ├── practice_session_service.py  # Practice Session 組み立て（Issue #150）
     ├── review_session_service.py  # Review Practice Session 組み立て（Issue #164）
     ├── weakness_pattern_service.py  # LearningEvent 横断の苦手パターン（Issue #203）
-    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。既知は新規だけ除外し、未学習は admission 通過後。苦手パターンは補助 signal
+    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。既知は新規だけ除外し、未学習は admission 通過後。件数省略時は負荷を自動調整（Issue #204）
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。

@@ -51,6 +51,7 @@ backend/app/
 │   ├── recommendation_signal.py  # 推薦入力のsignal snapshot（Issue #175）
 │   ├── recommendation_ranking.py  # 説明可能なranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
+│   ├── adaptive_plan.py  # 復習負債・誤答率に応じた今日の件数調整（Issue #204）
 │   ├── admission_policy.py  # 新規LearningItemの流入制御 admission policy（Issue #200）
 │   ├── known_item_policy.py # 既知項目の explicit known と conservative auto-skip（Issue #201）
 │   ├── context_selection.py # 複数Source文脈の context rotation（Issue #202）
@@ -87,7 +88,7 @@ backend/app/
     ├── practice_session_service.py  # Practice Session 組み立て
     ├── review_session_service.py  # Review Practice Session 組み立て
     ├── weakness_pattern_service.py  # 苦手パターンの算出（Issue #203）
-    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）
+    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。件数省略時は負荷を自動調整（Issue #204）
 ```
 
 新しい動詞を追加する場合は `CONJUGATIONS` と `VERB_GROUPS` の両方を `conjugation.py` に追記する。`VerbGroup` は `Literal["all", "er", "ir", "irregular"]` で、`?group=` クエリパラメータで絞り込める。
