@@ -2817,6 +2817,9 @@ POST /api/tutor/today/sessions
 実装は `domain.today_session` と `TodayLearningService`。
 Frontend / plan 永続化 / LLM による reason 文章生成は対象外。
 Phase 3 の Practice Session と Phase 4 の「今日の復習」は維持する。
+`question_count` / `max_new_count` を省略したフィールドは、下記
+「Phase 7 — 学習負荷の自動調整」が決める。両方を指定した呼び出しは、
+この節の due 優先のままである。
 
 ### 公開 plan contract
 
@@ -2914,6 +2917,7 @@ Tutor / Home
   内部 score は出さない。code が無ければ捏造しない。1 Item は上位 1〜2 件
 - 完了後: due queue を再 fetch し、一覧へ戻ると Plan / due を再取得する。
   再 fetch 失敗は学習結果を失敗扱いにしない
+- 「学習を始める」は出題数を送らない。一覧カードと同じ自動調整で Session を始める
 
 | 観点 | 自動テスト |
 |------|------------|
@@ -4284,6 +4288,91 @@ pattern の label を含む。定型文も残し、label が無いときは定�
 | due 優先を壊さない補助 signal | `test_quality_fixtures_pass` / `test_today_plan_uses_pattern_reason_without_burying_due` |
 | OpenAI / LLM 非依存 | `test_modules_do_not_import_llm_or_fastapi` |
 
+## Phase 7 — 学習負荷の自動調整（Issue #204）
+
+固定の「10問・新規3件」だけでなく、直近の学習状態から今日の総数と新規上限を
+小さく変える。難しかった日から問題数を増やさない。1件の誤答だけでは変えない。
+履歴が無い日はデフォルトに戻す。
+
+```text
+due / overdue / deferred
++ recent error / sessions / imbalance / study volume
++ admission budget
+  -> AdaptivePlanConstraints
+  -> PlanConstraints
+  -> Phase 5 Daily Learning Plan（due 優先は変えない）
+```
+
+実装は `domain.adaptive_plan.decide_adaptive_plan_constraints`。
+`TodayLearningService` は snapshot と LearningEvent と admission budget から
+signal を作り、省略された `question_count` / `max_new_count` だけをその結果で埋める。
+Plan の `policy_version` は `plan-v1` のまま。負荷調整の版は `adaptive-plan-v1`。
+ユーザー向けの理由は `explanation_summary` の続きに出す。LLM は使わない。
+
+### 優先順位
+
+1. 自動算出の総数は 5〜10、新規は 0〜3。この範囲の外には出さない。
+2. 呼び出し側が指定した `question_count` / `max_new_count` は、そのフィールドについて
+   自動算出より優先する。範囲は Plan と同じ 1〜20 / 0〜20。範囲外は拒否する。
+3. 未指定のフィールドだけ自動算出を使う。
+4. admission で入れなかった新規は、明示した `max_new_count` を広げても Plan に戻らない。
+5. 件数を決めたあとの due 優先と deferred は Phase 5 のまま。
+   復習負債が大きい日は総数を縮めず、overdue を枠の外へ押し出さない。
+
+### 初期 policy
+
+定数は `adaptive_plan` にまとめる。
+
+| 状態 | 新規上限 | 総数 |
+|------|----------|------|
+| 履歴なし、または安定 | 3 | 10 |
+| due 8 以上、または overdue 4 以上、または deferred 4 以上 | 1 | 10 |
+| due 16 以上、または overdue 8 以上、または deferred 8 以上 | 0 | 10 |
+| 直近 5 件以上で誤答率 0.5 以上 | 2 以下 | 10 |
+| 直近 8 件以上で誤答率 0.75 以上 | 1 以下 | 10 |
+| 難しい session が 2 回続いた | 2 以下 | 誤答圧力があり backlog が小さいとき 8 |
+| 難しい session が 3 回続いた | 1 以下 | 同上 |
+| admission budget が 3 未満 | その budget 以下 | 変えない |
+
+1件の誤答（attempt が 5 未満）は誤答率に使わない。
+学習量、session 完了率、recognition / production の偏りは、それだけでは件数を変えない。
+すでに新規を減らしているとき、偏りが 0.4 以上でサンプルが 2 Item 以上なら新規をさらに 1 段だけ下げる。
+0 にはしない。総数を 1 段（2問）下げるのは、誤答圧力に加えて難しい session の連続、
+低い完了率、または直近 1 日で 20 件以上の回答があるときだけである。
+
+session は 45 分より長く空いたら分ける。4件未満は難しいとも易しいとも判定しない。
+未来の event と 14 日より古い event は session に入れない。
+
+reason code は次のとおり。`STABLE_PROGRESS` は他と併記しない。
+
+| code | 意味 |
+|------|------|
+| `HIGH_REVIEW_BACKLOG` | 復習の滞りが大きいので新規を減らした |
+| `RECENT_ERROR_RATE_HIGH` | 直近の誤答、または難しい session の連続で新規を減らした |
+| `NEW_ADMISSION_LIMITED` | admission の新規枠がデフォルトより狭い |
+| `STABLE_PROGRESS` | デフォルトの 10 問・新規 3 件に戻した |
+
+### スコープ外
+
+- 学習時間の精密予測
+- reinforcement learning
+- notification
+- streak / gamification
+- ranking 式と Phase 5 の due 優先の変更
+
+| 観点 | 自動テスト |
+|------|------------|
+| backlog が大きいと新規が減る | `test_high_review_backlog_reduces_new_and_keeps_total` / `test_today_plan_reduces_new_when_the_review_backlog_is_high` |
+| 直近の誤答率が高いと新規が減る | `test_recent_error_reduces_new_without_one_answer` / `test_repeated_errors_reduce_new_unless_counts_are_explicit` |
+| 1件の誤答では変えない | `test_recent_error_reduces_new_without_one_answer` / `test_one_incorrect_answer_does_not_shrink_today_plan` |
+| 安定するとデフォルトへ戻る | `test_stable_progress_returns_to_the_default_budget` |
+| 履歴なしはデフォルト | `test_missing_history_uses_the_default_budget` / `test_today_plan_uses_defaults_when_history_is_missing` |
+| 極端な入力でも min/max を超えない | `test_extreme_inputs_stay_inside_the_safety_bounds` |
+| 同じ状態で deterministic | `test_same_signals_are_deterministic` |
+| 明示した件数を優先する | `test_explicit_counts_override_the_suggestion` |
+| Phase 5 の due 優先を維持する | `test_explicit_constraints_keep_the_phase5_plan` |
+| OpenAI / LLM / wall clock 非依存 | `test_module_does_not_import_llm_or_clock` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -4359,3 +4448,5 @@ Phase 6 自体の完了条件と Phase 7 への引継ぎは、上記
 「Phase 7 — 複数Source文脈の context rotation」を正とする。
 苦手文法・表現パターンの検出は、上記
 「Phase 7 — 苦手文法・表現パターンの検出」を正とする。
+今日の学習負荷の自動調整は、上記
+「Phase 7 — 学習負荷の自動調整」を正とする。

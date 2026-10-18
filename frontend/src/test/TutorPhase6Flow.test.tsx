@@ -253,7 +253,7 @@ describe('Tutor Phase 6 external source flow', () => {
     expect(screen.queryByText('出題数を選択')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '学習を始める' }))
-    expect(mockToday).toHaveBeenCalledWith({ question_count: 10 })
+    expect(mockToday).toHaveBeenCalledWith({})
     expect(screen.queryByText('出題数を選択')).not.toBeInTheDocument()
     const choice = screen.getByRole('button', { name: '図書館' })
     expect(choice).toHaveStyle({ width: '100%', minHeight: '48px' })

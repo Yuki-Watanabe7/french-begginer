@@ -208,7 +208,7 @@ describe('Tutor Phase 5 today learning flow', () => {
 
     await screen.findByText('意味')
     expect(screen.queryByText('出題数を選択')).not.toBeInTheDocument()
-    expect(mockToday).toHaveBeenCalledWith({ question_count: 10 })
+    expect(mockToday).toHaveBeenCalledWith({})
     expect(mockPractice).not.toHaveBeenCalled()
     expect(mockReview).not.toHaveBeenCalled()
     expect(screen.getByText('復習')).toBeInTheDocument()

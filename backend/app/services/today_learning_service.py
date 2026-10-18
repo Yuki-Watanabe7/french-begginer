@@ -5,7 +5,9 @@ signal → known-item policy → admission → ranking → Daily Learning Plan
 を組み立てる。explicit known と auto-skip は new_practice だけを外し、
 due review は残す（Issue #201）。未学習の新規は admission policy（Issue #200）
 を通過したものだけを new_practice として Plan に渡す。
-復習の順位と max_new_count の配分は変えない。
+question_count / max_new_count を省略したフィールドは、学習状態から
+小さく調整する（Issue #204）。指定したフィールドはその件数を優先する。
+復習の順位と、渡した件数の中での due 優先は変えない。
 Session 自体は保存しない。router は HTTP 変換だけ行う。
 """
 
@@ -18,6 +20,13 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
+from app.domain.adaptive_plan import (
+    AdaptivePlanConstraints,
+    InvalidAdaptivePlanInputError,
+    collect_adaptive_plan_signals,
+    decide_adaptive_plan_constraints,
+    describe_load_adjustment,
+)
 from app.domain.admission_policy import (
     UnseenBacklogItem,
     build_unseen_backlog_item,
@@ -28,9 +37,7 @@ from app.domain.admission_policy import (
 )
 from app.domain.context_selection import context_usages_from_events
 from app.domain.daily_learning_plan import (
-    DEFAULT_MAX_NEW_COUNT,
     DEFAULT_PLAN_SEED,
-    DEFAULT_PLAN_SIZE,
     DailyLearningPlan,
     InvalidPlanConstraintsError,
     PlanConstraints,
@@ -129,8 +136,8 @@ class TodayLearningService:
     def get_plan(
         self,
         *,
-        question_count: int = DEFAULT_PLAN_SIZE,
-        max_new_count: int = DEFAULT_MAX_NEW_COUNT,
+        question_count: int | None = None,
+        max_new_count: int | None = None,
         seed: str | int | None = None,
         now: datetime | None = None,
     ) -> TodayLearningPlanView:
@@ -151,8 +158,8 @@ class TodayLearningService:
     def create_session(
         self,
         *,
-        question_count: int = DEFAULT_PLAN_SIZE,
-        max_new_count: int = DEFAULT_MAX_NEW_COUNT,
+        question_count: int | None = None,
+        max_new_count: int | None = None,
         seed: str | int | None = None,
         now: datetime | None = None,
     ) -> TodayLearningSession:
@@ -187,13 +194,12 @@ class TodayLearningService:
     def _build_plan(
         self,
         *,
-        question_count: int,
-        max_new_count: int,
+        question_count: int | None,
+        max_new_count: int | None,
         seed: str | int | None,
         now: datetime | None,
     ) -> tuple[DailyLearningPlan, _PlanContext]:
         when = now if now is not None else self._clock()
-        constraints = _plan_constraints(question_count, max_new_count)
         all_items = self._items.list()
         items_by_id = {item.id: item for item in all_items}
         sources_by_id = {row.id: row for row in self._sources.list()}
@@ -276,6 +282,14 @@ class TodayLearningService:
             explicit_known_ids=explicit_known_ids,
             auto_skipped=auto_skipped,
         )
+        constraints, adaptive = _resolve_constraints(
+            snapshots,
+            [event for events in events_by_item.values() for event in events],
+            admission_budget=admission.admission_budget,
+            question_count=question_count,
+            max_new_count=max_new_count,
+            now=when,
+        )
         plan = build_daily_learning_plan(
             ranked,
             items_by_id=items_by_id,
@@ -284,6 +298,15 @@ class TodayLearningService:
             generated_at=when,
             seed=DEFAULT_PLAN_SEED if seed is None else seed,
         )
+        note = describe_load_adjustment(
+            adaptive,
+            total_was_adaptive=question_count is None,
+            new_was_adaptive=max_new_count is None,
+        )
+        if note:
+            plan = plan.model_copy(
+                update={"explanation_summary": f"{plan.explanation_summary}{note}"}
+            )
         return plan, _PlanContext(
             items_by_id=items_by_id,
             sources_by_id=sources_by_id,
@@ -298,13 +321,40 @@ class _PlanContext:
     snapshots_by_id: dict[str, RecommendationSignalSnapshot]
 
 
-def _plan_constraints(question_count: int, max_new_count: int) -> PlanConstraints:
+def _resolve_constraints(
+    snapshots: list[RecommendationSignalSnapshot],
+    events: list[LearningEvent],
+    *,
+    admission_budget: int,
+    question_count: int | None,
+    max_new_count: int | None,
+    now: datetime,
+) -> tuple[PlanConstraints, AdaptivePlanConstraints]:
+    """省略された件数だけを学習状態から決める。指定値の範囲外は拒否する。"""
     try:
-        return PlanConstraints(
-            total_count=question_count,
-            max_new_count=max_new_count,
+        signals = collect_adaptive_plan_signals(
+            snapshots,
+            events,
+            admission_budget=admission_budget,
+            now=now,
         )
-    except (ValidationError, InvalidPlanConstraintsError) as exc:
+        adaptive = decide_adaptive_plan_constraints(
+            signals,
+            explicit_total_count=question_count,
+            explicit_max_new_count=max_new_count,
+        )
+        return (
+            PlanConstraints(
+                total_count=adaptive.total_count,
+                max_new_count=adaptive.max_new_count,
+            ),
+            adaptive,
+        )
+    except (
+        ValidationError,
+        InvalidPlanConstraintsError,
+        InvalidAdaptivePlanInputError,
+    ) as exc:
         raise InvalidTodayLearningError(str(exc)) from exc
 
 

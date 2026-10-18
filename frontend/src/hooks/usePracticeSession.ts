@@ -142,7 +142,8 @@ function sessionStartErrorMessage(kind: TutorSessionKind, error: unknown): strin
 
 async function startSession(kind: TutorSessionKind, sourceId: string | undefined, questionCount: number) {
   if (kind === 'today') {
-    return createTodaySession({ question_count: questionCount })
+    // 出題数の選択画面は挟まない。件数は学習状態の自動調整に任せる。
+    return createTodaySession({})
   }
   if (kind === 'review') {
     return createReviewSession({ question_count: questionCount })

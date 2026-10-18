@@ -47,12 +47,7 @@ from app.api.deps import (
     get_web_url_ingestion_service,
     get_youtube_ingestion_service,
 )
-from app.domain.daily_learning_plan import (
-    DEFAULT_MAX_NEW_COUNT,
-    DEFAULT_PLAN_SIZE,
-    MAX_PLAN_SIZE,
-    MIN_PLAN_SIZE,
-)
+from app.domain.daily_learning_plan import MAX_PLAN_SIZE, MIN_PLAN_SIZE
 from app.domain.exercise import PublicExercise, to_public_exercise
 from app.domain.practice_session import (
     DEFAULT_QUESTION_COUNT,
@@ -436,13 +431,13 @@ class CreateTodaySessionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    question_count: int = Field(
-        default=DEFAULT_PLAN_SIZE,
+    question_count: int | None = Field(
+        default=None,
         ge=MIN_PLAN_SIZE,
         le=MAX_PLAN_SIZE,
     )
-    max_new_count: int = Field(
-        default=DEFAULT_MAX_NEW_COUNT,
+    max_new_count: int | None = Field(
+        default=None,
         ge=0,
         le=MAX_PLAN_SIZE,
     )
@@ -1299,13 +1294,13 @@ def create_review_session(
 @router.get("/today", response_model=TodayLearningPlanView)
 def get_today_plan(
     service: TodayLearningServiceDep,
-    question_count: int = Query(
-        default=DEFAULT_PLAN_SIZE,
+    question_count: int | None = Query(
+        default=None,
         ge=MIN_PLAN_SIZE,
         le=MAX_PLAN_SIZE,
     ),
-    max_new_count: int = Query(
-        default=DEFAULT_MAX_NEW_COUNT,
+    max_new_count: int | None = Query(
+        default=None,
         ge=0,
         le=MAX_PLAN_SIZE,
     ),
