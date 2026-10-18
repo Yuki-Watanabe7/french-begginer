@@ -5,11 +5,13 @@ LLM 再呼び出しなしで Exercise を組み立てる。出題のたびに問
 LLM に作らせない。
 
 このモジュールが依存してよいのは Python 標準ライブラリ、Pydantic、
-`domain.tutor`、`domain.exercise`、`domain.conjugation_adapter` のみ。
+`domain.tutor`、`domain.exercise`、`domain.conjugation_adapter`、
+`domain.context_selection`、`domain.source_ingestion` のみ。
 DB / FastAPI / OpenAI には依存しない。
 
-同じ (item, exercise_type, seed, exercise_version, sources) からは
-同じ Exercise になる。正解は `ExerciseAnswerKey` に閉じ、
+同じ (item, exercise_type, seed, exercise_version, sources, context history)
+からは同じ Exercise になる。履歴が空の cloze は oldest-source のまま。
+正解は `ExerciseAnswerKey` に閉じ、
 `to_public_exercise` には載せない。
 
 ```text
@@ -47,6 +49,14 @@ from app.domain.conjugation_adapter import (
     evaluate_conjugation_adapter,
     pronouns_for,
 )
+from app.domain.context_selection import (
+    ContextCandidate,
+    ContextSelection,
+    ContextUsage,
+    select_context,
+    source_evidence_id,
+    usages_for_exercise,
+)
 from app.domain.exercise import (
     EXERCISE_VERSION,
     MIN_CHOICE_OPTIONS,
@@ -59,6 +69,7 @@ from app.domain.exercise import (
     to_public_exercise,
     tokenize_canonical_form,
 )
+from app.domain.source_ingestion import SourceIngestionError, segment_for_span
 from app.domain.tutor import (
     EvidenceSpan,
     ExerciseType,
@@ -116,11 +127,17 @@ _SENTENCE_END_RE = re.compile(r"[.!?…]+|\n")
 
 
 class _ClozeMaterial(NamedTuple):
+    ref: SourceRef
     source: SourceDocument
     span: EvidenceSpan
     expected: str
     window: tuple[int, int]
     blanked: str
+
+
+class _SelectedCloze(NamedTuple):
+    material: _ClozeMaterial
+    selection: ContextSelection
 
 
 class GeneratedExercise(BaseModel):
@@ -168,6 +185,7 @@ def generate_exercise(
     pool: Sequence[LearningItem] = (),
     seed: str | int = DEFAULT_GENERATION_SEED,
     sources: Mapping[str, SourceDocument] | Sequence[SourceDocument] = (),
+    context_usages: Sequence[ContextUsage] = (),
     cloze_context_max_chars: int = CLOZE_CONTEXT_MAX_CHARS,
 ) -> ExerciseGenerationResult:
     """1つの ExerciseType を deterministic に生成する。
@@ -193,9 +211,18 @@ def generate_exercise(
         "generation_version": EXERCISE_VERSION,
     }
     rng = _stable_rng(seed, item.id, exercise_type, EXERCISE_VERSION)
+    source_map = _source_map(sources)
 
     if exercise_type == "meaning_recognition":
-        return _generate_meaning_recognition(item, pool, rng, metadata)
+        return _generate_meaning_recognition(
+            item,
+            pool,
+            rng,
+            metadata,
+            sources=source_map,
+            context_usages=usages_for_exercise(context_usages, "meaning_recognition"),
+            cloze_context_max_chars=cloze_context_max_chars,
+        )
     if exercise_type == "ja_to_fr":
         return _generate_ja_to_fr(item, metadata)
     if exercise_type == "expression_reconstruction":
@@ -203,8 +230,9 @@ def generate_exercise(
     if exercise_type == "cloze":
         return _generate_cloze(
             item,
-            _source_map(sources),
+            source_map,
             metadata,
+            context_usages=usages_for_exercise(context_usages, "cloze"),
             cloze_context_max_chars=cloze_context_max_chars,
         )
     if exercise_type == "verb_conjugation":
@@ -222,6 +250,7 @@ def generate_supported_exercises(
     pool: Sequence[LearningItem] = (),
     seed: str | int = DEFAULT_GENERATION_SEED,
     sources: Mapping[str, SourceDocument] | Sequence[SourceDocument] = (),
+    context_usages: Sequence[ContextUsage] = (),
     cloze_context_max_chars: int = CLOZE_CONTEXT_MAX_CHARS,
 ) -> tuple[ExerciseGenerationResult, ...]:
     """この生成器が扱う ExerciseType を item に対して順に生成する。"""
@@ -235,6 +264,7 @@ def generate_supported_exercises(
             pool=pool,
             seed=seed,
             sources=sources,
+            context_usages=context_usages,
             cloze_context_max_chars=cloze_context_max_chars,
         )
         for exercise_type in types
@@ -244,19 +274,23 @@ def generate_supported_exercises(
 def select_cloze_source_ref(
     item: LearningItem,
     sources: Mapping[str, SourceDocument] | Sequence[SourceDocument],
+    *,
+    context_usages: Sequence[ContextUsage] = (),
 ) -> SourceRef | None:
     """cloze に使う SourceRef を deterministic に1件選ぶ。
 
-    方針（oldest-source）:
-      - evidence_span がある SourceRef だけを候補にする
-      - SourceDocument が渡されているものだけを候補にする
-      - SourceDocument.created_at 昇順、同刻なら source_document_id 昇順
-      - さらに同順位なら evidence_span.start / end 昇順
-      - 暗黙の random は使わない
+    有効な evidence だけを候補にする。履歴が空なら oldest-source。
+    履歴があるときは、直近の cloze 文脈を避けて別の出典を選ぶ。
     """
-    source_map = _source_map(sources)
-    ranked = _rank_cloze_source_refs(item, source_map)
-    return ranked[0] if ranked else None
+    selected = _resolve_cloze_material(
+        item,
+        _source_map(sources),
+        CLOZE_CONTEXT_MAX_CHARS,
+        usages_for_exercise(context_usages, "cloze"),
+    )
+    if not isinstance(selected, _SelectedCloze):
+        return None
+    return selected.material.ref
 
 
 def blank_source_span(
@@ -301,6 +335,10 @@ def _generate_meaning_recognition(
     pool: Sequence[LearningItem],
     rng: random.Random,
     metadata: dict[str, Any],
+    *,
+    sources: Mapping[str, SourceDocument],
+    context_usages: Sequence[ContextUsage],
+    cloze_context_max_chars: int,
 ) -> ExerciseGenerationResult:
     needed = MIN_CHOICE_OPTIONS - 1
     distractors = list(unique_distractor_meanings(item, pool))
@@ -316,12 +354,19 @@ def _generate_meaning_recognition(
     options = [item.meaning_ja, *selected]
     rng.shuffle(options)
     option_tuple = tuple(options)
+    source_context, context_metadata = _auxiliary_context(
+        item,
+        sources,
+        context_usages,
+        cloze_context_max_chars,
+    )
     spec = make_exercise_spec(
         item,
         "meaning_recognition",
         prompt=_MEANING_RECOGNITION_PROMPT.format(canonical_form=item.canonical_form),
         options=option_tuple,
-        metadata=metadata,
+        source_context=source_context,
+        metadata={**metadata, **context_metadata},
     )
     return _generated(
         spec,
@@ -421,12 +466,16 @@ def _generate_cloze(
     sources: Mapping[str, SourceDocument],
     metadata: dict[str, Any],
     *,
+    context_usages: Sequence[ContextUsage],
     cloze_context_max_chars: int,
 ) -> ExerciseGenerationResult:
-    material = _resolve_cloze_material(item, sources, cloze_context_max_chars)
-    if not isinstance(material, _ClozeMaterial):
-        reason, detail = material
+    selected = _resolve_cloze_material(
+        item, sources, cloze_context_max_chars, context_usages
+    )
+    if not isinstance(selected, _SelectedCloze):
+        reason, detail = selected
         return _skipped("cloze", reason, detail)
+    material = selected.material
     spec = make_exercise_spec(
         item,
         "cloze",
@@ -434,9 +483,7 @@ def _generate_cloze(
         source_context=material.blanked,
         metadata={
             **metadata,
-            "source_document_id": material.source.id,
-            "evidence_start": material.span.start,
-            "evidence_end": material.span.end,
+            **_context_metadata(selected),
             "context_window_start": material.window[0],
             "context_window_end": material.window[1],
         },
@@ -444,11 +491,30 @@ def _generate_cloze(
     return _generated(spec, ExerciseAnswerKey(expected_answers=(material.expected,)))
 
 
+def _auxiliary_context(
+    item: LearningItem,
+    sources: Mapping[str, SourceDocument],
+    context_usages: Sequence[ContextUsage],
+    max_chars: int,
+) -> tuple[str | None, dict[str, Any]]:
+    """meaning recognition のフィードバック用文脈。正解は変えない。
+
+    文脈を切れない Item でも意味選択自体は出す。ja_to_fr には使わない。
+    """
+    selected = _resolve_cloze_material(item, sources, max_chars, context_usages)
+    if not isinstance(selected, _SelectedCloze):
+        return None, {}
+    material = selected.material
+    start, end = material.window
+    return material.source.content[start:end], _context_metadata(selected)
+
+
 def _resolve_cloze_material(
     item: LearningItem,
     sources: Mapping[str, SourceDocument],
     max_chars: int,
-) -> _ClozeMaterial | tuple[ExerciseSkipReason, str]:
+    usages: Sequence[ContextUsage],
+) -> _SelectedCloze | tuple[ExerciseSkipReason, str]:
     """valid な cloze 材料を選ぶ。invalid を無言で誤問題にしない。"""
     evidence_refs = [ref for ref in item.source_refs if ref.evidence_span is not None]
     if not evidence_refs:
@@ -466,20 +532,12 @@ def _resolve_cloze_material(
         elif first_error is None:
             first_error = checked
 
-    if valid:
-        valid.sort(
-            key=lambda row: (
-                row.source.created_at,
-                row.source.id,
-                row.span.start,
-                row.span.end,
-            )
+    if not valid:
+        return first_error or (
+            "source_not_found",
+            "source cloze に必要な SourceDocument が見つからない",
         )
-        return valid[0]
-    return first_error or (
-        "source_not_found",
-        "source cloze に必要な SourceDocument が見つからない",
-    )
+    return _choose_cloze_material(item.id, valid, usages)
 
 
 _MISSING_SOURCE_CREATED_AT = datetime.max.replace(tzinfo=UTC)
@@ -503,13 +561,63 @@ def _ordered_cloze_refs(
     return sorted(refs, key=sort_key)
 
 
-def _rank_cloze_source_refs(
-    item: LearningItem,
-    sources: Mapping[str, SourceDocument],
-) -> list[SourceRef]:
-    refs = [ref for ref in item.source_refs if ref.evidence_span is not None]
-    present = [ref for ref in refs if ref.source_document_id in sources]
-    return _ordered_cloze_refs(present, sources)
+def _choose_cloze_material(
+    learning_item_id: str,
+    valid: Sequence[_ClozeMaterial],
+    usages: Sequence[ContextUsage],
+) -> _SelectedCloze:
+    candidates = [
+        ContextCandidate(source_ref=row.ref, source_created_at=row.source.created_at)
+        for row in valid
+    ]
+    selection = select_context(
+        learning_item_id=learning_item_id,
+        candidates=candidates,
+        usages=usages,
+    )
+    if selection is None:
+        raise RuntimeError("有効な cloze 文脈があるのに選択結果が空")
+    for row in valid:
+        if row.ref == selection.selected_source_ref:
+            return _SelectedCloze(row, selection)
+    raise RuntimeError("選択された SourceRef が有効候補にない")
+
+
+def _context_metadata(selected: _SelectedCloze) -> dict[str, Any]:
+    material = selected.material
+    span = material.span
+    metadata: dict[str, Any] = {
+        "source_document_id": material.source.id,
+        "source_evidence_id": source_evidence_id(
+            material.source.id, span.start, span.end
+        ),
+        "evidence_start": span.start,
+        "evidence_end": span.end,
+        "context_policy_version": selected.selection.policy_version,
+        "context_selection_reason": selected.selection.reason,
+    }
+    metadata.update(_provenance_metadata(material.source, span))
+    return metadata
+
+
+def _provenance_metadata(source: SourceDocument, span: EvidenceSpan) -> dict[str, Any]:
+    """span を含む segment の page / 時刻を維持する。欠ければ空。"""
+    if not source.segments:
+        return {}
+    try:
+        segment = segment_for_span(source.segments, start=span.start, end=span.end)
+    except SourceIngestionError:
+        return {}
+    metadata: dict[str, Any] = {}
+    if segment.page_number is not None:
+        metadata["page_number"] = segment.page_number
+    if segment.start_seconds is not None:
+        metadata["start_seconds"] = segment.start_seconds
+    if segment.end_seconds is not None:
+        metadata["end_seconds"] = segment.end_seconds
+    if segment.timestamp is not None:
+        metadata["timestamp"] = segment.timestamp
+    return metadata
 
 
 def _validate_cloze_ref(
@@ -555,6 +663,7 @@ def _validate_cloze_ref(
             "blank 対象の前後に十分な context を切り出せない",
         )
     return _ClozeMaterial(
+        ref=ref,
         source=source,
         span=span,
         expected=expected,

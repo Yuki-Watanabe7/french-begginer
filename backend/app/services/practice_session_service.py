@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
+from app.domain.context_selection import context_usages_from_events
 from app.domain.practice_session import (
     DEFAULT_QUESTION_COUNT,
     DEFAULT_SESSION_SEED,
@@ -19,6 +20,7 @@ from app.domain.practice_session import (
 )
 from app.domain.tutor import LearningItem, SourceDocument
 from app.repositories.protocols import (
+    LearningEventRepository,
     LearningItemRepository,
     SourceDocumentRepository,
 )
@@ -31,6 +33,7 @@ from app.services.exceptions import (
 class _PracticeStore(Protocol):
     source_documents: SourceDocumentRepository
     learning_items: LearningItemRepository
+    learning_events: LearningEventRepository
 
 
 def build_practice_session_service(store: _PracticeStore) -> PracticeSessionService:
@@ -38,6 +41,7 @@ def build_practice_session_service(store: _PracticeStore) -> PracticeSessionServ
     return PracticeSessionService(
         sources=store.source_documents,
         items=store.learning_items,
+        events=store.learning_events,
     )
 
 
@@ -47,9 +51,11 @@ class PracticeSessionService:
         *,
         sources: SourceDocumentRepository,
         items: LearningItemRepository,
+        events: LearningEventRepository,
     ) -> None:
         self._sources = sources
         self._items = items
+        self._events = events
 
     def create_session(
         self,
@@ -74,6 +80,10 @@ class PracticeSessionService:
         if item_ids is not None:
             self._require_items(item_ids, all_items)
 
+        usages = {
+            item.id: context_usages_from_events(self._events.list_by_item(item.id))
+            for item in all_items
+        }
         try:
             return build_practice_session(
                 all_items,
@@ -82,6 +92,7 @@ class PracticeSessionService:
                 item_ids=item_ids,
                 question_count=question_count,
                 seed=DEFAULT_SESSION_SEED if seed is None else seed,
+                context_usages_by_item=usages,
             )
         except UnknownPracticeItemError as exc:
             raise TutorNotFoundError("LearningItem", exc.item_id) from exc

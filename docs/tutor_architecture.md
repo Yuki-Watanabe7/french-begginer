@@ -1533,7 +1533,8 @@ Je me suis ____ qu'il fallait changer de stratégie.
 ### SourceRef が複数ある場合
 
 有効な evidence（Source が存在し、span が本文内で空でなく、
-context を切れる）だけを候補にし、**oldest-source** で1件選ぶ。
+context を切れる）だけを候補にする。履歴が無いときの順位は
+**oldest-source** のままである。
 
 - `SourceDocument.created_at` 昇順
 - 同刻なら `source_document_id` 昇順
@@ -1541,6 +1542,8 @@ context を切れる）だけを候補にし、**oldest-source** で1件選ぶ�
 
 暗黙の random は使わない。invalid な ref は出題に使わず、
 valid な別 ref があればそちらを使う。
+同じ Item を別の出典文脈で再提示する規則は、下記
+「Phase 7 — 複数Source文脈の context rotation」を正とする。
 
 ### invalid / unavailable
 
@@ -1703,7 +1706,11 @@ Exercise 自体は永続化しない。
 - `response_kind`
 - `generation_method`（`deterministic` / `source_cloze` / `conjugation_adapter`）
 - `reconstruction_key`
-- cloze のとき `source_document_id`
+- cloze / 補助 context のとき `source_document_id`、`source_evidence_id`、
+  `evidence_start` / `evidence_end`、`context_policy_version`、
+  `context_selection_reason`
+- 該当 segment があるとき `page_number` または `timestamp` /
+  `start_seconds` / `end_seconds`
 
 正解は含めない。`exercise_type` は LearningEvent の既存フィールド。
 `LearnerState.by_direction` の更新は Issue #161。source of truth は
@@ -2636,15 +2643,16 @@ seen かつ future / unscheduled の direction は今日の候補にしない。
 | `source_recency` | source_recency_days | 補助 signal。Source なしは 0 |
 | `interest` | interest_weight | 補助。未設定（1.0）は 0 寄与 |
 | `importance` | importance_weight | 補助。未設定（1.0）は 0 寄与 |
+| `pattern_weakness` | 検出済み WeaknessPattern hint | 補助。hint が無い direction は 0。Issue #203 |
 
 weights / 飽和定数は `COMPONENT_WEIGHTS` ほかモジュール定数に一元管理する。
-`policy_version`（初期値 `ranking-v1`）で後から A/B 比較できる。
+`policy_version` の初期値は `ranking-v1`。横断苦手パターンの component を足した現行は `ranking-v2`。
 
 ### due review を軽視しない
 
 `overdue` を最大 weight にし、ちょうど due の寄与が
-interest + recency + importance + level_fit の最大合計を超える。
-interest だけで overdue を押しのけない。
+interest + recency + importance + level_fit + pattern_weakness の最大合計を超える。
+interest や苦手パターンだけでは overdue を押しのけない。
 
 ### direction imbalance
 
@@ -3116,7 +3124,7 @@ Issue #107 の Phase 5 は、学習履歴・弱点・Source・レベルを使っ
 | missing data を根拠なく苦手・低関心等と推測しない | unseen ≠ low mastery、unknown level は中立 | 同上 / `test_phase5_ranking_explanations_match_signals_and_stay_deterministic` |
 | signal から deterministic な ranking を生成できる | `rank_recommendations` | 同上 |
 | ranking の各主要寄与を説明できる | `RecommendationScore.components` + reason code | 同上 |
-| policy / feature version を追跡できる | `signal-v1` / `ranking-v1` / `plan-v1` | 同上 / `test_tutor_recommendation_quality.py` |
+| policy / feature version を追跡できる | `signal-v2` / `ranking-v2` / `plan-v1` | 同上 / `test_tutor_recommendation_quality.py` |
 | due review が新規項目に埋もれない | overdue 最大 weight | 同上 / fixture A |
 | 新規学習数に上限を設けられる | `max_new_count` | `test_phase5_new_review_mix_under_and_over_capacity` |
 | capacity 不足の due 件数を deferred として明示できる | `deferred_due_count` | 同上 |
@@ -3999,6 +4007,283 @@ Phase 7 へ進む前提は、Phase 0〜6 が `bash scripts/quality-check.sh` で
 継続して通ることである。OCR、login / paywall の突破、crawler、
 embeddings、ML ranking、自由会話 Tutor は Phase 7 の前提にしない。
 
+新規項目の過剰投入抑止は、下記
+「Phase 7 — 新規LearningItemのadmission policy」を正とする。
+
+## Phase 7 — 新規LearningItemのadmission policy（Issue #200）
+
+accepted 済みの未学習 LearningItem が Source 追加のたびに無制限へ積み上がらないよう、
+「今、新規学習へ入れてよい Item」だけを policy 結果として導出する。
+`LearningItem.status` は増やさない。defer は Candidate の reject ではなく、
+条件が変われば同じ Item が再度 eligible になる。永続化も migration もしない。
+
+```text
+accepted LearningItems
+  -> unseen backlog
+  -> admission policy
+  -> eligible-for-new-learning
+  -> Phase 5 ranking / Daily Learning Plan
+```
+
+実装は `domain.admission_policy.decide_new_admissions`。
+`TodayLearningService` は active Item の signal から unseen backlog と
+due 件数、直近導入件数を作り、defer された `new_practice` だけを
+ranking 結果から外して既存の Daily Learning Plan に渡す。
+ranking の式、`max_new_count`、純 Review Session は変えない。
+
+### 初期 policy
+
+定数は `admission_policy` にまとめ、`policy_version` は `admission-v1`。
+
+| 定数 | 初期値 | 意味 |
+|------|--------|------|
+| `NORMAL_NEW_ADMISSION_CAP` | 8 | due が少ないときの eligible 在庫。セッションの `max_new_count` より広い |
+| `DUE_BACKLOG_SOFT_THRESHOLD` | 8 | これ以上の due direction で新規枠を 1 件へ下げる |
+| `DUE_BACKLOG_HARD_THRESHOLD` | 16 | これ以上の due direction で新規枠を 0 にする |
+| `DAILY_INTRODUCTION_QUOTA` | 8 | 直近に導入済みの新規が達したら追加 eligible を出さない |
+| `RECENT_INTRODUCTION_WINDOW_DAYS` | 1 | 最初の学習イベントを導入済みと数える窓 |
+| `PER_SOURCE_ADMISSION_CAP` | 2 | 同一 Source が新規在庫を占有できる上限 |
+
+due 件数は Item 数ではなく direction 単位。直近導入は、最初の学習が窓内にある
+Item 数であり、まだ unseen の在庫は数えない。
+
+選別の順は次のとおり。
+
+1. 表記ゆれ（大小文字、空白、ハイフン、アポストロフィの字形）が同じ canonical form は
+   優先度の高い 1 件だけを残し、残りを `DUPLICATE_OR_REDUNDANT`。アクセントは残す。
+2. CEFR 距離が 3 以上は `LEVEL_TOO_FAR_FOR_NOW`。距離不明は排除しない。
+3. 残った Item を level fit、Source の新しさ、importance、interest、
+   `learning_item_id` の順で並べる。
+4. Source を跨いで round-robin し、同一 Source は cap まで。
+   Source を持たない Item は互いに cap を共有しない。
+5. cap で落ちた Item は `SOURCE_DAILY_CAP`。
+   due 抑制が無ければ入れた Item は `REVIEW_BACKLOG_HIGH`。
+   それ以外の見送りは `HIGHER_PRIORITY_NEW_EXISTS`。
+   直近導入で枠を使い切った場合も後者になる。
+
+admit の reason code は空。defer は上記のいずれか 1 つ。
+
+Phase 5 の `max_new_count` は 1 セッションの上限のままである。
+admission 在庫がそれより広くても Plan は `max_new_count` を超えない。
+在庫の方が狭ければ Plan の新規は在庫件数で頭打ちになる。
+
+### スコープ外
+
+- Today Plan の ranking 式の変更
+- ML による admission
+- Candidate の自動 reject
+- notification
+- admission 結果の永続化と HTTP での理由一覧
+
+| 観点 | 自動テスト |
+|------|------------|
+| due が多いと新規を抑制する | `test_high_due_backlog_suppresses_new_admission` / `test_today_plan_suppresses_new_when_due_backlog_is_high` |
+| due が少ないと新規を許可する | `test_low_due_backlog_allows_new_admission` / `test_today_plan_admits_new_when_due_backlog_is_low` |
+| 1 Source が全枠を独占しない | `test_single_source_does_not_fill_the_admission_budget` / `test_today_plan_does_not_let_one_source_fill_max_new` |
+| 複数 Source で deterministic | `test_multiple_sources_are_fair_and_deterministic` |
+| CEFR 不明を自動排除しない | `test_unknown_cefr_is_not_excluded` |
+| defer した Item が後日 eligible | `test_deferred_item_becomes_eligible_when_conditions_change` |
+| 同じ状態と now で同じ結果 | `test_same_state_and_now_returns_the_same_result` |
+| `max_new_count` と矛盾しない | `test_max_new_count_still_bounds_the_plan` |
+| OpenAI / LLM 非依存 | `test_module_does_not_import_llm` |
+
+## Phase 7 — 既知項目の known-item policy（Issue #201）
+
+ユーザーがすでに知っている項目を新規学習枠から外し、あとから戻せるようにする。
+判定を LLM には渡さない。`LearningItem.status` の `mastered` とは別の情報である。
+
+| 概念 | 役割 | 新規学習 | due review | 永続 status |
+|------|------|----------|------------|-------------|
+| `mastered` | 既存の定着状態 | 対象外（inactive） | 出題しない | `LearningItem.status` を変える |
+| explicit known | ユーザーが「知っている」と宣言 | 外す | 残す | 変えない。undo できる |
+| auto-skip | direction ごとの十分な履歴 | その direction だけ外す | 残す | 変えない。毎回計算する |
+
+「知っている」は新規導入を skip する情報であり、将来の再確認を禁止しない。
+due の Item を known にしても ReviewSchedule は消さず、Phase 4 の純 Review Session
+と今日の復習枠には残る。外れるのは `new_practice` だけである。
+
+```text
+active LearningItem
+  -> explicit known / direction auto-skip
+  -> new_practice だけを除外
+  -> unseen backlog
+  -> admission policy
+  -> ranking / Daily Learning Plan
+due review はこの除外を通さず、従来どおり ranking へ残る
+```
+
+### explicit known
+
+`POST /api/tutor/items/{item_id}/known` が宣言、`POST .../known/undo` が取り消し。
+同じ状態への再操作は履歴を足さない。変化したときだけ append-only の
+`known_item_events` と、現在値の `known_item_overrides` を同一トランザクションで書く。
+`updated_at` は最後に変化した操作時刻。LearningEvent / LearnerState / ReviewSchedule
+は更新しない。
+
+### auto-skip
+
+`decide_auto_skip` はその direction の LearningEvent だけを見る。次をすべて満たすときだけ
+新規学習を不要とする。
+
+| 条件 | 初期値 |
+|------|--------|
+| 正解回数 | 3 回以上。1 回では不可 |
+| 正答率 | 0.8 以上 |
+| 確認の期間 | 最初の正解から最後の正解まで 2 日以上 |
+| 最近の誤答 | 14 日以内の誤答があると不可 |
+
+recognition が高くても production の履歴が足りなければ production は skip しない。
+結果は保存しない。`policy_version` は `known-item-v1`。
+
+### UI
+
+採用済みの候補と、新規の練習問題の回答前後に「これは知っている」を出す。
+一度押しただけでは外れず、確認のあとで新規学習から外す。表示は
+「知っているので、新しい学習には出しません」と「元に戻す」。
+技術用語 `mastered` は見せない。純復習の問題にはこの操作を出さない。
+
+### スコープ外
+
+- 既知判定の LLM 委任
+- placement test
+- adaptive CEFR 推定
+- 学習項目の自動削除
+
+| 観点 | 自動テスト |
+|------|------------|
+| explicit known で new plan から除外 | `test_explicit_known_excludes_new_plan_and_undo_restores` |
+| undo で復帰 | 同上 / `test_mark_known_is_idempotent_and_undo_restores` |
+| 1 回正解では auto-skip しない | `test_one_correct_answer_does_not_auto_skip` / `test_one_correct_does_not_auto_skip_the_other_direction` |
+| 十分な履歴で auto-skip | `test_sufficient_history_auto_skips_only_that_direction` / `test_sufficient_history_does_not_consume_a_new_slot` |
+| recent incorrect では auto-skip しない | `test_recent_incorrect_blocks_auto_skip` / `test_recent_incorrect_does_not_auto_skip` |
+| recognition が高くても production は残す | `test_high_recognition_does_not_skip_low_production` |
+| DB reopen | `test_explicit_known_survives_reopen` |
+| Phase 4 review を壊さない | `test_known_due_item_stays_in_review_and_leaves_new_plan` / `test_known_due_item_stays_in_review_queue` |
+| known と mastered を混ぜない | `test_mark_known_keeps_status_history_and_schedule` / `test_mark_known_does_not_change_mastered_status` |
+| Frontend | `PracticeExerciseCard.test.tsx` / `KnownItemControl.test.tsx` |
+
+## Phase 7 — 複数Source文脈の context rotation（Issue #202）
+
+同じ LearningItem を、毎回同じ例文だけで出さない。有効な SourceRef が複数あるとき、
+その ExerciseType の直近利用を避けて別の出典文脈を選ぶ。正解の根拠は変えない。
+cloze の正解は選ばれた Source 本文の slice のままである。`ja_to_fr` の正解は
+`canonical_form` のままで、出典には依存させない。
+
+```text
+有効な SourceRef（span が本文内、空でない、前後 context を切れる）
+  -> 同じ ExerciseType の LearningEvent で未使用の文脈を優先
+  -> すべて使用済みなら、最後に使った時刻が古い文脈
+  -> created_at / source id / evidence start / end で安定順
+  -> ContextSelection（reason / policy_version）
+```
+
+`policy_version` は `context-rotation-v1`。理由は `single_valid_context` /
+`unused_context` / `least_recent_context`。候補が1件なら直近でもそれを使う。
+invalid な span や欠落した Source は候補にせず、残った文脈で Session を続ける。
+別 Item の表現は、この Item の `source_refs` に無い限り混ぜない。
+
+LearningEvent.metadata には `source_document_id`、`source_evidence_id`、
+evidence の start / end、`exercise_version` を残す。span の無い既存 Event は
+その Source 全体を使った履歴として復元する。PDF の page と字幕の timestamp は、
+選んだ span を含む segment から metadata に写す。
+
+meaning recognition は、同じ選択で切り出した文を `source_context` に載せる。
+選択肢と正解は `meaning_ja` のままである。この補助文脈の履歴は
+meaning recognition の Event だけを見る。cloze の再構成は cloze の Event
+だけを見るので、片方の回答がもう片方の採点根拠をずらさない。
+
+LLM による例文生成、embeddings、random な選択はしない。
+
+| 観点 | 自動テスト |
+|------|------------|
+| 2 SourceRef の rotation | `test_two_source_refs_rotate_away_from_the_recent_context` |
+| 3件以上で直近を避ける | `test_three_source_refs_avoid_the_most_recent_context` |
+| 1 SourceRef は従来どおり | `test_single_source_ref_stays_on_that_context` |
+| invalid evidence を skip | `test_invalid_evidence_is_not_selected` |
+| DB reopen 後も判断できる | `test_recent_context_survives_reopen_and_changes_the_cloze_answer` |
+| 同じ履歴で deterministic | `test_same_history_is_deterministic` |
+| page / timestamp を維持 | `test_pdf_page_and_transcript_timestamp_stay_on_the_selected_context` |
+| 欠落 Source で Session を壊さない | `test_missing_source_does_not_fail_the_session` |
+| ja_to_fr の正解を変えない | `test_ja_to_fr_answer_stays_canonical_form` |
+
+## Phase 7 — 苦手文法・表現パターンの検出（Issue #203）
+
+個別 LearningItem の recent error ではなく、同じ metadata / tag を持つ
+複数 Item の誤答が閾値を超えたときだけ `WeaknessPattern` にする。
+embeddings や LLM クラスタリングは source of truth にしない。
+書いていない gender、動詞 group、代名動詞は表記や辞書から推測しない。
+
+```text
+LearningItem.item_type / metadata + LearningEvent
+  -> aggregate_weakness_patterns()
+  -> direction 別の WeaknessPattern
+  -> 根拠 Item だけを snapshot の補助 hint にする
+  -> ranking の pattern_weakness（独立 component、小さい weight）
+```
+
+実装は `domain.weakness_pattern.aggregate_weakness_patterns`。
+`WeaknessPatternService.detect` は保存せず、同じ DB と now から再計算する。
+`TodayLearningService` は active Item の snapshot に、直近誤答の根拠になっている
+検出済み pattern だけを載せる。hint が空の Item の score は pattern 寄与 0 のまま。
+
+### taxonomy
+
+| dimension | 出典 | 例 |
+|-----------|------|----|
+| `item_type` | `LearningItem.item_type` | 語彙 / 表現 / 文法 / 動詞活用 |
+| `grammar_feature` | metadata または `tags` | 冠詞付き名詞、il faut 系 |
+| `verb_group` | metadata `verb_group` | `-er` / `-ir` / `-re` / 不規則 |
+| `tense` / `mood` | metadata | 半過去、直説法 |
+| `noun_gender` | metadata `noun_gender` または `gender` | 男性名詞 / 女性名詞。矛盾時は使わない |
+| `pronominal` | metadata `pronominal: true` | 代名動詞 |
+
+`tags` は `dimension:value` だけを読む。未知 dimension は捨てる。
+`item_type` は Item のフィールドを使い、tag では上書きしない。
+
+### 検出閾値
+
+定数は `weakness_pattern` にまとめ、`version` は `weakness-pattern-v1`。
+判定は direction ごと、直近 `RECENT_WINDOW_DAYS`（14日）の attempt だけを使う。
+窓の外の誤答は `attempt_count` に残るが、それだけでは `is_weakness` にしない。
+
+| 定数 | 初期値 | 意味 |
+|------|--------|------|
+| `MIN_ATTEMPTS` | 4 | 直近 attempt がこれ未満なら断定しない |
+| `MIN_DISTINCT_ITEMS` | 2 | 1 Item の誤答はパターンにしない |
+| `MIN_RECENT_INCORRECT` | 2 | 直近の誤答件数がこれ未満なら断定しない |
+| `ERROR_RATE_THRESHOLD` | 0.5 | 直近 error rate がこれ未満なら断定しない |
+
+SkillDirection は `exercise_type` から決める。event metadata では上書きしない。
+
+### ranking と説明
+
+`pattern_weakness` の weight は `0.03`。interest / recency / importance /
+level_fit と合わせても、ちょうど due の overdue 寄与を超えない。
+reason code は recognition が `PATTERN_RECENT_ERRORS`、
+production が `PRODUCTION_PATTERN_WEAKNESS`。
+ユーザー向け文は「最近、代名動詞の自力回答で間違いが続いています」のように
+pattern の label を含む。定型文も残し、label が無いときは定型文だけにする。
+
+### スコープ外
+
+- embeddings clustering
+- LLM だけでの pattern 発見
+- 自動カリキュラムの全面再設計
+- WeaknessPattern の永続化と専用 HTTP API
+
+| 観点 | 自動テスト |
+|------|------------|
+| 同じ pattern の複数 Item 誤答で検出 | `test_shared_pattern_across_items_is_detected` |
+| 1 Item だけでは検出しない | `test_single_item_is_not_called_a_weakness` |
+| attempt 不足では断定しない | `test_too_few_attempts_are_not_a_weakness` |
+| recognition / production を分ける | `test_recognition_and_production_are_separate` |
+| 窓の外の古い誤答だけでは断定しない | `test_old_errors_outside_the_window_do_not_define_a_weakness` |
+| metadata 欠損は推測しない | `test_missing_metadata_is_not_inferred` |
+| 同じ入力で同じ集計 | `test_aggregation_is_deterministic` |
+| DB 再 open 後も再計算が一致 | `test_patterns_recompute_the_same_after_db_reopen` |
+| due 優先を壊さない補助 signal | `test_quality_fixtures_pass` / `test_today_plan_uses_pattern_reason_without_burying_due` |
+| OpenAI / LLM 非依存 | `test_modules_do_not_import_llm_or_fastapi` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -4066,3 +4351,11 @@ YouTube transcript と SRT / VTT の取り込みは上記
 「Phase 6 — 複数Source形式の追加UIとingestion状態・provenance表示」を正とする。
 Phase 6 自体の完了条件と Phase 7 への引継ぎは、上記
 「Phase 6 Exit Criteria」と「Phase 7 への引き継ぎ」を正とする。
+新規 LearningItem の流入制御は、上記
+「Phase 7 — 新規LearningItemのadmission policy」を正とする。
+既知項目の skip は、上記
+「Phase 7 — 既知項目の known-item policy」を正とする。
+複数 Source 文脈の再提示は、上記
+「Phase 7 — 複数Source文脈の context rotation」を正とする。
+苦手文法・表現パターンの検出は、上記
+「Phase 7 — 苦手文法・表現パターンの検出」を正とする。

@@ -3,8 +3,8 @@ import { fetchReviewQueue } from '../api/tutor'
 import { PracticeExerciseCard } from './PracticeExerciseCard'
 import { PracticeSessionResult } from './PracticeSessionResult'
 import { usePracticeSession } from '../hooks/usePracticeSession'
-import type { TutorSessionKind } from '../types'
-import { todayActivityLabel, visibleReasonLabels } from '../utils/tutor'
+import type { ActivityKind, TutorSessionKind } from '../types'
+import { todayActivityLabel, visibleEntryReasons } from '../utils/tutor'
 
 interface Props {
   sourceId?: string
@@ -28,6 +28,9 @@ export function PracticeSessionFlow({
     submit,
     submitChoice,
     nextQuestion,
+    skipUnanswered,
+    markKnown,
+    undoKnown,
     setInput,
     setReconstruction,
     retry,
@@ -131,7 +134,7 @@ export function PracticeSessionFlow({
         activityLabel={
           currentTodayEntry ? todayActivityLabel(currentTodayEntry.activity_kind) : null
         }
-        reasonLabels={visibleReasonLabels(currentTodayEntry?.reason_codes)}
+        reasonLabels={visibleEntryReasons(currentTodayEntry)}
         onInputChange={setInput}
         onReconstructionChange={setReconstruction}
         onSubmit={() => {
@@ -141,6 +144,18 @@ export function PracticeSessionFlow({
           void submitChoice(option)
         }}
         onNext={nextQuestion}
+        knownAction={
+          showKnownAction(kind, currentTodayEntry?.activity_kind)
+            ? {
+                explicitKnown: state.knownByItemId[current.learning_item_id] === true,
+                busy: state.knownBusy || state.submitting,
+                error: state.knownError,
+                onMark: markKnown,
+                onUndo: undoKnown,
+              }
+            : null
+        }
+        onSkipUnanswered={skipUnanswered}
       />
     )
   }
@@ -150,6 +165,14 @@ export function PracticeSessionFlow({
       読み込み中...
     </p>
   )
+}
+
+function showKnownAction(
+  kind: TutorSessionKind,
+  activityKind: ActivityKind | undefined,
+): boolean {
+  if (kind === 'practice') return true
+  return kind === 'today' && activityKind === 'new_practice'
 }
 
 const styles: Record<string, React.CSSProperties> = {

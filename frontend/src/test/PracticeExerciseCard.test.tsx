@@ -317,6 +317,72 @@ describe('PracticeExerciseCard — 送信失敗と TTS', () => {
   })
 })
 
+describe('PracticeExerciseCard — known item', () => {
+  it('回答の前に確認してから既知にする', async () => {
+    const onMark = vi.fn()
+    renderCard({
+      knownAction: {
+        explicitKnown: false,
+        busy: false,
+        error: null,
+        onMark,
+        onUndo: vi.fn(),
+      },
+    })
+    expect(screen.queryByText(/mastered/i)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'これは知っている' }))
+    expect(onMark).not.toHaveBeenCalled()
+    expect(screen.getByText('新しい学習から外します。復習の予定は残ります。あとから戻せます。')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'やめる' }))
+    expect(onMark).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'これは知っている' }))
+    await userEvent.click(screen.getByRole('button', { name: '外す' }))
+    expect(onMark).toHaveBeenCalledTimes(1)
+  })
+
+  it('既知のあとは元に戻せて、答えずに次へ進める', async () => {
+    const onUndo = vi.fn()
+    const onSkipUnanswered = vi.fn()
+    renderCard({
+      knownAction: {
+        explicitKnown: true,
+        busy: false,
+        error: null,
+        onMark: vi.fn(),
+        onUndo,
+      },
+      onSkipUnanswered,
+    })
+    expect(screen.getByText('知っているので、新しい学習には出しません')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '本' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/mastered/i)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '元に戻す' }))
+    expect(onUndo).toHaveBeenCalledTimes(1)
+    await userEvent.click(screen.getByRole('button', { name: '次の問題 →' }))
+    expect(onSkipUnanswered).toHaveBeenCalledTimes(1)
+  })
+
+  it('回答後も既知の操作を残す', () => {
+    renderCard({
+      feedback: feedback(),
+      knownAction: {
+        explicitKnown: false,
+        busy: false,
+        error: null,
+        onMark: vi.fn(),
+        onUndo: vi.fn(),
+      },
+    })
+    expect(screen.getByText('✓ 正解')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'これは知っている' })).toBeInTheDocument()
+  })
+
+  it('操作を渡さないときは既知ボタンを出さない', () => {
+    renderCard()
+    expect(screen.queryByRole('button', { name: 'これは知っている' })).not.toBeInTheDocument()
+  })
+})
+
 describe('PracticeExerciseCard — today activity', () => {
   it('任意の復習/新規バッジと理由を出せる', async () => {
     renderCard({

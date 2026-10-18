@@ -3,6 +3,7 @@ import type { TodayPlanEntryView } from '../types'
 import {
   MAX_TODAY_PLAN_PREVIEW,
   todayActivityLabel,
+  visibleEntryReasons,
   visibleReasonLabels,
 } from '../utils/tutor'
 
@@ -96,7 +97,7 @@ export function TutorTodayLearningCard({ onStartToday }: Props) {
 }
 
 function PreviewRow({ entry }: { entry: TodayPlanEntryView }) {
-  const reasons = visibleReasonLabels(entry.reason_codes)
+  const reasons = visibleEntryReasons(entry)
   return (
     <li style={styles.previewItem}>
       <span style={styles.previewKind}>{todayActivityLabel(entry.activity_kind)}</span>

@@ -220,6 +220,22 @@ def _reason_signal_issues(
         issues.append("level fit 対象外なのに LEVEL_FIT を出した")
     if "RECENT_SOURCE" in codes and snap.source_recency_days is None:
         issues.append("Source が無いのに RECENT_SOURCE を出した")
+    if "PATTERN_RECENT_ERRORS" in codes:
+        if row.skill_direction != "recognition":
+            issues.append("production に PATTERN_RECENT_ERRORS を出した")
+        elif not any(
+            hint.skill_direction == "recognition" for hint in snap.weakness_patterns
+        ):
+            issues.append("pattern signal が無いのに PATTERN_RECENT_ERRORS を出した")
+    if "PRODUCTION_PATTERN_WEAKNESS" in codes:
+        if row.skill_direction != "production":
+            issues.append("recognition に PRODUCTION_PATTERN_WEAKNESS を出した")
+        elif not any(
+            hint.skill_direction == "production" for hint in snap.weakness_patterns
+        ):
+            issues.append(
+                "pattern signal が無いのに PRODUCTION_PATTERN_WEAKNESS を出した"
+            )
 
     for code in codes:
         component = REASON_TO_COMPONENT[code]

@@ -51,6 +51,10 @@ backend/app/
 │   ├── recommendation_signal.py  # 推薦入力のsignal snapshot（Issue #175）
 │   ├── recommendation_ranking.py  # 説明可能なranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
+│   ├── admission_policy.py  # 新規LearningItemの流入制御 admission policy（Issue #200）
+│   ├── known_item_policy.py # 既知項目の explicit known と conservative auto-skip（Issue #201）
+│   ├── context_selection.py # 複数Source文脈の context rotation（Issue #202）
+│   ├── weakness_pattern.py  # 複数Item横断の苦手パターン（Issue #203）
 │   ├── today_session.py  # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 │   ├── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
@@ -82,6 +86,7 @@ backend/app/
     ├── exercise_service.py  # Exercise 取得・採点・LearningEvent 記録
     ├── practice_session_service.py  # Practice Session 組み立て
     ├── review_session_service.py  # Review Practice Session 組み立て
+    ├── weakness_pattern_service.py  # 苦手パターンの算出（Issue #203）
     └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）
 ```
 
@@ -156,6 +161,9 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベント記録（state / schedule も更新） |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem |
 | GET | `/api/tutor/reviews/queue` | direction-aware な due review queue（件数 summary 付き） |
+| POST | `/api/tutor/items/{item_id}/known` | 既知として新規学習から外す。再指定は冪等。status は変えない。due review は残す |
+| POST | `/api/tutor/items/{item_id}/known/undo` | 既知指定を取り消す。未指定でも冪等 |
+| GET | `/api/tutor/items/{item_id}/known` | explicit known の現在値と更新時刻。未指定でも Item があれば 200 |
 
 ### 現在の動詞データ（`conjugation.py`）
 
@@ -175,6 +183,7 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 
 ## 開発方針
 
+- 実装ブランチは `origin/main` から切る。Cloud Agent の checkout は起動時のスナップショットで、リモートの `main` より遅れていることがある。ブランチを切る前、および作業完了前に `bash scripts/ensure_branch_includes_main.sh` を実行する。失敗したら `git fetch origin main` のあと `origin/main` から切り直すか、`git merge origin/main` で取り込んでから続ける。ローカルの `main` やスナップショットの HEAD からは切らない
 - 1 Issue = 1 PR。UIに関わる変更はスマホ実機（Codespaces ポートフォワード）で確認してからマージ
 - PR 前に `ruff check .` / `pytest` / `npm run lint` / `npm run build` がすべて通ること
 - API を追加・変更した場合は `docs/architecture.md` の API 表を更新する
@@ -191,6 +200,7 @@ PR 本文の Test plan は「これから人が確認するリスト」ではな
 ## 作業完了条件
 
 Claude は作業完了報告の前に、必ず`bash scripts/quality-check.sh`を実行すること。
+このスクリプトは最初に `scripts/ensure_branch_includes_main.sh` を実行し、HEAD が `origin/main` を含まなければテストの前に失敗する。
 実行できない場合は、完了報告してはならない。
 その場合は以下を報告すること。
 

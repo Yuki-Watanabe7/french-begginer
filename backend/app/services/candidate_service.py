@@ -32,6 +32,7 @@ from app.domain.tutor import (
 from app.repositories.exceptions import DuplicateEntityError, ReferentialIntegrityError
 from app.repositories.protocols import (
     CandidatePromotionRepository,
+    KnownItemRepository,
     LearningItemCandidateRepository,
     LearningItemRepository,
     SourceDocumentRepository,
@@ -51,6 +52,8 @@ class CandidateView:
 
     candidate: LearningItemCandidate
     evidence_text: str
+    learning_item_id: str | None = None
+    explicit_known: bool = False
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,7 @@ class _CandidateStore(Protocol):
     learning_items: LearningItemRepository
     learning_item_candidates: LearningItemCandidateRepository
     candidate_promotions: CandidatePromotionRepository
+    known_items: KnownItemRepository
 
 
 def build_candidate_service(
@@ -86,6 +90,7 @@ def build_candidate_service(
         items=store.learning_items,
         candidates=store.learning_item_candidates,
         promotions=store.candidate_promotions,
+        known=store.known_items,
         extraction=extraction,
     )
 
@@ -98,12 +103,14 @@ class CandidateService:
         items: LearningItemRepository,
         candidates: LearningItemCandidateRepository,
         promotions: CandidatePromotionRepository,
+        known: KnownItemRepository,
         extraction: ExtractionService,
     ) -> None:
         self._sources = sources
         self._items = items
         self._candidates = candidates
         self._promotions = promotions
+        self._known = known
         self._extraction = extraction
 
     def extract_for_source(self, source_id: str) -> ExtractCandidatesResult:
@@ -309,7 +316,20 @@ class CandidateService:
             )
         except ValueError:
             evidence_text = ""
-        return CandidateView(candidate=candidate, evidence_text=evidence_text)
+        learning_item_id = None
+        explicit_known = False
+        if candidate.status == "accepted":
+            item = self._find_matching_item(candidate)
+            if item is not None:
+                learning_item_id = item.id
+                override = self._known.get(item.id)
+                explicit_known = override is not None and override.active
+        return CandidateView(
+            candidate=candidate,
+            evidence_text=evidence_text,
+            learning_item_id=learning_item_id,
+            explicit_known=explicit_known,
+        )
 
 
 def _index_by_normalization_key(

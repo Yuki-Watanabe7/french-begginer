@@ -157,6 +157,16 @@ export function tutorCandidateFetchErrorMessage(error: unknown): string {
   return '学習候補の取得に失敗しました。通信環境を確認して再度お試しください'
 }
 
+export function tutorKnownItemErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 404) {
+    return '学習項目が見つかりません'
+  }
+  if (error instanceof ApiError && error.status >= 500) {
+    return 'サーバーでエラーが発生しました。時間をおいて再度お試しください'
+  }
+  return '操作に失敗しました。通信環境を確認して再度お試しください'
+}
+
 export function tutorCandidateActionErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 404) {
@@ -239,7 +249,14 @@ export const REASON_CODE_LABELS: Record<ReasonCode, string> = {
   LEVEL_FIT: '現在の学習レベルに近い項目です',
   HIGH_INTEREST: '関心の高い教材に出てきた表現です',
   HIGH_IMPORTANCE: '優先して覚えたい項目です',
+  PATTERN_RECENT_ERRORS: '最近、同じ種類の項目で間違いが続いています',
+  PRODUCTION_PATTERN_WEAKNESS: '最近、同じ種類の項目の自力回答で間違いが続いています',
 }
+
+const PATTERN_REASON_CODES = new Set<ReasonCode>([
+  'PATTERN_RECENT_ERRORS',
+  'PRODUCTION_PATTERN_WEAKNESS',
+])
 
 const KNOWN_REASON_CODES = new Set<string>(Object.keys(REASON_CODE_LABELS))
 
@@ -261,6 +278,25 @@ export function visibleReasonLabels(
     if (labels.length >= limit) break
   }
   return labels
+}
+
+/** 苦手パターンは項目名を含む explanation を、それ以外は短いラベルを出す。 */
+export function visibleEntryReasons(
+  entry:
+    | {
+        reason_codes?: readonly string[] | null
+        explanation?: string | null
+      }
+    | null
+    | undefined,
+): string[] {
+  if (!entry?.reason_codes || entry.reason_codes.length === 0) return []
+  const hasPattern = entry.reason_codes.some(
+    code => isReasonCode(code) && PATTERN_REASON_CODES.has(code),
+  )
+  const explanation = entry.explanation?.trim()
+  if (hasPattern && explanation) return [explanation]
+  return visibleReasonLabels(entry.reason_codes)
 }
 
 export function todayActivityLabel(kind: ActivityKind): string {

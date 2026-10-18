@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
+from app.domain.known_item_policy import KnownItemEvent, KnownItemOverride
 from app.domain.tutor import (
     CandidateStatus,
     LearnerState,
@@ -154,5 +155,28 @@ class ReviewScheduleRepository(Protocol):
 
         途中失敗時は既存 schedule を残し、中途半端な置換結果は残さない。
         空なら当該 Item の schedule を削除する。
+        """
+        ...
+
+
+class KnownItemRepository(Protocol):
+    """explicit known の現在値と操作履歴。LearningItem.status は触らない。"""
+
+    def get(self, item_id: str) -> KnownItemOverride | None: ...
+
+    def list_events(self, item_id: str) -> list[KnownItemEvent]:
+        """occurred_at 昇順、同一時刻は id 昇順。"""
+        ...
+
+    def list_active_ids(self) -> set[str]:
+        """現在 explicit known の LearningItem id。"""
+        ...
+
+    def append_event_and_upsert(
+        self, event: KnownItemEvent, override: KnownItemOverride
+    ) -> tuple[KnownItemEvent, KnownItemOverride]:
+        """操作履歴の追加と現在値の更新を同一トランザクションで行う。
+
+        duplicate event ID は拒否し、どちらも変更しない。
         """
         ...

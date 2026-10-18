@@ -60,6 +60,9 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/items/{item_id}/reviews` | 復習イベントを記録し、LearnerState と ReviewSchedule を更新する |
 | GET | `/api/tutor/reviews/due` | 現在 due の LearningItem を返す。任意時刻の query は持たない |
 | GET | `/api/tutor/reviews/queue` | direction-aware な due review queue。`limit` 付き。任意時刻の query は持たない |
+| POST | `/api/tutor/items/{item_id}/known` | 既知として新規学習から外す。再指定は冪等。`LearningItem.status` は変えない。存在しない Item は 404 |
+| POST | `/api/tutor/items/{item_id}/known/undo` | 既知指定を取り消して新規学習へ戻せるようにする。指定が無いときも冪等。存在しない Item は 404 |
+| GET | `/api/tutor/items/{item_id}/known` | explicit known の現在値と更新時刻。未指定でも Item があれば 200。存在しない Item は 404 |
 
 ### GET /api/tutor/sources クエリパラメータ
 
@@ -78,6 +81,10 @@ SQLite (初期) → PostgreSQL (将来)
 | `limit` | 1〜100 の整数 | `50` | 取得件数。`created_at` 昇順（同一時刻は `id` 昇順）。active のみ。不正値は 422 |
 
 0件でも 200 + `[]`。suspended / mastered は含めない。
+
+`POST /api/tutor/items/{item_id}/known` は explicit known を記録する。これは `mastered` とは別で、新規学習の候補から外すための指定である。due review と `LearningItem.status` は変えない。`POST .../known/undo` で戻せる。応答に習熟スコアや `mastered` は含めない。
+
+Exercise の取得と回答は、同じ LearningEvent 履歴から cloze の出典文脈を再構成する。複数の有効な SourceRef があるときは直近の cloze 文脈を避け、履歴が空なら最も古い Source を使う。選択理由と `context-rotation-v1` は LearningEvent.metadata に残る。エンドポイントは増えない。
 
 ### GET /api/tutor/reviews/queue
 
@@ -266,6 +273,10 @@ backend/app/
 │   ├── recommendation_signal.py  # 推薦入力の signal snapshot（Issue #175）
 │   ├── recommendation_ranking.py  # 説明可能な ranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
+│   ├── admission_policy.py     # 新規LearningItemの流入制御（Issue #200）
+│   ├── known_item_policy.py    # 既知項目の explicit known と auto-skip（Issue #201）
+│   ├── context_selection.py    # 複数Source文脈の context rotation（Issue #202）
+│   ├── weakness_pattern.py     # 横断の苦手パターン検出（Issue #203）
 │   ├── today_session.py        # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
 │   └── conjugation_adapter.py
 ├── ingestion/    # Web URL、PDF、YouTube、字幕、テキスト / 会話 JSON（Issue #190 / #191 / #192 / #194）。domain からは依存しない
@@ -297,7 +308,8 @@ backend/app/
     ├── exercise_service.py        # Exercise 取得・採点・LearningEvent 記録（Issue #149）
     ├── practice_session_service.py  # Practice Session 組み立て（Issue #150）
     ├── review_session_service.py  # Review Practice Session 組み立て（Issue #164）
-    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）
+    ├── weakness_pattern_service.py  # LearningEvent 横断の苦手パターン（Issue #203）
+    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。既知は新規だけ除外し、未学習は admission 通過後。苦手パターンは補助 signal
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。

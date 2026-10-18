@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
+from app.domain.context_selection import context_usages_from_events
 from app.domain.review_queue import MAX_QUEUE_LIMIT
 from app.domain.review_session import (
     DEFAULT_QUESTION_COUNT,
@@ -20,6 +21,7 @@ from app.domain.review_session import (
     build_review_practice_session,
 )
 from app.repositories.protocols import (
+    LearningEventRepository,
     LearningItemRepository,
     SourceDocumentRepository,
 )
@@ -30,6 +32,7 @@ from app.services.tutor_service import TutorService
 class _ReviewSessionStore(Protocol):
     source_documents: SourceDocumentRepository
     learning_items: LearningItemRepository
+    learning_events: LearningEventRepository
 
 
 def build_review_session_service(
@@ -40,6 +43,7 @@ def build_review_session_service(
     return ReviewSessionService(
         sources=store.source_documents,
         items=store.learning_items,
+        events=store.learning_events,
         tutor=tutor,
     )
 
@@ -50,10 +54,12 @@ class ReviewSessionService:
         *,
         sources: SourceDocumentRepository,
         items: LearningItemRepository,
+        events: LearningEventRepository,
         tutor: TutorService,
     ) -> None:
         self._sources = sources
         self._items = items
+        self._events = events
         self._tutor = tutor
 
     def create_session(
@@ -69,6 +75,10 @@ class ReviewSessionService:
         新規 / 未 due Item は混ぜない。Session は保存しない。
         """
         queue = self._tutor.list_review_queue(now, limit=MAX_QUEUE_LIMIT)
+        usages = {
+            item_id: context_usages_from_events(self._events.list_by_item(item_id))
+            for item_id in dict.fromkeys(entry.item.id for entry in queue.entries)
+        }
         try:
             return build_review_practice_session(
                 queue.entries,
@@ -76,6 +86,7 @@ class ReviewSessionService:
                 sources=self._sources.list(),
                 question_count=question_count,
                 seed=DEFAULT_REVIEW_SESSION_SEED if seed is None else seed,
+                context_usages_by_item=usages,
             )
         except InvalidReviewSessionRequestError as exc:
             raise InvalidReviewSessionError(str(exc)) from exc

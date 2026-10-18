@@ -35,6 +35,7 @@ Source / LearningItem / LearnerState / ReviewSchedule / LearningEvent
 5. CEFR level fit: item_level / learner_level / level_distance
 6. Source recency / interest: source_recency_days / source_ref_count / interest_weight
 7. item importance: importance_weight
+8. weakness pattern: 呼び出し側が渡す横断苦手 hint。未指定は空で、苦手と推測しない
 """
 
 from __future__ import annotations
@@ -56,13 +57,17 @@ from app.domain.tutor import (
     SourceDocument,
     SourceRef,
 )
+from app.domain.weakness_pattern import WeaknessPatternHint
 
 # ---------------------------------------------------------------------------
 # 定数
 # ---------------------------------------------------------------------------
 
-FEATURE_VERSION = "signal-v1"
-"""このモジュールが書き込む feature_version。スキーマ変更時は bump する。"""
+FEATURE_VERSION = "signal-v2"
+"""このモジュールが書き込む feature_version。スキーマ変更時は bump する。
+
+signal-v2 は横断苦手パターンの補助 hint（空なら signal-v1 と同じ特徴量）を足す。
+"""
 
 RECENT_EVENT_WINDOW = 10
 """recent error rate 算出に使う直近 N 件。"""
@@ -167,6 +172,13 @@ class RecommendationSignalSnapshot(BaseModel):
     # item importance
     importance_weight: float = Field(ge=0.0)
     """LearningItem.metadata['importance'] があれば使う。なければ neutral（1.0）。"""
+
+    weakness_patterns: tuple[WeaknessPatternHint, ...] = ()
+    """検出済みの横断苦手パターン。空は「パターンなし」であり、未計算の推測ではない。
+
+    複数 Item の集計が必要なため extract 自身は計算しない。呼び出し側が
+    `aggregate_weakness_patterns` の結果から渡す。
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +327,7 @@ def extract_recommendation_signal(
     events_by_direction: dict[SkillDirection, Sequence[LearningEvent]] | None = None,
     sources_by_id: dict[str, SourceDocument] | None = None,
     learner_level: CefrLevel | None = None,
+    weakness_patterns: Sequence[WeaknessPatternHint] = (),
     now: datetime,
 ) -> RecommendationSignalSnapshot:
     """LearningItem の推薦特徴量を RecommendationSignalSnapshot として返す。
@@ -336,6 +349,9 @@ def extract_recommendation_signal(
         None = SourceRef があっても recency neutral。
     learner_level:
         学習者の CEFR レベル設定。None なら DEFAULT_LEARNER_LEVEL を使う。
+    weakness_patterns:
+        この Item が根拠になっている検出済みパターン。未指定は空。
+        渡された hint を並べるだけで、ここでは苦手判定をしない。
     now:
         snapshot 生成時刻（due 判定・overdue 算出の基準）。wall clock を呼ばない。
     """
@@ -368,6 +384,15 @@ def extract_recommendation_signal(
     importance_weight = float(
         item.metadata.get("importance_weight", NEUTRAL_IMPORTANCE_WEIGHT)
     )
+    ordered_patterns = tuple(
+        sorted(
+            {
+                (hint.pattern_key, hint.skill_direction): hint
+                for hint in weakness_patterns
+            }.values(),
+            key=lambda hint: (hint.pattern_key, hint.skill_direction),
+        )
+    )
 
     return RecommendationSignalSnapshot(
         learning_item_id=item.id,
@@ -382,4 +407,5 @@ def extract_recommendation_signal(
         source_ref_count=len(item.source_refs),
         interest_weight=interest_weight,
         importance_weight=importance_weight,
+        weakness_patterns=ordered_patterns,
     )

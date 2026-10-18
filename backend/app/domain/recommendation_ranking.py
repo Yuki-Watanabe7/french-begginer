@@ -34,13 +34,18 @@ from app.domain.recommendation_signal import (
     RecommendationSignalSnapshot,
 )
 from app.domain.tutor import SkillDirection
+from app.domain.weakness_pattern import WeaknessPatternHint
 
 # ---------------------------------------------------------------------------
 # 定数（policy_version と weights を一元管理）
 # ---------------------------------------------------------------------------
 
-POLICY_VERSION = "ranking-v1"
-"""このモジュールが書き込む policy_version。weights / 式の変更時は bump する。"""
+POLICY_VERSION = "ranking-v2"
+"""このモジュールが書き込む policy_version。weights / 式の変更時は bump する。
+
+ranking-v2 は pattern_weakness を独立 component として足す。hint が空のとき
+寄与は 0 で、ranking-v1 の他 component と同じ式になる。
+"""
 
 ActivityKind = Literal["review", "new_practice"]
 """review = 期限到来の復習 / new_practice = 未学習の新規練習。"""
@@ -62,6 +67,8 @@ ReasonCode = Literal[
     "LEVEL_FIT",
     "HIGH_INTEREST",
     "HIGH_IMPORTANCE",
+    "PATTERN_RECENT_ERRORS",
+    "PRODUCTION_PATTERN_WEAKNESS",
 ]
 """ユーザー向け説明へ変換可能な reason code。内部 score 値そのものではない。"""
 
@@ -75,6 +82,7 @@ COMPONENT_NAMES: tuple[str, ...] = (
     "source_recency",
     "interest",
     "importance",
+    "pattern_weakness",
 )
 """score component の安定した列挙順。"""
 
@@ -88,12 +96,14 @@ COMPONENT_WEIGHTS: dict[str, float] = {
     "source_recency": 0.08,
     "interest": 0.06,
     "importance": 0.05,
+    "pattern_weakness": 0.03,
 }
 """各 component の weight。合計は 1 を超えてよい（絶対寄与）。
 
 due review が新規候補に埋もれないよう、overdue を最大にする。
-interest / recency / importance / level_fit の最大合計は
-「ちょうど due」の overdue 寄与を超えない。
+interest / recency / importance / level_fit / pattern_weakness の最大合計は
+「ちょうど due」の overdue 寄与を超えない。pattern_weakness は補助 signal で、
+苦手パターンがあっても due 優先は維持する。
 """
 
 DUE_BASE = 0.80
@@ -143,6 +153,8 @@ REASON_TO_COMPONENT: dict[ReasonCode, str] = {
     "RECENT_SOURCE": "source_recency",
     "HIGH_INTEREST": "interest",
     "HIGH_IMPORTANCE": "importance",
+    "PATTERN_RECENT_ERRORS": "pattern_weakness",
+    "PRODUCTION_PATTERN_WEAKNESS": "pattern_weakness",
 }
 """reason code → 対応する score component。説明と寄与の対応を固定する。"""
 
@@ -292,6 +304,23 @@ def _importance_raw(snapshot: RecommendationSignalSnapshot) -> float:
     return _clamp01(extra / IMPORTANCE_RANGE)
 
 
+def _pattern_hints(
+    snapshot: RecommendationSignalSnapshot, direction: SkillDirection
+) -> tuple[WeaknessPatternHint, ...]:
+    return tuple(
+        hint for hint in snapshot.weakness_patterns if hint.skill_direction == direction
+    )
+
+
+def _pattern_weakness_raw(
+    snapshot: RecommendationSignalSnapshot, direction: SkillDirection
+) -> float:
+    """検出済み hint がある direction だけ 1。無いときは 0。重ねて加点しない。"""
+    if _pattern_hints(snapshot, direction):
+        return 1.0
+    return 0.0
+
+
 # ---------------------------------------------------------------------------
 # reason codes
 # ---------------------------------------------------------------------------
@@ -346,6 +375,15 @@ def _reason_codes(
         "HIGH_IMPORTANCE",
         extra_ok=snapshot.importance_weight > NEUTRAL_IMPORTANCE_WEIGHT,
     )
+    pattern_hints = _pattern_hints(snapshot, direction)
+    _maybe(
+        "PATTERN_RECENT_ERRORS",
+        extra_ok=direction == "recognition" and bool(pattern_hints),
+    )
+    _maybe(
+        "PRODUCTION_PATTERN_WEAKNESS",
+        extra_ok=direction == "production" and bool(pattern_hints),
+    )
 
     candidates.sort()
     return tuple(code for _, __, code in candidates)
@@ -379,6 +417,7 @@ def score_recommendation(
         "source_recency": _source_recency_raw(snapshot),
         "interest": _interest_raw(snapshot),
         "importance": _importance_raw(snapshot),
+        "pattern_weakness": _pattern_weakness_raw(snapshot, skill_direction),
     }
 
     components: dict[str, float] = {}
