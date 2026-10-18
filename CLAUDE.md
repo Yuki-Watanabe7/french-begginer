@@ -183,6 +183,7 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 
 ## 開発方針
 
+- 実装ブランチは `origin/main` から切る。Cloud Agent の checkout は起動時のスナップショットで、リモートの `main` より遅れていることがある。ブランチを切る前、および作業完了前に `bash scripts/ensure_branch_includes_main.sh` を実行する。失敗したら `git fetch origin main` のあと `origin/main` から切り直すか、`git merge origin/main` で取り込んでから続ける。ローカルの `main` やスナップショットの HEAD からは切らない
 - 1 Issue = 1 PR。UIに関わる変更はスマホ実機（Codespaces ポートフォワード）で確認してからマージ
 - PR 前に `ruff check .` / `pytest` / `npm run lint` / `npm run build` がすべて通ること
 - API を追加・変更した場合は `docs/architecture.md` の API 表を更新する
@@ -199,6 +200,7 @@ PR 本文の Test plan は「これから人が確認するリスト」ではな
 ## 作業完了条件
 
 Claude は作業完了報告の前に、必ず`bash scripts/quality-check.sh`を実行すること。
+このスクリプトは最初に `scripts/ensure_branch_includes_main.sh` を実行し、HEAD が `origin/main` を含まなければテストの前に失敗する。
 実行できない場合は、完了報告してはならない。
 その場合は以下を報告すること。
 

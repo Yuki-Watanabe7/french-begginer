@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd backend
+root=$(cd "$(dirname "$0")/.." && pwd)
+bash "$root/scripts/ensure_branch_includes_main.sh"
+
+cd "$root/backend"
 uv sync --locked --group dev
 uv run --group dev ruff check .
 uv run --group dev ruff format --check .
 uv run --group dev pytest
 
-cd ../frontend
+cd "$root/frontend"
 npm ci --include=dev
 npm run lint
 npm run test
