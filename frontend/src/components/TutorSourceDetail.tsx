@@ -1,4 +1,5 @@
 import { TutorCandidateList } from './TutorCandidateList'
+import { TutorSourceLearningSummary } from './TutorSourceLearningSummary'
 import { useTutorSourceDetail } from '../hooks/useTutorSourceDetail'
 import {
   sourceContentBlocks,
@@ -131,6 +132,7 @@ export function TutorSourceDetail({
           学習する
         </button>
       )}
+      <TutorSourceLearningSummary sourceId={source.id} />
       <TutorCandidateList sourceId={source.id} segments={source.segments} />
       {justSaved && onAddAnother && (
         <button type="button" style={styles.primaryBtn} onClick={onAddAnother}>

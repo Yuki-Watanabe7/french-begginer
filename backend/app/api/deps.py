@@ -34,6 +34,10 @@ from app.services.review_session_service import (
     ReviewSessionService,
     build_review_session_service,
 )
+from app.services.source_learning_summary_service import (
+    SourceLearningSummaryService,
+    build_source_learning_summary_service,
+)
 from app.services.subtitle_ingestion import SubtitleIngestionService
 from app.services.text_file_ingestion import TextFileIngestionService
 from app.services.today_learning_service import (
@@ -71,6 +75,12 @@ def get_candidate_service(
     extraction: Annotated[ExtractionService, Depends(get_extraction_service)],
 ) -> CandidateService:
     return build_candidate_service(store, extraction)
+
+
+def get_source_learning_summary_service(
+    store: Annotated[TutorSqliteStore, Depends(get_tutor_store)],
+) -> SourceLearningSummaryService:
+    return build_source_learning_summary_service(store)
 
 
 def get_exercise_service(

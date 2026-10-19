@@ -4373,6 +4373,75 @@ reason code は次のとおり。`STABLE_PROGRESS` は他と併記しない。
 | Phase 5 の due 優先を維持する | `test_explicit_constraints_keep_the_phase5_plan` |
 | OpenAI / LLM / wall clock 非依存 | `test_module_does_not_import_llm_or_clock` |
 
+## Phase 7 — Source単位の学習成果（Issue #205）
+
+Source を追加したあと、「この教材に結びついた項目が、いまどの状態か」を
+Source 詳細で短く示す。因果的な「この Source のおかげで習得した」とは読まない。
+高度な dashboard、学習時間予測、Source 間ランキングは扱わない。
+
+```text
+Candidate（この Source だけ）
++ SourceRef で結びついた LearningItem
++ LearnerState / ReviewSchedule / explicit known
+  -> SourceLearningSummary
+```
+
+実装は `domain.source_learning_summary.summarize_source_learning`。
+`SourceLearningSummaryService` は保存済みデータを渡し、結果を保存しない。
+`GET /api/tutor/sources/{source_id}/learning-summary` はサーバー時刻で due を判定し、
+任意時刻の query は受け取らない。Frontend は Source 詳細の「学習状況」に、
+採用数、学習開始済み、復習待ち、既知/十分定着、見て分かる / 自分で言うの差だけを出す。
+
+### 数え方
+
+| フィールド | 意味 |
+|------------|------|
+| `candidate_count` | この Source の Candidate 全件 |
+| `pending_candidate_count` | status が `candidate` |
+| `accepted_candidate_count` | status が `accepted` |
+| `rejected_item_count` | status が `rejected` の Candidate。LearningItem にはならない |
+| `accepted_item_count` | SourceRef がこの Source を指す LearningItem のユニーク件数。手入力の参照も含む |
+| `unseen_item_count` | 関連 item のうち、未回答で mastered / explicit known / suspended でないもの |
+| `active_item_count` | status が active、explicit known ではなく、回答が1件以上 |
+| `suspended_item_count` | explicit known と mastered を除いた suspended |
+| `mastered_or_known_count` | status が mastered、または explicit known。両方でも1件 |
+| `started_item_count` | 回答が1件以上ある関連 item |
+| `due_direction_count` | status が active の関連 item で、`due_at <= now` の direction 数 |
+| `attempts` / `correct_rate` | 関連 item の LearnerState を1件につき1回足した値。未回答の rate は null |
+| `recognition` / `production` | `by_direction` の回答数・正答率・due 数 |
+| `recent_activity_at` | 関連 item の `last_reviewed_at` の最大値。known の更新時刻は使わない |
+
+同じ LearningItem が複数 Source に紐づく場合、各 Source の関連 item として表示する。
+その Source の中では SourceRef が重複しても、accepted Candidate が複数でも、
+LearnerState は1回だけ足す。LearningEvent は読み直さない。
+Source ごとのサマリーを合計すると、複数 Source にまたがる item が重複する。
+その合計は全体成果ではない。
+
+explicit known は due を消さない。`mastered` と `suspended` は due に数えない。
+集計の版は `source-learning-summary-v1`。attribution は
+`related_item_current_state` で固定する。
+
+### スコープ外
+
+- analytics dashboard
+- 学習時間の予測
+- Source 間のランキング
+- 因果的な成果帰属
+- SourceType ごとの専用集計
+
+| 観点 | 自動テスト |
+|------|------------|
+| Source 単位の集計 | `test_source_summary_counts_each_related_item_once` / `test_persisted_summary_counts_accept_reject_and_due` |
+| accepted / rejected / unseen / due | `test_accepted_rejected_unseen_and_due` |
+| recognition / production | `test_recognition_and_production_stay_separate` |
+| multi-source item を1 Source 内で二重計上しない | `test_multi_source_item_is_not_double_counted_inside_one_summary` / `test_merged_multi_source_item_keeps_events_once` |
+| event がない Source | `test_source_without_events_has_no_rate_or_activity` |
+| DB reopen | `test_persisted_summary_counts_accept_reject_and_due` |
+| URL / PDF / transcript / conversation で共通 | `test_summary_is_the_same_for_url_pdf_transcript_and_conversation` |
+| SourceType で分岐しない | `test_summary_does_not_branch_on_source_type` |
+| API | `test_learning_summary_api_returns_related_current_state` |
+| UI の loading / error / empty と mobile 幅 | `TutorSourceDetail.test.tsx` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -4450,3 +4519,5 @@ Phase 6 自体の完了条件と Phase 7 への引継ぎは、上記
 「Phase 7 — 苦手文法・表現パターンの検出」を正とする。
 今日の学習負荷の自動調整は、上記
 「Phase 7 — 学習負荷の自動調整」を正とする。
+Source 単位の学習成果は、上記
+「Phase 7 — Source単位の学習成果」を正とする。

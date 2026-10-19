@@ -5,6 +5,7 @@ import { TutorFlow } from '../components/TutorFlow'
 import {
   createTutorSource,
   fetchCandidates,
+  fetchSourceLearningSummary,
   ingestTutorUrl,
   fetchReviewQueue,
   fetchTodayPlan,
@@ -14,6 +15,7 @@ import {
 } from '../api/tutor'
 import type { SourceDocument, SourceSummary } from '../types'
 import { EMPTY_REVIEW_QUEUE } from './reviewQueueFixtures'
+import { EMPTY_SOURCE_LEARNING_SUMMARY } from './sourceLearningSummaryFixtures'
 import { EMPTY_TODAY_PLAN } from './todayPlanFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
@@ -24,6 +26,7 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorSource: vi.fn(),
     createTutorSource: vi.fn(),
     fetchCandidates: vi.fn(),
+    fetchSourceLearningSummary: vi.fn(),
     ingestTutorUrl: vi.fn(),
     fetchReviewQueue: vi.fn(),
     fetchTodayPlan: vi.fn(),
@@ -36,6 +39,7 @@ const mockGet = vi.mocked(fetchTutorSource)
 const mockCreate = vi.mocked(createTutorSource)
 const mockIngestUrl = vi.mocked(ingestTutorUrl)
 const mockFetchCandidates = vi.mocked(fetchCandidates)
+const mockSummary = vi.mocked(fetchSourceLearningSummary)
 const mockQueue = vi.mocked(fetchReviewQueue)
 const mockPlan = vi.mocked(fetchTodayPlan)
 const mockTodaySession = vi.mocked(createTodaySession)
@@ -59,6 +63,7 @@ describe('TutorFlow', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockFetchCandidates.mockResolvedValue([])
+    mockSummary.mockResolvedValue(EMPTY_SOURCE_LEARNING_SUMMARY)
     mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
     mockPlan.mockResolvedValue(EMPTY_TODAY_PLAN)
   })

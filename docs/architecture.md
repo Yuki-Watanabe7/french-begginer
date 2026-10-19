@@ -44,6 +44,7 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/sources/ingest/conversation` | structured conversation JSON を multipart で取り込み、話者と発話時刻付きの SourceDocument にする。同じファイルと本文は既存を返す。指定不正・形式不正・未知フィールドは 400、サイズ超過は 413、JSON 以外は 415、本文が空なら 422。添付は取得しない |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`created_at` 降順）。全文ではなく SourceSummary を返す |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得する |
+| GET | `/api/tutor/sources/{source_id}/learning-summary` | この Source に関連する学習項目の現在状態。Candidate / Item / LearnerState / ReviewSchedule を集計し、結果は保存しない。存在しない Source は 404。任意時刻の query は受け取らない |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から学習候補を抽出し保存する。存在しない Source は 404。API key 未設定・一時障害は 503、LLM 応答不正は 502 |
 | GET | `/api/tutor/sources/{source_id}/candidates` | Source 単位の Candidate 一覧。`status` と本文から再構成した `evidence_text` を含む。provider 生応答は返さない |
 | POST | `/api/tutor/candidates/{candidate_id}/accept` | Candidate を採用し LearningItem を作成、または既存 Item へ SourceRef を追加する。再 accept は冪等。rejected からの accept は 409 |
@@ -71,6 +72,8 @@ SQLite (初期) → PostgreSQL (将来)
 | `limit` | 1〜100 の整数 | `50` | 取得件数。`created_at` 降順（同一時刻は `id` 昇順）。不正値は 422 |
 
 レスポンスは全文ではなく `SourceSummary`（`content_preview` は先頭120文字）。0件でも 200 + `[]`。
+
+`GET /api/tutor/sources/{source_id}/learning-summary` は、その Source に SourceRef で結びついた LearningItem の現在状態を返す。同じ item が複数 Source にあっても、1つの Source の中では成果を1回だけ数える。Source ごとの結果を足して全体の成果にはしない。SourceType では分岐しない。
 
 `POST /api/tutor/sources` は手入力のまま `content` を正規化せず保存する。`GET /api/tutor/sources/{source_id}` の `SourceDocument` は、Phase 6 の ingestion で作った Source について `content_hash` / `ingestion_version` / `provenance` / `segments` を返す。手入力の既存行ではこれらは空である。Web URL は `POST /api/tutor/sources/ingest/url`、テキスト PDF は `POST /api/tutor/sources/ingest/pdf`、YouTube の公開字幕は `POST /api/tutor/sources/ingest/youtube`、SRT / VTT は `POST /api/tutor/sources/ingest/subtitle`、音声の文字起こしは `POST /api/tutor/sources/ingest/audio`、テキスト / Markdown は `POST /api/tutor/sources/ingest/text-file`、会話 JSON は `POST /api/tutor/sources/ingest/conversation`。
 

@@ -8,6 +8,7 @@ import {
   createTutorSource,
   extractCandidates,
   fetchCandidates,
+  fetchSourceLearningSummary,
   fetchReviewQueue,
   fetchTodayPlan,
   fetchTutorSource,
@@ -25,6 +26,7 @@ import type {
   SourceSummary,
 } from '../types'
 import { EMPTY_REVIEW_QUEUE } from './reviewQueueFixtures'
+import { EMPTY_SOURCE_LEARNING_SUMMARY } from './sourceLearningSummaryFixtures'
 import { EMPTY_TODAY_PLAN } from './todayPlanFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
@@ -35,6 +37,7 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorSource: vi.fn(),
     createTutorSource: vi.fn(),
     fetchCandidates: vi.fn(),
+    fetchSourceLearningSummary: vi.fn(),
     extractCandidates: vi.fn(),
     acceptCandidate: vi.fn(),
     rejectCandidate: vi.fn(),
@@ -47,6 +50,7 @@ const mockList = vi.mocked(fetchTutorSources)
 const mockGet = vi.mocked(fetchTutorSource)
 const mockCreate = vi.mocked(createTutorSource)
 const mockFetchCandidates = vi.mocked(fetchCandidates)
+const mockSummary = vi.mocked(fetchSourceLearningSummary)
 const mockExtract = vi.mocked(extractCandidates)
 const mockAccept = vi.mocked(acceptCandidate)
 const mockReject = vi.mocked(rejectCandidate)
@@ -262,6 +266,7 @@ describe('Tutor Phase 2 vertical slice', () => {
     vi.resetAllMocks()
     mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
     mockPlan.mockResolvedValue(EMPTY_TODAY_PLAN)
+    mockSummary.mockResolvedValue(EMPTY_SOURCE_LEARNING_SUMMARY)
   })
 
   it('抽出から根拠確認・採用・却下・再表示まで一本でつながる', async () => {

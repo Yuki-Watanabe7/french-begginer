@@ -52,6 +52,7 @@ backend/app/
 │   ├── recommendation_ranking.py  # 説明可能なranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
 │   ├── adaptive_plan.py  # 復習負債・誤答率に応じた今日の件数調整（Issue #204）
+│   ├── source_learning_summary.py  # Source単位の学習成果（Issue #205）
 │   ├── admission_policy.py  # 新規LearningItemの流入制御 admission policy（Issue #200）
 │   ├── known_item_policy.py # 既知項目の explicit known と conservative auto-skip（Issue #201）
 │   ├── context_selection.py # 複数Source文脈の context rotation（Issue #202）
@@ -88,6 +89,7 @@ backend/app/
     ├── practice_session_service.py  # Practice Session 組み立て
     ├── review_session_service.py  # Review Practice Session 組み立て
     ├── weakness_pattern_service.py  # 苦手パターンの算出（Issue #203）
+    ├── source_learning_summary_service.py  # Source単位の学習成果（Issue #205）
     └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。件数省略時は負荷を自動調整（Issue #204）
 ```
 
@@ -147,6 +149,7 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 | POST | `/api/tutor/sources/ingest/conversation` | structured conversation JSON を話者・発話時刻付き SourceDocument にする。同一ファイル・同一本文は既存を返す。未知の JSON は解釈しない |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`SourceSummary`） |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得 |
+| GET | `/api/tutor/sources/{source_id}/learning-summary` | この Source に関連する項目の現在の学習状態。結果は保存しない |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から Candidate を抽出して保存。再実行しても重複爆発しない |
 | GET | `/api/tutor/sources/{source_id}/candidates` | Source 単位の Candidate 一覧（status / evidence_text） |
 | POST | `/api/tutor/candidates/{candidate_id}/accept` | Candidate を採用し LearningItem を作成または既存へ統合 |

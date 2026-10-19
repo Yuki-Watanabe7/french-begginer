@@ -7,6 +7,7 @@ import {
   acceptCandidate,
   extractCandidates,
   fetchCandidates,
+  fetchSourceLearningSummary,
   fetchTutorSource,
   rejectCandidate,
 } from '../api/tutor'
@@ -16,12 +17,17 @@ import type {
   LearningItemCandidate,
   SourceDocument,
 } from '../types'
+import {
+  EMPTY_SOURCE_LEARNING_SUMMARY,
+  sourceLearningSummaryFixture,
+} from './sourceLearningSummaryFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
   const actual = await importOriginal<typeof import('../api/tutor')>()
   return {
     ...actual,
     fetchTutorSource: vi.fn(),
+    fetchSourceLearningSummary: vi.fn(),
     fetchCandidates: vi.fn(),
     extractCandidates: vi.fn(),
     acceptCandidate: vi.fn(),
@@ -30,6 +36,7 @@ vi.mock('../api/tutor', async importOriginal => {
 })
 
 const mockGet = vi.mocked(fetchTutorSource)
+const mockSummary = vi.mocked(fetchSourceLearningSummary)
 const mockFetchCandidates = vi.mocked(fetchCandidates)
 const mockExtract = vi.mocked(extractCandidates)
 const mockAccept = vi.mocked(acceptCandidate)
@@ -101,6 +108,7 @@ describe('TutorSourceDetail', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockFetchCandidates.mockResolvedValue([])
+    mockSummary.mockResolvedValue(EMPTY_SOURCE_LEARNING_SUMMARY)
   })
 
   it('title / content / note / 保存日時を表示する', async () => {
@@ -293,6 +301,7 @@ describe('TutorSourceDetail の学習候補', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockFetchCandidates.mockResolvedValue([])
+    mockSummary.mockResolvedValue(EMPTY_SOURCE_LEARNING_SUMMARY)
   })
 
   it('抽出ボタンと empty state を表示する', async () => {
@@ -444,5 +453,133 @@ describe('TutorSourceDetail の学習候補', () => {
     await userEvent.click(await screen.findByRole('button', { name: '学習候補を抽出' }))
     await screen.findByText('学習候補は見つかりませんでした')
     expect(screen.getByRole('button', { name: 'もう一度抽出する' })).toBeInTheDocument()
+  })
+})
+
+describe('TutorSourceDetail の学習状況', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mockFetchCandidates.mockResolvedValue([])
+    mockSummary.mockResolvedValue(EMPTY_SOURCE_LEARNING_SUMMARY)
+  })
+
+  it('採用前は empty を出し、候補のページ導線は残す', async () => {
+    const pdf: SourceDocument = {
+      id: 'src-pdf',
+      source_type: 'pdf',
+      title: 'Leçon',
+      content: 'Bonjour.\n\nAu revoir.',
+      language: 'fr',
+      created_at: '2026-08-23T12:00:00+00:00',
+      metadata: { page_count: 2 },
+      segments: [
+        { normalized_start: 0, normalized_end: 8, page_number: 1 },
+        { normalized_start: 10, normalized_end: 20, page_number: 2 },
+      ],
+    }
+    mockFetchCandidates.mockResolvedValue([
+      candidate({
+        evidence_span: { start: 10, end: 20 },
+        evidence_text: 'Au revoir.',
+      }),
+    ])
+    render(
+      <TutorSourceDetail sourceId="src-pdf" initialSource={pdf} onBackToList={() => {}} />,
+    )
+
+    expect(await screen.findByText('採用した学習項目はまだありません')).toBeInTheDocument()
+    expect(screen.getAllByText('2ページ').length).toBeGreaterThan(0)
+    expect(screen.queryByText('source-learning-summary-v1')).not.toBeInTheDocument()
+    expect(screen.queryByText('related_item_current_state')).not.toBeInTheDocument()
+    const section = screen.getByRole('region', { name: '学習状況' })
+    expect(section).toHaveStyle({ width: '100%', maxWidth: '100%', overflowWrap: 'anywhere' })
+  })
+
+  it('読み込み中と取得失敗からの再読み込みを扱う', async () => {
+    const pending = deferred<ReturnType<typeof sourceLearningSummaryFixture>>()
+    mockSummary.mockReturnValueOnce(pending.promise)
+    renderDetail()
+
+    expect(screen.getByText('学習状況を読み込み中...')).toBeInTheDocument()
+    pending.resolve(EMPTY_SOURCE_LEARNING_SUMMARY)
+    await screen.findByText('採用した学習項目はまだありません')
+
+    mockSummary.mockRejectedValueOnce(new ApiError(500, { detail: 'boom' }))
+    renderDetail()
+    await screen.findByText('学習状況を取得できませんでした。時間をおいて再度お試しください')
+    const retry = screen.getByRole('button', { name: '学習状況を再読み込み' })
+    expect(retry).toHaveStyle({ width: '100%', minHeight: '48px' })
+    mockSummary.mockResolvedValueOnce(
+      sourceLearningSummaryFixture({
+        accepted_item_count: 12,
+        started_item_count: 7,
+        due_direction_count: 3,
+        mastered_or_known_count: 2,
+        attempts: 4,
+        correct_count: 3,
+        correct_rate: 0.75,
+        recognition: {
+          skill_direction: 'recognition',
+          attempt_count: 4,
+          correct_count: 3,
+          correct_rate: 0.75,
+          due_count: 1,
+        },
+        production: {
+          skill_direction: 'production',
+          attempt_count: 3,
+          correct_count: 1,
+          correct_rate: 1 / 3,
+          due_count: 2,
+        },
+      }),
+    )
+    await userEvent.click(retry)
+    expect(await screen.findByTestId('source-learning-accepted')).toHaveTextContent(
+      '採用した項目 12',
+    )
+  })
+
+  it('関連項目の現在状態と direction の差を出す', async () => {
+    mockSummary.mockResolvedValue(
+      sourceLearningSummaryFixture({
+        accepted_item_count: 12,
+        started_item_count: 7,
+        due_direction_count: 3,
+        mastered_or_known_count: 2,
+        attempts: 4,
+        correct_count: 3,
+        correct_rate: 0.75,
+        recognition: {
+          skill_direction: 'recognition',
+          attempt_count: 4,
+          correct_count: 3,
+          correct_rate: 0.75,
+          due_count: 1,
+        },
+        production: {
+          skill_direction: 'production',
+          attempt_count: 3,
+          correct_count: 1,
+          correct_rate: 1 / 3,
+          due_count: 2,
+        },
+      }),
+    )
+    renderDetail()
+
+    expect(await screen.findByTestId('source-learning-accepted')).toHaveTextContent(
+      '採用した項目 12',
+    )
+    expect(screen.getByTestId('source-learning-started')).toHaveTextContent('学習開始済み 7')
+    expect(screen.getByTestId('source-learning-due')).toHaveTextContent('復習待ち 3')
+    expect(screen.getByTestId('source-learning-known')).toHaveTextContent('既知/十分定着 2')
+    expect(screen.getByText('見て分かる 3/4')).toBeInTheDocument()
+    expect(screen.getByText('自分で言う 1/3')).toBeInTheDocument()
+    expect(screen.getByText('正答 3/4')).toBeInTheDocument()
+    expect(screen.getByText('この教材に結びついた項目の、いまの状態です。')).toHaveStyle({
+      overflowWrap: 'anywhere',
+    })
+    expect(screen.queryByText('related_item_current_state')).not.toBeInTheDocument()
   })
 })
