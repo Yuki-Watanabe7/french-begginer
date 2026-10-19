@@ -14,6 +14,7 @@ uv run pytest                # 全テスト
 uv run pytest tests/test_api.py::test_health  # 単一テスト
     uv run python ../scripts/evaluate_tutor_extraction.py  # Tutor抽出の実LLM品質評価（任意。OPENAI_API_KEY が必要）
     uv run python ../scripts/evaluate_tutor_recommendations.py  # Tutor推薦品質の固定fixture評価（任意。LLM不要）
+    uv run python ../scripts/evaluate_tutor_learning_quality.py  # Tutor学習品質の複数日シミュレーション（任意。LLM不要）
     uv run python ../scripts/rebuild_review_schedules.py --check  # ReviewSchedule 不整合の検出（任意）
 ```
 
@@ -66,7 +67,7 @@ backend/app/
 │   ├── conjugation_adapter.py  # conjugation Item→既存動詞活用への安全な接続
 │   └── source_ingestion.py  # Source ingestion 共通契約（Issue #189）
 ├── ingestion/     # Web URL、PDF、YouTube 字幕、SRT / VTT、音声、テキスト / 会話 JSON（Issue #190 / #191 / #192 / #193 / #194）
-├── evaluation/    # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）
+├── evaluation/    # 抽出品質（Issue #136）、推薦品質fixture（Issue #180）、長期学習品質（Issue #206）
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/      # ユースケース（domain を組み合わせる処理）
