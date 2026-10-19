@@ -9,6 +9,7 @@ import {
   createTutorSource,
   extractCandidates,
   fetchCandidates,
+  fetchSourceLearningSummary,
   fetchTutorItem,
   fetchTutorItems,
   fetchTutorSource,
@@ -32,6 +33,7 @@ import type {
   SourceSummary,
 } from '../types'
 import { EMPTY_REVIEW_QUEUE } from './reviewQueueFixtures'
+import { EMPTY_SOURCE_LEARNING_SUMMARY } from './sourceLearningSummaryFixtures'
 import { EMPTY_TODAY_PLAN } from './todayPlanFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
@@ -42,6 +44,7 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorSource: vi.fn(),
     createTutorSource: vi.fn(),
     fetchCandidates: vi.fn(),
+    fetchSourceLearningSummary: vi.fn(),
     extractCandidates: vi.fn(),
     acceptCandidate: vi.fn(),
     rejectCandidate: vi.fn(),
@@ -69,6 +72,7 @@ const mockList = vi.mocked(fetchTutorSources)
 const mockGet = vi.mocked(fetchTutorSource)
 const mockCreate = vi.mocked(createTutorSource)
 const mockFetchCandidates = vi.mocked(fetchCandidates)
+const mockSummary = vi.mocked(fetchSourceLearningSummary)
 const mockExtract = vi.mocked(extractCandidates)
 const mockAccept = vi.mocked(acceptCandidate)
 const mockReject = vi.mocked(rejectCandidate)
@@ -405,6 +409,7 @@ describe('Tutor Phase 3 vertical slice', () => {
     ttsState.play = vi.fn()
     mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
     mockPlan.mockResolvedValue(EMPTY_TODAY_PLAN)
+    mockSummary.mockResolvedValue(EMPTY_SOURCE_LEARNING_SUMMARY)
   })
 
   it('採用した LearningItem から練習し、全形式を解いて結果まで一本でつながる', async () => {

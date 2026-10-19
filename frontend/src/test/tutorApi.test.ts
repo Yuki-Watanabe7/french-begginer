@@ -10,6 +10,7 @@ import {
   ingestTutorUrl,
   ingestTutorYoutube,
   fetchCandidates,
+  fetchSourceLearningSummary,
   fetchReviewQueue,
   fetchTodayPlan,
   createTodaySession,
@@ -187,6 +188,54 @@ describe('fetchTutorSources', () => {
     await fetchTutorSources({ limit: 2 })
 
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith('/api/tutor/sources?limit=2')
+  })
+})
+
+describe('fetchSourceLearningSummary', () => {
+  it('GET /api/tutor/sources/{id}/learning-summary を URL encode して取得する', async () => {
+    const summary = {
+      source_id: 'src/あ',
+      policy_version: 'source-learning-summary-v1',
+      attribution: 'related_item_current_state',
+      candidate_count: 0,
+      pending_candidate_count: 0,
+      accepted_candidate_count: 0,
+      accepted_item_count: 0,
+      rejected_item_count: 0,
+      unseen_item_count: 0,
+      active_item_count: 0,
+      suspended_item_count: 0,
+      mastered_or_known_count: 0,
+      started_item_count: 0,
+      due_direction_count: 0,
+      attempts: 0,
+      correct_count: 0,
+      correct_rate: null,
+      recognition: {
+        skill_direction: 'recognition',
+        attempt_count: 0,
+        correct_count: 0,
+        correct_rate: null,
+        due_count: 0,
+      },
+      production: {
+        skill_direction: 'production',
+        attempt_count: 0,
+        correct_count: 0,
+        correct_rate: null,
+        due_count: 0,
+      },
+      recent_activity_at: null,
+    }
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockJsonResponse(summary))
+
+    const sourceId = 'src/あ?x=1'
+    const result = await fetchSourceLearningSummary(sourceId)
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      `/api/tutor/sources/${encodeURIComponent(sourceId)}/learning-summary`,
+    )
+    expect(result).toEqual(summary)
   })
 })
 

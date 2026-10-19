@@ -131,6 +131,38 @@ export interface SourceDocument {
   segments?: SourceSegment[]
 }
 
+export interface DirectionLearningSummary {
+  skill_direction: 'recognition' | 'production'
+  attempt_count: number
+  correct_count: number
+  correct_rate: number | null
+  due_count: number
+}
+
+/** この Source に関連する項目の、いまの学習状態。因果帰属ではない。 */
+export interface SourceLearningSummary {
+  source_id: string
+  policy_version: string
+  attribution: 'related_item_current_state'
+  candidate_count: number
+  pending_candidate_count: number
+  accepted_candidate_count: number
+  accepted_item_count: number
+  rejected_item_count: number
+  unseen_item_count: number
+  active_item_count: number
+  suspended_item_count: number
+  mastered_or_known_count: number
+  started_item_count: number
+  due_direction_count: number
+  attempts: number
+  correct_count: number
+  correct_rate: number | null
+  recognition: DirectionLearningSummary
+  production: DirectionLearningSummary
+  recent_activity_at: string | null
+}
+
 export interface SourceSummary {
   id: string
   source_type: SourceType | string
