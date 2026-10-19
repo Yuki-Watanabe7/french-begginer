@@ -138,6 +138,17 @@ Phase 6 vertical slice と Exit Criteria（Issue #196）
   - score の絶対値は golden 固定しない。LLM-as-judge を唯一の gate にしない
   - 通常 CI は外部 API なしで通る
   - 原則は「Phase 5 — 推薦品質の固定 fixture と反実仮想テスト」を正とする
+- 学習品質（Phase 7）:
+  `backend/app/evaluation/learning_quality_fixtures.py`
+  / `backend/app/evaluation/learning_quality.py`
+  / `backend/tests/test_tutor_phase7_quality.py`
+  / `scripts/evaluate_tutor_learning_quality.py`
+  / `docs/tutor_learning_quality.md`
+  （Issue #206）
+  - 固定 clock の複数日 synthetic learner で admission / known / context / 弱点 / 負荷を同時に検証する
+  - 不変条件を主 gate にする。LLM-as-judge は使わない
+  - policy version と日次メトリクスをレポートに残す。通常 CI は外部 API なし
+  - 原則は「Phase 7 — 長期シミュレーションによる学習品質の回帰検証」を正とする
 - Phase 5 vertical slice: `backend/tests/test_tutor_phase5_vertical_slice.py`
   / `frontend/src/test/TutorPhase5Flow.test.tsx`
   / `frontend/src/test/TutorTodayLearningCard.test.tsx`
@@ -4442,6 +4453,80 @@ explicit known は due を消さない。`mastered` と `suspended` は due に�
 | API | `test_learning_summary_api_returns_related_current_state` |
 | UI の loading / error / empty と mobile 幅 | `TutorSourceDetail.test.tsx` |
 
+## Phase 7 — 長期シミュレーションによる学習品質の回帰検証（Issue #206）
+
+admission、known skip、context rotation、弱点検出、負荷調整は、
+個別のテストでは正しくても、複数日を通すと新規が止まらない、
+同じ文脈に固定される、弱い direction を広げて断定する、といった悪化が起きうる。
+固定 clock の synthetic learner で、その相互作用を不変条件として検証する。
+
+LLM-as-judge は使わない。擬似データで学習効果の絶対値は証明しない。
+score の golden 固定よりも、不変条件と日次の傾向を見る。
+詳細は `docs/tutor_learning_quality.md`。
+
+```text
+固定 clock の 7〜30 日
+  -> その朝の Source / Item を足す
+  -> signal / known / admission / ranking / adaptive plan / Daily Plan
+  -> 答えた日は context を選んで Event / State / Schedule を進める
+  -> 日次メトリクスと policy version
+  -> 不変条件
+```
+
+実装は `evaluation.learning_quality_fixtures` と
+`evaluation.learning_quality`。1日の組み立て順は
+`TodayLearningService._build_plan` に合わせる。
+通常 CI は synthetic scenario のみ。外部 API は使わない。
+任意レポートは `scripts/evaluate_tutor_learning_quality.py`（LLM 不要）。
+
+### scenario
+
+| ID | 見るもの |
+|----|----------|
+| `combined-21d` | 新規 Source、1 Source の大量 Item、既知、同一表記、複数文脈、production だけの弱点、欠席による overdue、難しい期間と回復 |
+| `sparse-errors-3d` | 1 Item の短い誤答では WeaknessPattern を断定しない |
+
+### invariants
+
+- due backlog が高いと new を抑える。hard 閾値では止める
+- known item は new 枠を消費しない
+- 1 Source が admission 枠を占有し続けない
+- 同じ表記は同日に複数 admit しない
+- 複数文脈は同じ出典に固定されない
+- production だけの弱点を recognition の弱点にしない
+- 少数誤答だけで弱点を断定しない
+- 難しい期間で max_new が下がり、改善後はデフォルトへ戻れる
+- due review は new より先
+- 同じシナリオなら同じ結果。policy version をレポートに残す
+
+残す版は `feature_version`、ranking、plan、admission、adaptive load、context、
+weakness pattern、known-item。日次では admitted / deferred / due backlog /
+overdue / same-context rate / known skip / weakness count / plan size /
+max_new / direction balance を記録する。
+
+### スコープ外
+
+- 実ユーザー効果の統計的証明
+- online A/B test
+- automatic weight tuning
+- reinforcement learning
+
+| 観点 | 自動テスト |
+|------|------------|
+| 21日シナリオの不変条件 | `test_combined_scenario_passes` |
+| due backlog が new を抑える | `test_high_due_backlog_suppresses_new_items` |
+| known が new 枠を消費しない | `test_known_items_do_not_consume_new_slots` |
+| 1 Source が枠を占有しない | `test_one_source_does_not_fill_the_admission_budget` |
+| 同一表記を二重に admit しない | `test_duplicate_expression_is_not_admitted_twice` |
+| 複数文脈が固定されない | `test_context_rotates_away_from_the_same_source` |
+| production だけの弱点 | `test_production_weakness_does_not_mark_recognition` |
+| 少数誤答では断定しない | `test_sparse_errors_do_not_declare_a_weakness` |
+| 難しい期間とデフォルトへの復帰 | `test_difficult_period_lowers_max_new_then_recovers` |
+| due が new より先 | `test_due_reviews_stay_ahead_of_new_items` |
+| 同じシナリオで同じ結果 | `test_simulation_is_deterministic` |
+| policy version | `test_policy_versions_are_reported` |
+| OpenAI / LLM / wall clock 非依存 | `test_quality_modules_do_not_import_llm_or_clock` |
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -4521,3 +4606,5 @@ Phase 6 自体の完了条件と Phase 7 への引継ぎは、上記
 「Phase 7 — 学習負荷の自動調整」を正とする。
 Source 単位の学習成果は、上記
 「Phase 7 — Source単位の学習成果」を正とする。
+長期の学習品質は、上記
+「Phase 7 — 長期シミュレーションによる学習品質の回帰検証」を正とする。

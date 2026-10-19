@@ -296,7 +296,7 @@ backend/app/
 │   ├── pdf_text.py           # PDF のマジック・ファイル名・ページ整形
 │   ├── pdf_parser.py         # pypdf による text layer 抽出（OCR はしない）
 │   └── pdf.py                # pdf adapter
-├── evaluation/   # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）。HTTPからは使わない
+├── evaluation/   # 抽出品質（Issue #136）、推薦品質fixture（Issue #180）、長期学習品質（Issue #206）。HTTPからは使わない
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
@@ -334,6 +334,8 @@ backend/app/
 > [tutor_extraction_quality.md](./tutor_extraction_quality.md) を参照。
 > Phase 5 の Tutor 推薦品質（固定 fixture と counterfactual）は
 > [tutor_recommendation_quality.md](./tutor_recommendation_quality.md) を参照。
+> Phase 7 の長期学習品質（複数日シミュレーションと不変条件）は
+> [tutor_learning_quality.md](./tutor_learning_quality.md) を参照。
 > Phase 2 の Source → Candidate → LearningItem vertical slice は
 > `backend/tests/test_tutor_phase2_vertical_slice.py` と
 > `frontend/src/test/TutorPhase2Flow.test.tsx` で統合テストする。
