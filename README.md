@@ -175,3 +175,8 @@ npm run build
 - **AI活用**: Claude Code を使い Issue 単位で実装を進める
 
 詳細は [docs/development_workflow.md](docs/development_workflow.md) を参照してください。
+
+## 家庭内本番・外出先教材の運用設計
+
+家庭内で本番学習し、外出先では承認済み教材だけを読み取る構成を [ADR 0001](docs/adr/0001-local-lan-and-remote-readonly-hosting.md) に記録しています。
+[家庭内の起動・バックアップ・復旧手順案](docs/operations/local-lan-runbook.md) と [外出先教材のデータ・公開契約案](docs/operations/remote-readonly-contract.md) は設計草案です。本番構成や外部配布は未実装で、上の開発用起動手順を本番運用の代わりにしないでください。
