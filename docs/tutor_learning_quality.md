@@ -12,6 +12,12 @@ Phase 7 の admission、known skip、context rotation、弱点検出、負荷調
 擬似データで「学習効果」の絶対値は証明しない。
 score の絶対値を golden 固定しない。見るのは不変条件と、日次の傾向である。
 
+HTTP API と SQLite で同じ policy を一本の学習フローに通す検証は
+`backend/tests/test_tutor_phase7_vertical_slice.py` と
+`frontend/src/test/TutorPhase7Flow.test.tsx`（Issue #207）。
+完了条件と Phase 7 の次は `docs/tutor_architecture.md` の
+「Phase 7 Exit Criteria」と「Phase 7 後」を正とする。
+
 ## 評価するもの / しないもの
 
 評価する:
