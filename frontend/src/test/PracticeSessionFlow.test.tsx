@@ -422,7 +422,7 @@ describe('PracticeSessionFlow', () => {
     render(<PracticeSessionFlow kind="today" questionCount={10} onExit={() => {}} />)
 
     await screen.findByText('意味')
-    expect(mockTodayCreate).toHaveBeenCalledWith({ question_count: 10 })
+    expect(mockTodayCreate).toHaveBeenCalledWith({})
     expect(mockCreate).not.toHaveBeenCalled()
     expect(mockReviewCreate).not.toHaveBeenCalled()
     expect(screen.getByText('復習')).toBeInTheDocument()

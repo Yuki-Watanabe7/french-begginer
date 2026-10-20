@@ -14,6 +14,7 @@ uv run pytest                # 全テスト
 uv run pytest tests/test_api.py::test_health  # 単一テスト
     uv run python ../scripts/evaluate_tutor_extraction.py  # Tutor抽出の実LLM品質評価（任意。OPENAI_API_KEY が必要）
     uv run python ../scripts/evaluate_tutor_recommendations.py  # Tutor推薦品質の固定fixture評価（任意。LLM不要）
+    uv run python ../scripts/evaluate_tutor_learning_quality.py  # Tutor学習品質の複数日シミュレーション（任意。LLM不要）
     uv run python ../scripts/rebuild_review_schedules.py --check  # ReviewSchedule 不整合の検出（任意）
 ```
 
@@ -51,6 +52,8 @@ backend/app/
 │   ├── recommendation_signal.py  # 推薦入力のsignal snapshot（Issue #175）
 │   ├── recommendation_ranking.py  # 説明可能なranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
+│   ├── adaptive_plan.py  # 復習負債・誤答率に応じた今日の件数調整（Issue #204）
+│   ├── source_learning_summary.py  # Source単位の学習成果（Issue #205）
 │   ├── admission_policy.py  # 新規LearningItemの流入制御 admission policy（Issue #200）
 │   ├── known_item_policy.py # 既知項目の explicit known と conservative auto-skip（Issue #201）
 │   ├── context_selection.py # 複数Source文脈の context rotation（Issue #202）
@@ -64,7 +67,7 @@ backend/app/
 │   ├── conjugation_adapter.py  # conjugation Item→既存動詞活用への安全な接続
 │   └── source_ingestion.py  # Source ingestion 共通契約（Issue #189）
 ├── ingestion/     # Web URL、PDF、YouTube 字幕、SRT / VTT、音声、テキスト / 会話 JSON（Issue #190 / #191 / #192 / #193 / #194）
-├── evaluation/    # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）
+├── evaluation/    # 抽出品質（Issue #136）、推薦品質fixture（Issue #180）、長期学習品質（Issue #206）
 ├── persistence/   # Tutorデータの SQLite / schema version
 ├── repositories/  # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/      # ユースケース（domain を組み合わせる処理）
@@ -87,7 +90,8 @@ backend/app/
     ├── practice_session_service.py  # Practice Session 組み立て
     ├── review_session_service.py  # Review Practice Session 組み立て
     ├── weakness_pattern_service.py  # 苦手パターンの算出（Issue #203）
-    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）
+    ├── source_learning_summary_service.py  # Source単位の学習成果（Issue #205）
+    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。件数省略時は負荷を自動調整（Issue #204）
 ```
 
 新しい動詞を追加する場合は `CONJUGATIONS` と `VERB_GROUPS` の両方を `conjugation.py` に追記する。`VerbGroup` は `Literal["all", "er", "ir", "irregular"]` で、`?group=` クエリパラメータで絞り込める。
@@ -146,6 +150,7 @@ Tutor Practice Session は `TutorFlow` 内で `QuizSettings` → `PracticeSessio
 | POST | `/api/tutor/sources/ingest/conversation` | structured conversation JSON を話者・発話時刻付き SourceDocument にする。同一ファイル・同一本文は既存を返す。未知の JSON は解釈しない |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`SourceSummary`） |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得 |
+| GET | `/api/tutor/sources/{source_id}/learning-summary` | この Source に関連する項目の現在の学習状態。結果は保存しない |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から Candidate を抽出して保存。再実行しても重複爆発しない |
 | GET | `/api/tutor/sources/{source_id}/candidates` | Source 単位の Candidate 一覧（status / evidence_text） |
 | POST | `/api/tutor/candidates/{candidate_id}/accept` | Candidate を採用し LearningItem を作成または既存へ統合 |

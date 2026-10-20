@@ -46,6 +46,8 @@ Issue #166。推薦入力の signal snapshot は `recommendation_signal`（Issue
 既知項目の explicit known と conservative auto-skip は `known_item_policy` が担う
 （Issue #201）。`mastered` とは別で、新規学習の skip であり due review は消さない。
 複数 SourceRef の再提示文脈は `context_selection` が担う（Issue #202）。
+Source 単位の学習成果は `source_learning_summary` が担う（Issue #205）。
+成果は関連 Item の現在状態であり、Source への因果帰属ではない。
 due queue UI / Frontend mastery 表示は後続Issue。
 """
 

@@ -6,6 +6,7 @@ import {
   ApiError,
   createTutorSource,
   fetchCandidates,
+  fetchSourceLearningSummary,
   fetchReviewQueue,
   fetchTodayPlan,
   fetchTutorSource,
@@ -13,6 +14,7 @@ import {
 } from '../api/tutor'
 import type { CreateTutorSourceInput, SourceDocument, SourceSummary } from '../types'
 import { EMPTY_REVIEW_QUEUE } from './reviewQueueFixtures'
+import { EMPTY_SOURCE_LEARNING_SUMMARY } from './sourceLearningSummaryFixtures'
 import { EMPTY_TODAY_PLAN } from './todayPlanFixtures'
 
 vi.mock('../api/tutor', async importOriginal => {
@@ -23,6 +25,7 @@ vi.mock('../api/tutor', async importOriginal => {
     fetchTutorSource: vi.fn(),
     createTutorSource: vi.fn(),
     fetchCandidates: vi.fn(),
+    fetchSourceLearningSummary: vi.fn(),
     fetchReviewQueue: vi.fn(),
     fetchTodayPlan: vi.fn(),
   }
@@ -32,6 +35,7 @@ const mockList = vi.mocked(fetchTutorSources)
 const mockGet = vi.mocked(fetchTutorSource)
 const mockCreate = vi.mocked(createTutorSource)
 const mockFetchCandidates = vi.mocked(fetchCandidates)
+const mockSummary = vi.mocked(fetchSourceLearningSummary)
 const mockQueue = vi.mocked(fetchReviewQueue)
 const mockPlan = vi.mocked(fetchTodayPlan)
 
@@ -102,6 +106,7 @@ describe('Tutor Phase 1 vertical slice', () => {
     vi.resetAllMocks()
     mockQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE)
     mockPlan.mockResolvedValue(EMPTY_TODAY_PLAN)
+    mockSummary.mockResolvedValue(EMPTY_SOURCE_LEARNING_SUMMARY)
   })
 
   it('貼り付け保存から一覧・詳細・再読み込みまで一本でつながる', async () => {

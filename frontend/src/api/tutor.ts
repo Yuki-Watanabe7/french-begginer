@@ -22,6 +22,7 @@ import type {
   ReviewPracticeSession,
   ReviewQueue,
   SourceDocument,
+  SourceLearningSummary,
   SourceSummary,
   TodayLearningPlanView,
   TodayLearningSession,
@@ -187,6 +188,16 @@ export async function fetchTutorSources(
 export async function fetchTutorSource(sourceId: string): Promise<SourceDocument> {
   return parseJson(
     await fetch(`${BASE}/api/tutor/sources/${encodeURIComponent(sourceId)}`),
+  )
+}
+
+export async function fetchSourceLearningSummary(
+  sourceId: string,
+): Promise<SourceLearningSummary> {
+  return parseJson(
+    await fetch(
+      `${BASE}/api/tutor/sources/${encodeURIComponent(sourceId)}/learning-summary`,
+    ),
   )
 }
 

@@ -39,7 +39,9 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）、
 Tutor 推薦品質の固定 fixture・反実仮想テスト（Issue #180）、
 Phase 5 vertical slice と Exit Criteria（Issue #181）、
 Phase 6 の外部 Source ingestion（Issue #189、#190、#191、#192、#193、#194、#195）、
-Phase 6 vertical slice と Exit Criteria（Issue #196）
+Phase 6 vertical slice と Exit Criteria（Issue #196）、
+Phase 7 の学習量・品質の制御（Issue #200、#201、#202、#203、#204、#205、#206）、
+Phase 7 vertical slice と Exit Criteria（Issue #207）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -138,6 +140,17 @@ Phase 6 vertical slice と Exit Criteria（Issue #196）
   - score の絶対値は golden 固定しない。LLM-as-judge を唯一の gate にしない
   - 通常 CI は外部 API なしで通る
   - 原則は「Phase 5 — 推薦品質の固定 fixture と反実仮想テスト」を正とする
+- 学習品質（Phase 7）:
+  `backend/app/evaluation/learning_quality_fixtures.py`
+  / `backend/app/evaluation/learning_quality.py`
+  / `backend/tests/test_tutor_phase7_quality.py`
+  / `scripts/evaluate_tutor_learning_quality.py`
+  / `docs/tutor_learning_quality.md`
+  （Issue #206）
+  - 固定 clock の複数日 synthetic learner で admission / known / context / 弱点 / 負荷を同時に検証する
+  - 不変条件を主 gate にする。LLM-as-judge は使わない
+  - policy version と日次メトリクスをレポートに残す。通常 CI は外部 API なし
+  - 原則は「Phase 7 — 長期シミュレーションによる学習品質の回帰検証」を正とする
 - Phase 5 vertical slice: `backend/tests/test_tutor_phase5_vertical_slice.py`
   / `frontend/src/test/TutorPhase5Flow.test.tsx`
   / `frontend/src/test/TutorTodayLearningCard.test.tsx`
@@ -145,6 +158,9 @@ Phase 6 vertical slice と Exit Criteria（Issue #196）
 - Phase 6 vertical slice: `backend/tests/test_tutor_phase6_vertical_slice.py`
   / `frontend/src/test/TutorPhase6Flow.test.tsx`
   （Issue #196）
+- Phase 7 vertical slice: `backend/tests/test_tutor_phase7_vertical_slice.py`
+  / `frontend/src/test/TutorPhase7Flow.test.tsx`
+  （Issue #207）
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -2817,6 +2833,9 @@ POST /api/tutor/today/sessions
 実装は `domain.today_session` と `TodayLearningService`。
 Frontend / plan 永続化 / LLM による reason 文章生成は対象外。
 Phase 3 の Practice Session と Phase 4 の「今日の復習」は維持する。
+`question_count` / `max_new_count` を省略したフィールドは、下記
+「Phase 7 — 学習負荷の自動調整」が決める。両方を指定した呼び出しは、
+この節の due 優先のままである。
 
 ### 公開 plan contract
 
@@ -2914,6 +2933,7 @@ Tutor / Home
   内部 score は出さない。code が無ければ捏造しない。1 Item は上位 1〜2 件
 - 完了後: due queue を再 fetch し、一覧へ戻ると Plan / due を再取得する。
   再 fetch 失敗は学習結果を失敗扱いにしない
+- 「学習を始める」は出題数を送らない。一覧カードと同じ自動調整で Session を始める
 
 | 観点 | 自動テスト |
 |------|------------|
@@ -4284,6 +4304,358 @@ pattern の label を含む。定型文も残し、label が無いときは定�
 | due 優先を壊さない補助 signal | `test_quality_fixtures_pass` / `test_today_plan_uses_pattern_reason_without_burying_due` |
 | OpenAI / LLM 非依存 | `test_modules_do_not_import_llm_or_fastapi` |
 
+## Phase 7 — 学習負荷の自動調整（Issue #204）
+
+固定の「10問・新規3件」だけでなく、直近の学習状態から今日の総数と新規上限を
+小さく変える。難しかった日から問題数を増やさない。1件の誤答だけでは変えない。
+履歴が無い日はデフォルトに戻す。
+
+```text
+due / overdue / deferred
++ recent error / sessions / imbalance / study volume
++ admission budget
+  -> AdaptivePlanConstraints
+  -> PlanConstraints
+  -> Phase 5 Daily Learning Plan（due 優先は変えない）
+```
+
+実装は `domain.adaptive_plan.decide_adaptive_plan_constraints`。
+`TodayLearningService` は snapshot と LearningEvent と admission budget から
+signal を作り、省略された `question_count` / `max_new_count` だけをその結果で埋める。
+Plan の `policy_version` は `plan-v1` のまま。負荷調整の版は `adaptive-plan-v1`。
+ユーザー向けの理由は `explanation_summary` の続きに出す。LLM は使わない。
+
+### 優先順位
+
+1. 自動算出の総数は 5〜10、新規は 0〜3。この範囲の外には出さない。
+2. 呼び出し側が指定した `question_count` / `max_new_count` は、そのフィールドについて
+   自動算出より優先する。範囲は Plan と同じ 1〜20 / 0〜20。範囲外は拒否する。
+3. 未指定のフィールドだけ自動算出を使う。
+4. admission で入れなかった新規は、明示した `max_new_count` を広げても Plan に戻らない。
+5. 件数を決めたあとの due 優先と deferred は Phase 5 のまま。
+   復習負債が大きい日は総数を縮めず、overdue を枠の外へ押し出さない。
+
+### 初期 policy
+
+定数は `adaptive_plan` にまとめる。
+
+| 状態 | 新規上限 | 総数 |
+|------|----------|------|
+| 履歴なし、または安定 | 3 | 10 |
+| due 8 以上、または overdue 4 以上、または deferred 4 以上 | 1 | 10 |
+| due 16 以上、または overdue 8 以上、または deferred 8 以上 | 0 | 10 |
+| 直近 5 件以上で誤答率 0.5 以上 | 2 以下 | 10 |
+| 直近 8 件以上で誤答率 0.75 以上 | 1 以下 | 10 |
+| 難しい session が 2 回続いた | 2 以下 | 誤答圧力があり backlog が小さいとき 8 |
+| 難しい session が 3 回続いた | 1 以下 | 同上 |
+| admission budget が 3 未満 | その budget 以下 | 変えない |
+
+1件の誤答（attempt が 5 未満）は誤答率に使わない。
+学習量、session 完了率、recognition / production の偏りは、それだけでは件数を変えない。
+すでに新規を減らしているとき、偏りが 0.4 以上でサンプルが 2 Item 以上なら新規をさらに 1 段だけ下げる。
+0 にはしない。総数を 1 段（2問）下げるのは、誤答圧力に加えて難しい session の連続、
+低い完了率、または直近 1 日で 20 件以上の回答があるときだけである。
+
+session は 45 分より長く空いたら分ける。4件未満は難しいとも易しいとも判定しない。
+未来の event と 14 日より古い event は session に入れない。
+
+reason code は次のとおり。`STABLE_PROGRESS` は他と併記しない。
+
+| code | 意味 |
+|------|------|
+| `HIGH_REVIEW_BACKLOG` | 復習の滞りが大きいので新規を減らした |
+| `RECENT_ERROR_RATE_HIGH` | 直近の誤答、または難しい session の連続で新規を減らした |
+| `NEW_ADMISSION_LIMITED` | admission の新規枠がデフォルトより狭い |
+| `STABLE_PROGRESS` | デフォルトの 10 問・新規 3 件に戻した |
+
+### スコープ外
+
+- 学習時間の精密予測
+- reinforcement learning
+- notification
+- streak / gamification
+- ranking 式と Phase 5 の due 優先の変更
+
+| 観点 | 自動テスト |
+|------|------------|
+| backlog が大きいと新規が減る | `test_high_review_backlog_reduces_new_and_keeps_total` / `test_today_plan_reduces_new_when_the_review_backlog_is_high` |
+| 直近の誤答率が高いと新規が減る | `test_recent_error_reduces_new_without_one_answer` / `test_repeated_errors_reduce_new_unless_counts_are_explicit` |
+| 1件の誤答では変えない | `test_recent_error_reduces_new_without_one_answer` / `test_one_incorrect_answer_does_not_shrink_today_plan` |
+| 安定するとデフォルトへ戻る | `test_stable_progress_returns_to_the_default_budget` |
+| 履歴なしはデフォルト | `test_missing_history_uses_the_default_budget` / `test_today_plan_uses_defaults_when_history_is_missing` |
+| 極端な入力でも min/max を超えない | `test_extreme_inputs_stay_inside_the_safety_bounds` |
+| 同じ状態で deterministic | `test_same_signals_are_deterministic` |
+| 明示した件数を優先する | `test_explicit_counts_override_the_suggestion` |
+| Phase 5 の due 優先を維持する | `test_explicit_constraints_keep_the_phase5_plan` |
+| OpenAI / LLM / wall clock 非依存 | `test_module_does_not_import_llm_or_clock` |
+
+## Phase 7 — Source単位の学習成果（Issue #205）
+
+Source を追加したあと、「この教材に結びついた項目が、いまどの状態か」を
+Source 詳細で短く示す。因果的な「この Source のおかげで習得した」とは読まない。
+高度な dashboard、学習時間予測、Source 間ランキングは扱わない。
+
+```text
+Candidate（この Source だけ）
++ SourceRef で結びついた LearningItem
++ LearnerState / ReviewSchedule / explicit known
+  -> SourceLearningSummary
+```
+
+実装は `domain.source_learning_summary.summarize_source_learning`。
+`SourceLearningSummaryService` は保存済みデータを渡し、結果を保存しない。
+`GET /api/tutor/sources/{source_id}/learning-summary` はサーバー時刻で due を判定し、
+任意時刻の query は受け取らない。Frontend は Source 詳細の「学習状況」に、
+採用数、学習開始済み、復習待ち、既知/十分定着、見て分かる / 自分で言うの差だけを出す。
+
+### 数え方
+
+| フィールド | 意味 |
+|------------|------|
+| `candidate_count` | この Source の Candidate 全件 |
+| `pending_candidate_count` | status が `candidate` |
+| `accepted_candidate_count` | status が `accepted` |
+| `rejected_item_count` | status が `rejected` の Candidate。LearningItem にはならない |
+| `accepted_item_count` | SourceRef がこの Source を指す LearningItem のユニーク件数。手入力の参照も含む |
+| `unseen_item_count` | 関連 item のうち、未回答で mastered / explicit known / suspended でないもの |
+| `active_item_count` | status が active、explicit known ではなく、回答が1件以上 |
+| `suspended_item_count` | explicit known と mastered を除いた suspended |
+| `mastered_or_known_count` | status が mastered、または explicit known。両方でも1件 |
+| `started_item_count` | 回答が1件以上ある関連 item |
+| `due_direction_count` | status が active の関連 item で、`due_at <= now` の direction 数 |
+| `attempts` / `correct_rate` | 関連 item の LearnerState を1件につき1回足した値。未回答の rate は null |
+| `recognition` / `production` | `by_direction` の回答数・正答率・due 数 |
+| `recent_activity_at` | 関連 item の `last_reviewed_at` の最大値。known の更新時刻は使わない |
+
+同じ LearningItem が複数 Source に紐づく場合、各 Source の関連 item として表示する。
+その Source の中では SourceRef が重複しても、accepted Candidate が複数でも、
+LearnerState は1回だけ足す。LearningEvent は読み直さない。
+Source ごとのサマリーを合計すると、複数 Source にまたがる item が重複する。
+その合計は全体成果ではない。
+
+explicit known は due を消さない。`mastered` と `suspended` は due に数えない。
+集計の版は `source-learning-summary-v1`。attribution は
+`related_item_current_state` で固定する。
+
+### スコープ外
+
+- analytics dashboard
+- 学習時間の予測
+- Source 間のランキング
+- 因果的な成果帰属
+- SourceType ごとの専用集計
+
+| 観点 | 自動テスト |
+|------|------------|
+| Source 単位の集計 | `test_source_summary_counts_each_related_item_once` / `test_persisted_summary_counts_accept_reject_and_due` |
+| accepted / rejected / unseen / due | `test_accepted_rejected_unseen_and_due` |
+| recognition / production | `test_recognition_and_production_stay_separate` |
+| multi-source item を1 Source 内で二重計上しない | `test_multi_source_item_is_not_double_counted_inside_one_summary` / `test_merged_multi_source_item_keeps_events_once` |
+| event がない Source | `test_source_without_events_has_no_rate_or_activity` |
+| DB reopen | `test_persisted_summary_counts_accept_reject_and_due` |
+| URL / PDF / transcript / conversation で共通 | `test_summary_is_the_same_for_url_pdf_transcript_and_conversation` |
+| SourceType で分岐しない | `test_summary_does_not_branch_on_source_type` |
+| API | `test_learning_summary_api_returns_related_current_state` |
+| UI の loading / error / empty と mobile 幅 | `TutorSourceDetail.test.tsx` |
+
+## Phase 7 — 長期シミュレーションによる学習品質の回帰検証（Issue #206）
+
+admission、known skip、context rotation、弱点検出、負荷調整は、
+個別のテストでは正しくても、複数日を通すと新規が止まらない、
+同じ文脈に固定される、弱い direction を広げて断定する、といった悪化が起きうる。
+固定 clock の synthetic learner で、その相互作用を不変条件として検証する。
+
+LLM-as-judge は使わない。擬似データで学習効果の絶対値は証明しない。
+score の golden 固定よりも、不変条件と日次の傾向を見る。
+詳細は `docs/tutor_learning_quality.md`。
+
+```text
+固定 clock の 7〜30 日
+  -> その朝の Source / Item を足す
+  -> signal / known / admission / ranking / adaptive plan / Daily Plan
+  -> 答えた日は context を選んで Event / State / Schedule を進める
+  -> 日次メトリクスと policy version
+  -> 不変条件
+```
+
+実装は `evaluation.learning_quality_fixtures` と
+`evaluation.learning_quality`。1日の組み立て順は
+`TodayLearningService._build_plan` に合わせる。
+通常 CI は synthetic scenario のみ。外部 API は使わない。
+任意レポートは `scripts/evaluate_tutor_learning_quality.py`（LLM 不要）。
+
+### scenario
+
+| ID | 見るもの |
+|----|----------|
+| `combined-21d` | 新規 Source、1 Source の大量 Item、既知、同一表記、複数文脈、production だけの弱点、欠席による overdue、難しい期間と回復 |
+| `sparse-errors-3d` | 1 Item の短い誤答では WeaknessPattern を断定しない |
+
+### invariants
+
+- due backlog が高いと new を抑える。hard 閾値では止める
+- known item は new 枠を消費しない
+- 1 Source が admission 枠を占有し続けない
+- 同じ表記は同日に複数 admit しない
+- 複数文脈は同じ出典に固定されない
+- production だけの弱点を recognition の弱点にしない
+- 少数誤答だけで弱点を断定しない
+- 難しい期間で max_new が下がり、改善後はデフォルトへ戻れる
+- due review は new より先
+- 同じシナリオなら同じ結果。policy version をレポートに残す
+
+残す版は `feature_version`、ranking、plan、admission、adaptive load、context、
+weakness pattern、known-item。日次では admitted / deferred / due backlog /
+overdue / same-context rate / known skip / weakness count / plan size /
+max_new / direction balance を記録する。
+
+### スコープ外
+
+- 実ユーザー効果の統計的証明
+- online A/B test
+- automatic weight tuning
+- reinforcement learning
+
+| 観点 | 自動テスト |
+|------|------------|
+| 21日シナリオの不変条件 | `test_combined_scenario_passes` |
+| due backlog が new を抑える | `test_high_due_backlog_suppresses_new_items` |
+| known が new 枠を消費しない | `test_known_items_do_not_consume_new_slots` |
+| 1 Source が枠を占有しない | `test_one_source_does_not_fill_the_admission_budget` |
+| 同一表記を二重に admit しない | `test_duplicate_expression_is_not_admitted_twice` |
+| 複数文脈が固定されない | `test_context_rotates_away_from_the_same_source` |
+| production だけの弱点 | `test_production_weakness_does_not_mark_recognition` |
+| 少数誤答では断定しない | `test_sparse_errors_do_not_declare_a_weakness` |
+| 難しい期間とデフォルトへの復帰 | `test_difficult_period_lowers_max_new_then_recovers` |
+| due が new より先 | `test_due_reviews_stay_ahead_of_new_items` |
+| 同じシナリオで同じ結果 | `test_simulation_is_deterministic` |
+| policy version | `test_policy_versions_are_reported` |
+| OpenAI / LLM / wall clock 非依存 | `test_quality_modules_do_not_import_llm_or_clock` |
+
+## Phase 7 vertical slice（Issue #207）
+
+Issue #200〜#206 で追加した流入制御、既知 skip、文脈の再提示、弱点検出、
+負荷調整、Source 単位の学習状況を、固定 clock の synthetic learner で
+一本の学習フローとして検証する。複数日の不変条件そのものは
+「Phase 7 — 長期シミュレーションによる学習品質の回帰検証」を正とする。
+この slice は HTTP API と SQLite で、利用者が辿る操作の順に同じ policy を通す。
+
+Phase 7 のゴールは、**Tutor が学べることに加え、過剰・重複・不要な学習を避け、
+弱点に応じて適量を提示できること**である。
+
+```text
+複数 Source
+  -> Candidate 抽出 / accept
+  -> 既知指定と複数 SourceRef
+  -> recognition / production で異なる履歴
+  -> due / overdue
+  -> admission / known skip / weakness / adaptive constraints
+  -> Today Learning Plan
+  -> review を学習し、別文脈を提示
+  -> state / schedule / Source summary
+  -> 翌日の再 plan
+```
+
+実 LLM とネットワークは使わない。抽出は固定の fake extractor。
+時計は `2026-10-01T12:00:00Z` と翌日。手入力 Source の `created_at` は
+壁時計のままなので、PDF / SRT の取り込み時計だけを固定する。
+
+### シナリオ
+
+| 観点 | 確認すること |
+|------|----------------|
+| Source flood | 1 Source の未学習が per-source cap を超えず、due がある日は review を押しのけない |
+| Known item | explicit known は new から外れ、undo で戻る。due review は残る。recognition の auto-skip は未習熟の production を skip しない。1 回の正答では auto-skip しない |
+| Context rotation | 同じ `livre` の次の cloze が別 Source の文になる。page と start_seconds は Event metadata に残る |
+| Weakness | grammar の production は複数 Item の履歴から弱点になる。recognition は弱点にしない |
+| Adaptive load | due / overdue が多い日は new を 0 にし、説明に負荷を下げた理由を出す。翌日、due と overdue が soft 未満ならデフォルト件数へ戻る |
+| Source progress | 採用、開始済み、未学習、既知、direction 別の件数。複数 Source にまたがる Item の attempts は Source ごとに同じ 1 Item 分 |
+
+翌日の再 plan では、復習を先に置き、known のままの項目を new に入れない。
+明示件数を広げても admission の per-source cap と既知除外は広がらない。
+同一表記の別 Item（`chat` と `Chat`）を同じ new 枠に両方は入れない。
+
+file DB を dispose して開き直しても、複数 SourceRef、explicit known、
+page / time、翌日の new 対象が残る。
+
+### Frontend
+
+今日の学習カードの件数と負荷の説明、出題数画面を挟まずに Today Session を
+始めること、空欄の出典、新規項目の既知指定と取り消し、Source 詳細の学習状況と
+採用済み候補の既知表示までを `TutorFlow` でつなぐ。
+開始ボタンは全幅かつ `minHeight` 48、Source 行は全幅で題名が折り返し、
+既知の取り消しは `minHeight` 44。
+
+### Phase 7 ではまだ行わないこと
+
+- 新しい大規模 Source connector、OCR、login / paywall の突破
+- ML ranking、FSRS への自動移行
+- 自由会話 Tutor、notification
+- Phase 8 の自動追加
+
+| 観点 | 自動テスト |
+|------|------------|
+| Source 追加から翌日の再 plan まで | `test_phase7_quality_controls_vertical_slice` |
+| flood が cap を超えず review を押しのけない | 同上 |
+| explicit known の除外と undo。due は残る | 同上 |
+| recognition 既知が production を skip しない。1 回正答では skip しない | 同上 |
+| 別文脈と page / time | 同上 |
+| grammar production の弱点。recognition は弱点にしない | 同上 |
+| 負荷を下げ、翌日デフォルトへ戻す | 同上 |
+| Source 集計が複数 Source の Item を二重に数えない | 同上 |
+| DB 再 open | 同上 |
+| quiz / 名詞 / 冠詞 / TTS / Practice / Review / Today | `test_phase7_quiz_practice_review_today_and_tts_remain` |
+| 複数日シミュレーションの不変条件 | `test_tutor_phase7_quality.py` |
+| 少数誤答では弱点にしない | `test_sparse_errors_do_not_declare_a_weakness` |
+| 今日の学習、既知、Source 状況、全幅ボタン | `TutorPhase7Flow.test.tsx` |
+
+## Phase 7 Exit Criteria（Issue #107）との対応
+
+Issue #107 の Phase 7 は、学習量と品質の制御が一本の流れで動き、
+過剰な新規、既知の再学習、同じ文脈への固定、弱い根拠の苦手断定を避けることである。
+各 policy の式は、上記の Issue #200〜#206 の節を正とする。
+
+| Exit Criteria | 満たした実装 | 自動テスト |
+|---------------|--------------|------------|
+| new item backlog を無制限に Today Learning へ流さない | `decide_new_admissions` | `test_phase7_quality_controls_vertical_slice` / `test_admission_policy.py` |
+| review backlog に応じて new admission を抑制できる | admission budget と adaptive `max_new` | 同上 |
+| 同一 Source の new item 独占を防げる | per-source cap | `test_phase7_quality_controls_vertical_slice` |
+| explicit known を安全に skip / undo できる | `POST .../known` と `.../known/undo` | 同上 / `TutorPhase7Flow.test.tsx` |
+| conservative auto-skip が過剰判定しない | `decide_auto_skip`。1 回の正答では skip しない | `test_phase7_quality_controls_vertical_slice` |
+| recognition / production を別々に known / weakness 判断できる | direction 別の known と weakness | 同上 |
+| 同一 LearningItem を複数 Source context で再提示できる | context rotation | 同上 |
+| evidence / page / time provenance を維持する | LearningEvent.metadata | 同上 |
+| 複数 item 横断の WeaknessPattern を検出できる | `aggregate_weakness_patterns` | 同上 |
+| 少数サンプルで苦手と断定しない | weakness の最小試行・最小 Item 数 | `test_sparse_errors_do_not_declare_a_weakness` |
+| backlog / error に応じて Daily Plan 負荷を安全に調整できる | adaptive plan。min / max の内側 | `test_phase7_quality_controls_vertical_slice` |
+| 状態改善時に負荷を戻せる | 翌日のデフォルト件数 | 同上 |
+| Source 単位の学習状況を可視化できる | `GET .../learning-summary` と Source 詳細 | 同上 / `TutorPhase7Flow.test.tsx` |
+| multi-source item を集計で二重計上しない | Source ごとに関連 Item を 1 回数える | `test_phase7_quality_controls_vertical_slice` |
+| 複数日 simulation で主要 policy の相互作用を回帰保護できる | `evaluation.learning_quality` | `test_tutor_phase7_quality.py` |
+| due 優先と Phase 5 ranking の基本を壊さない | review が new より前。弱点 reason を explanation に出す | `test_phase7_quality_controls_vertical_slice` |
+| Source ingestion / Candidate / Practice / Review / Today / quiz / TTS に回帰がない | 既存 API は独立 | `test_phase7_quiz_practice_review_today_and_tts_remain` / `TutorPhase7Flow.test.tsx` |
+| スマホ相当幅で今日の学習、既知、Source 状況が操作できる | 全幅、折り返し、`minHeight` 44 / 48 | `TutorPhase7Flow.test.tsx` |
+| `bash scripts/quality-check.sh` が通る | ruff / pytest / lint / frontend test / build | 作業完了時に実行 |
+| Phase 7 境界と次段階を記載する | 本セクションと「Phase 7 後」 | 本ドキュメント |
+
+スマホ実機の使用感は自動 style test だけでは完全代替しない。
+Phase 6 の教材追加と、Phase 7 の既知操作、Source の学習状況、今日の学習、
+文脈表示は、実機未確認の場合は PR に残す。
+
+## Phase 7 後
+
+Phase 7 で Roadmap #107 の Phase 0〜7 が一巡する。
+完了後に Phase 8 を自動では増やさない。実利用の結果と未解決の課題を見て、
+次のどれにするかを別途決める。
+
+- Roadmap #107 を一旦完了とする
+- 実利用のフィードバックから次の Roadmap を作る
+- OCR、connector sync、会話 Tutor などの追加能力へ進む
+- scheduler や ranking の高度化を別 initiative にする
+
+Phase 7 へ進む前提だった OCR、login / paywall の突破、crawler、
+embeddings、ML ranking、自由会話 Tutor は、この完了条件にも含めない。
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -4359,3 +4731,13 @@ Phase 6 自体の完了条件と Phase 7 への引継ぎは、上記
 「Phase 7 — 複数Source文脈の context rotation」を正とする。
 苦手文法・表現パターンの検出は、上記
 「Phase 7 — 苦手文法・表現パターンの検出」を正とする。
+今日の学習負荷の自動調整は、上記
+「Phase 7 — 学習負荷の自動調整」を正とする。
+Source 単位の学習成果は、上記
+「Phase 7 — Source単位の学習成果」を正とする。
+長期の学習品質は、上記
+「Phase 7 — 長期シミュレーションによる学習品質の回帰検証」を正とする。
+Phase 7 の品質制御を一本につないだ検証は、上記
+「Phase 7 vertical slice」を正とする。
+Phase 7 自体の完了条件と、その後に Phase 8 を自動では増やさない判断は、上記
+「Phase 7 Exit Criteria」と「Phase 7 後」を正とする。

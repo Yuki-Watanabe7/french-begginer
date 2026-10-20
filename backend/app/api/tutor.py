@@ -7,7 +7,8 @@ Web URL からの Source 取り込み（Issue #190）、
 テキスト PDF からの Source 取り込み（Issue #191）、
 YouTube transcript と SRT / VTT からの Source 取り込み（Issue #192）、
 音声の文字起こしからの Source 取り込み（Issue #193）、
-テキスト / Markdown と会話 JSON からの Source 取り込み（Issue #194）。
+テキスト / Markdown と会話 JSON からの Source 取り込み（Issue #194）、
+Source 単位の学習成果サマリー（Issue #205）。
 
 business rule は TutorService / CandidateService / ExerciseService /
 PracticeSessionService / ReviewSessionService / TodayLearningService /
@@ -40,6 +41,7 @@ from app.api.deps import (
     get_pdf_ingestion_service,
     get_practice_session_service,
     get_review_session_service,
+    get_source_learning_summary_service,
     get_subtitle_ingestion_service,
     get_text_file_ingestion_service,
     get_today_learning_service,
@@ -47,12 +49,7 @@ from app.api.deps import (
     get_web_url_ingestion_service,
     get_youtube_ingestion_service,
 )
-from app.domain.daily_learning_plan import (
-    DEFAULT_MAX_NEW_COUNT,
-    DEFAULT_PLAN_SIZE,
-    MAX_PLAN_SIZE,
-    MIN_PLAN_SIZE,
-)
+from app.domain.daily_learning_plan import MAX_PLAN_SIZE, MIN_PLAN_SIZE
 from app.domain.exercise import PublicExercise, to_public_exercise
 from app.domain.practice_session import (
     DEFAULT_QUESTION_COUNT,
@@ -74,6 +71,7 @@ from app.domain.source_ingestion import (
     IngestionFailureKind,
     SourceIngestionError,
 )
+from app.domain.source_learning_summary import SourceLearningSummary
 from app.domain.today_session import (
     SkippedTodayEntry,
     TodayLearningPlanView,
@@ -136,6 +134,9 @@ from app.services.exercise_service import ExerciseService
 from app.services.pdf_ingestion import PdfIngestionService
 from app.services.practice_session_service import PracticeSessionService
 from app.services.review_session_service import ReviewSessionService
+from app.services.source_learning_summary_service import (
+    SourceLearningSummaryService,
+)
 from app.services.subtitle_ingestion import SubtitleIngestionService
 from app.services.text_file_ingestion import TextFileIngestionService
 from app.services.today_learning_service import TodayLearningService
@@ -156,6 +157,9 @@ ReviewSessionServiceDep = Annotated[
 ]
 TodayLearningServiceDep = Annotated[
     TodayLearningService, Depends(get_today_learning_service)
+]
+SourceLearningSummaryServiceDep = Annotated[
+    SourceLearningSummaryService, Depends(get_source_learning_summary_service)
 ]
 WebUrlIngestionServiceDep = Annotated[
     WebUrlIngestionService, Depends(get_web_url_ingestion_service)
@@ -436,13 +440,13 @@ class CreateTodaySessionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    question_count: int = Field(
-        default=DEFAULT_PLAN_SIZE,
+    question_count: int | None = Field(
+        default=None,
         ge=MIN_PLAN_SIZE,
         le=MAX_PLAN_SIZE,
     )
-    max_new_count: int = Field(
-        default=DEFAULT_MAX_NEW_COUNT,
+    max_new_count: int | None = Field(
+        default=None,
         ge=0,
         le=MAX_PLAN_SIZE,
     )
@@ -1044,6 +1048,25 @@ def get_source(source_id: str, service: TutorServiceDep) -> SourceDocument:
         raise _to_http(exc) from exc
 
 
+@router.get(
+    "/sources/{source_id}/learning-summary",
+    response_model=SourceLearningSummary,
+)
+def get_source_learning_summary(
+    source_id: str, service: SourceLearningSummaryServiceDep
+) -> SourceLearningSummary:
+    """この Source に関連する学習項目の、いまの状態を返す。
+
+    集計は保存しない。任意時刻の query は受け取らない。
+    複数 Source にまたがる item は、各 Source の現在状態として1回ずつ出る。
+    """
+
+    try:
+        return service.summarize(source_id)
+    except TutorServiceError as exc:
+        raise _to_http(exc) from exc
+
+
 @router.post(
     "/sources/{source_id}/candidates/extract",
     response_model=ExtractCandidatesResponse,
@@ -1299,13 +1322,13 @@ def create_review_session(
 @router.get("/today", response_model=TodayLearningPlanView)
 def get_today_plan(
     service: TodayLearningServiceDep,
-    question_count: int = Query(
-        default=DEFAULT_PLAN_SIZE,
+    question_count: int | None = Query(
+        default=None,
         ge=MIN_PLAN_SIZE,
         le=MAX_PLAN_SIZE,
     ),
-    max_new_count: int = Query(
-        default=DEFAULT_MAX_NEW_COUNT,
+    max_new_count: int | None = Query(
+        default=None,
         ge=0,
         le=MAX_PLAN_SIZE,
     ),

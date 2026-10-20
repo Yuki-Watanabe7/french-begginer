@@ -44,6 +44,7 @@ SQLite (初期) → PostgreSQL (将来)
 | POST | `/api/tutor/sources/ingest/conversation` | structured conversation JSON を multipart で取り込み、話者と発話時刻付きの SourceDocument にする。同じファイルと本文は既存を返す。指定不正・形式不正・未知フィールドは 400、サイズ超過は 413、JSON 以外は 415、本文が空なら 422。添付は取得しない |
 | GET | `/api/tutor/sources` | 保存済み Source の一覧（`created_at` 降順）。全文ではなく SourceSummary を返す |
 | GET | `/api/tutor/sources/{source_id}` | SourceDocument を1件取得する |
+| GET | `/api/tutor/sources/{source_id}/learning-summary` | この Source に関連する学習項目の現在状態。Candidate / Item / LearnerState / ReviewSchedule を集計し、結果は保存しない。存在しない Source は 404。任意時刻の query は受け取らない |
 | POST | `/api/tutor/sources/{source_id}/candidates/extract` | Source から学習候補を抽出し保存する。存在しない Source は 404。API key 未設定・一時障害は 503、LLM 応答不正は 502 |
 | GET | `/api/tutor/sources/{source_id}/candidates` | Source 単位の Candidate 一覧。`status` と本文から再構成した `evidence_text` を含む。provider 生応答は返さない |
 | POST | `/api/tutor/candidates/{candidate_id}/accept` | Candidate を採用し LearningItem を作成、または既存 Item へ SourceRef を追加する。再 accept は冪等。rejected からの accept は 409 |
@@ -71,6 +72,8 @@ SQLite (初期) → PostgreSQL (将来)
 | `limit` | 1〜100 の整数 | `50` | 取得件数。`created_at` 降順（同一時刻は `id` 昇順）。不正値は 422 |
 
 レスポンスは全文ではなく `SourceSummary`（`content_preview` は先頭120文字）。0件でも 200 + `[]`。
+
+`GET /api/tutor/sources/{source_id}/learning-summary` は、その Source に SourceRef で結びついた LearningItem の現在状態を返す。同じ item が複数 Source にあっても、1つの Source の中では成果を1回だけ数える。Source ごとの結果を足して全体の成果にはしない。SourceType では分岐しない。
 
 `POST /api/tutor/sources` は手入力のまま `content` を正規化せず保存する。`GET /api/tutor/sources/{source_id}` の `SourceDocument` は、Phase 6 の ingestion で作った Source について `content_hash` / `ingestion_version` / `provenance` / `segments` を返す。手入力の既存行ではこれらは空である。Web URL は `POST /api/tutor/sources/ingest/url`、テキスト PDF は `POST /api/tutor/sources/ingest/pdf`、YouTube の公開字幕は `POST /api/tutor/sources/ingest/youtube`、SRT / VTT は `POST /api/tutor/sources/ingest/subtitle`、音声の文字起こしは `POST /api/tutor/sources/ingest/audio`、テキスト / Markdown は `POST /api/tutor/sources/ingest/text-file`、会話 JSON は `POST /api/tutor/sources/ingest/conversation`。
 
@@ -161,11 +164,14 @@ queue entry の skill_direction に合う Exercise だけを出す。新規 / �
 
 説明可能な ranking と Daily Learning Plan から、今日の学習 Plan を返す。
 Plan 自体は DB に保存しない。Session は開始しない。
+`question_count` と `max_new_count` を省略したフィールドは、復習の滞りと直近の誤答から
+自動で決める。指定したフィールドはその件数を優先する。安定しているときの自動値は
+総数 10、新規 3 である。配分そのもの（due 優先）は変えない。
 
 | パラメータ | 型 | デフォルト | 説明 |
 |------------|-----|------------|------|
-| `question_count` | 1〜20 の整数 | `10` | 要求する総件数。候補が少なければ短く返す |
-| `max_new_count` | 0〜20 の整数 | `3` | 新規 LearningItem の上限 |
+| `question_count` | 1〜20 の整数 | 省略時は自動 | 要求する総件数。候補が少なければ短く返す |
+| `max_new_count` | 0〜20 の整数 | 省略時は自動 | 新規 LearningItem の上限 |
 
 任意時刻の `now` は受け取らない。due 判定はサーバー時刻。0件でも 200。
 
@@ -180,8 +186,8 @@ Plan 自体は DB に保存しない。Session は開始しない。
 | `deferred_due_count` | capacity 不足や skip で入れられなかった due 件数 |
 | `entries` | item 要約、`activity_kind`、`skill_direction`、reason codes / 説明文。内部 score は含めない |
 | `summary_reason_codes` | plan 全体の reason code（初出順） |
-| `policy_version` | 配分規則の版 |
-| `explanation_summary` | 内部 score を出さない短い配分説明 |
+| `policy_version` | Daily Learning Plan の版（`plan-v1`）。負荷調整の版とは別 |
+| `explanation_summary` | 内部 score を出さない短い配分説明。件数を自動で減らしたときは、その理由を続ける |
 
 reason の説明文は code から deterministic に生成する。LLM は使わない。
 
@@ -194,8 +200,8 @@ Phase 3 の Practice Session と Phase 4 の「今日の復習」は維持する
 
 | フィールド | 型 | デフォルト | 説明 |
 |------------|-----|------------|------|
-| `question_count` | 1〜20 の整数 | `10` | 要求する総件数 |
-| `max_new_count` | 0〜20 の整数 | `3` | 新規 LearningItem の上限 |
+| `question_count` | 1〜20 の整数 | 省略時は自動 | 要求する総件数。指定すると自動調整より優先する |
+| `max_new_count` | 0〜20 の整数 | 省略時は自動 | 新規 LearningItem の上限。指定すると自動調整より優先する |
 | `seed` | string optional | サーバー既定 | 再現用。Exercise 本文の再構成には使わない |
 
 任意時刻の `now` は受け取らない。0件でも 200。正解は問題提示時に返さない。
@@ -273,6 +279,7 @@ backend/app/
 │   ├── recommendation_signal.py  # 推薦入力の signal snapshot（Issue #175）
 │   ├── recommendation_ranking.py  # 説明可能な ranking policy（Issue #176）
 │   ├── daily_learning_plan.py  # 新規/復習の配分 Daily Learning Plan（Issue #177）
+│   ├── adaptive_plan.py        # 復習負債・誤答率に応じた今日の件数調整（Issue #204）
 │   ├── admission_policy.py     # 新規LearningItemの流入制御（Issue #200）
 │   ├── known_item_policy.py    # 既知項目の explicit known と auto-skip（Issue #201）
 │   ├── context_selection.py    # 複数Source文脈の context rotation（Issue #202）
@@ -289,7 +296,7 @@ backend/app/
 │   ├── pdf_text.py           # PDF のマジック・ファイル名・ページ整形
 │   ├── pdf_parser.py         # pypdf による text layer 抽出（OCR はしない）
 │   └── pdf.py                # pdf adapter
-├── evaluation/   # 抽出品質（Issue #136）と推薦品質fixture（Issue #180）。HTTPからは使わない
+├── evaluation/   # 抽出品質（Issue #136）、推薦品質fixture（Issue #180）、長期学習品質（Issue #206）。HTTPからは使わない
 ├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
@@ -309,7 +316,7 @@ backend/app/
     ├── practice_session_service.py  # Practice Session 組み立て（Issue #150）
     ├── review_session_service.py  # Review Practice Session 組み立て（Issue #164）
     ├── weakness_pattern_service.py  # LearningEvent 横断の苦手パターン（Issue #203）
-    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。既知は新規だけ除外し、未学習は admission 通過後。苦手パターンは補助 signal
+    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。既知は新規だけ除外し、未学習は admission 通過後。件数省略時は負荷を自動調整（Issue #204）
 ```
 
 - **api層**: FastAPIルーター。HTTPの関心事（パスパラメータ、ステータスコード）のみ担当。
@@ -327,6 +334,11 @@ backend/app/
 > [tutor_extraction_quality.md](./tutor_extraction_quality.md) を参照。
 > Phase 5 の Tutor 推薦品質（固定 fixture と counterfactual）は
 > [tutor_recommendation_quality.md](./tutor_recommendation_quality.md) を参照。
+> Phase 7 の長期学習品質（複数日シミュレーションと不変条件）は
+> [tutor_learning_quality.md](./tutor_learning_quality.md) を参照。
+> Phase 7 の品質制御を一本につないだ vertical slice は
+> `backend/tests/test_tutor_phase7_vertical_slice.py` と
+> `frontend/src/test/TutorPhase7Flow.test.tsx` で統合テストする。
 > Phase 2 の Source → Candidate → LearningItem vertical slice は
 > `backend/tests/test_tutor_phase2_vertical_slice.py` と
 > `frontend/src/test/TutorPhase2Flow.test.tsx` で統合テストする。
