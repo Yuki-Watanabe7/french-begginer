@@ -336,6 +336,9 @@ backend/app/
 > [tutor_recommendation_quality.md](./tutor_recommendation_quality.md) を参照。
 > Phase 7 の長期学習品質（複数日シミュレーションと不変条件）は
 > [tutor_learning_quality.md](./tutor_learning_quality.md) を参照。
+> Phase 7 の品質制御を一本につないだ vertical slice は
+> `backend/tests/test_tutor_phase7_vertical_slice.py` と
+> `frontend/src/test/TutorPhase7Flow.test.tsx` で統合テストする。
 > Phase 2 の Source → Candidate → LearningItem vertical slice は
 > `backend/tests/test_tutor_phase2_vertical_slice.py` と
 > `frontend/src/test/TutorPhase2Flow.test.tsx` で統合テストする。

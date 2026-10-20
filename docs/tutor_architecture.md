@@ -39,7 +39,9 @@ Phase 4 vertical slice と Exit Criteria（Issue #167）、
 Tutor 推薦品質の固定 fixture・反実仮想テスト（Issue #180）、
 Phase 5 vertical slice と Exit Criteria（Issue #181）、
 Phase 6 の外部 Source ingestion（Issue #189、#190、#191、#192、#193、#194、#195）、
-Phase 6 vertical slice と Exit Criteria（Issue #196）
+Phase 6 vertical slice と Exit Criteria（Issue #196）、
+Phase 7 の学習量・品質の制御（Issue #200、#201、#202、#203、#204、#205、#206）、
+Phase 7 vertical slice と Exit Criteria（Issue #207）
 の責務分離・不変条件を記録する。
 
 - ドメイン: `backend/app/domain/tutor.py` / `backend/tests/test_tutor_domain.py`
@@ -156,6 +158,9 @@ Phase 6 vertical slice と Exit Criteria（Issue #196）
 - Phase 6 vertical slice: `backend/tests/test_tutor_phase6_vertical_slice.py`
   / `frontend/src/test/TutorPhase6Flow.test.tsx`
   （Issue #196）
+- Phase 7 vertical slice: `backend/tests/test_tutor_phase7_vertical_slice.py`
+  / `frontend/src/test/TutorPhase7Flow.test.tsx`
+  （Issue #207）
 - 最小API: `backend/app/api/tutor.py` / `backend/app/services/tutor_service.py`
   / `backend/tests/test_tutor_api.py` / `backend/tests/test_tutor_service.py`
 - 抽出: `backend/app/services/extraction_service.py`
@@ -4527,6 +4532,130 @@ max_new / direction balance を記録する。
 | policy version | `test_policy_versions_are_reported` |
 | OpenAI / LLM / wall clock 非依存 | `test_quality_modules_do_not_import_llm_or_clock` |
 
+## Phase 7 vertical slice（Issue #207）
+
+Issue #200〜#206 で追加した流入制御、既知 skip、文脈の再提示、弱点検出、
+負荷調整、Source 単位の学習状況を、固定 clock の synthetic learner で
+一本の学習フローとして検証する。複数日の不変条件そのものは
+「Phase 7 — 長期シミュレーションによる学習品質の回帰検証」を正とする。
+この slice は HTTP API と SQLite で、利用者が辿る操作の順に同じ policy を通す。
+
+Phase 7 のゴールは、**Tutor が学べることに加え、過剰・重複・不要な学習を避け、
+弱点に応じて適量を提示できること**である。
+
+```text
+複数 Source
+  -> Candidate 抽出 / accept
+  -> 既知指定と複数 SourceRef
+  -> recognition / production で異なる履歴
+  -> due / overdue
+  -> admission / known skip / weakness / adaptive constraints
+  -> Today Learning Plan
+  -> review を学習し、別文脈を提示
+  -> state / schedule / Source summary
+  -> 翌日の再 plan
+```
+
+実 LLM とネットワークは使わない。抽出は固定の fake extractor。
+時計は `2026-10-01T12:00:00Z` と翌日。手入力 Source の `created_at` は
+壁時計のままなので、PDF / SRT の取り込み時計だけを固定する。
+
+### シナリオ
+
+| 観点 | 確認すること |
+|------|----------------|
+| Source flood | 1 Source の未学習が per-source cap を超えず、due がある日は review を押しのけない |
+| Known item | explicit known は new から外れ、undo で戻る。due review は残る。recognition の auto-skip は未習熟の production を skip しない。1 回の正答では auto-skip しない |
+| Context rotation | 同じ `livre` の次の cloze が別 Source の文になる。page と start_seconds は Event metadata に残る |
+| Weakness | grammar の production は複数 Item の履歴から弱点になる。recognition は弱点にしない |
+| Adaptive load | due / overdue が多い日は new を 0 にし、説明に負荷を下げた理由を出す。翌日、due と overdue が soft 未満ならデフォルト件数へ戻る |
+| Source progress | 採用、開始済み、未学習、既知、direction 別の件数。複数 Source にまたがる Item の attempts は Source ごとに同じ 1 Item 分 |
+
+翌日の再 plan では、復習を先に置き、known のままの項目を new に入れない。
+明示件数を広げても admission の per-source cap と既知除外は広がらない。
+同一表記の別 Item（`chat` と `Chat`）を同じ new 枠に両方は入れない。
+
+file DB を dispose して開き直しても、複数 SourceRef、explicit known、
+page / time、翌日の new 対象が残る。
+
+### Frontend
+
+今日の学習カードの件数と負荷の説明、出題数画面を挟まずに Today Session を
+始めること、空欄の出典、新規項目の既知指定と取り消し、Source 詳細の学習状況と
+採用済み候補の既知表示までを `TutorFlow` でつなぐ。
+開始ボタンは全幅かつ `minHeight` 48、Source 行は全幅で題名が折り返し、
+既知の取り消しは `minHeight` 44。
+
+### Phase 7 ではまだ行わないこと
+
+- 新しい大規模 Source connector、OCR、login / paywall の突破
+- ML ranking、FSRS への自動移行
+- 自由会話 Tutor、notification
+- Phase 8 の自動追加
+
+| 観点 | 自動テスト |
+|------|------------|
+| Source 追加から翌日の再 plan まで | `test_phase7_quality_controls_vertical_slice` |
+| flood が cap を超えず review を押しのけない | 同上 |
+| explicit known の除外と undo。due は残る | 同上 |
+| recognition 既知が production を skip しない。1 回正答では skip しない | 同上 |
+| 別文脈と page / time | 同上 |
+| grammar production の弱点。recognition は弱点にしない | 同上 |
+| 負荷を下げ、翌日デフォルトへ戻す | 同上 |
+| Source 集計が複数 Source の Item を二重に数えない | 同上 |
+| DB 再 open | 同上 |
+| quiz / 名詞 / 冠詞 / TTS / Practice / Review / Today | `test_phase7_quiz_practice_review_today_and_tts_remain` |
+| 複数日シミュレーションの不変条件 | `test_tutor_phase7_quality.py` |
+| 少数誤答では弱点にしない | `test_sparse_errors_do_not_declare_a_weakness` |
+| 今日の学習、既知、Source 状況、全幅ボタン | `TutorPhase7Flow.test.tsx` |
+
+## Phase 7 Exit Criteria（Issue #107）との対応
+
+Issue #107 の Phase 7 は、学習量と品質の制御が一本の流れで動き、
+過剰な新規、既知の再学習、同じ文脈への固定、弱い根拠の苦手断定を避けることである。
+各 policy の式は、上記の Issue #200〜#206 の節を正とする。
+
+| Exit Criteria | 満たした実装 | 自動テスト |
+|---------------|--------------|------------|
+| new item backlog を無制限に Today Learning へ流さない | `decide_new_admissions` | `test_phase7_quality_controls_vertical_slice` / `test_admission_policy.py` |
+| review backlog に応じて new admission を抑制できる | admission budget と adaptive `max_new` | 同上 |
+| 同一 Source の new item 独占を防げる | per-source cap | `test_phase7_quality_controls_vertical_slice` |
+| explicit known を安全に skip / undo できる | `POST .../known` と `.../known/undo` | 同上 / `TutorPhase7Flow.test.tsx` |
+| conservative auto-skip が過剰判定しない | `decide_auto_skip`。1 回の正答では skip しない | `test_phase7_quality_controls_vertical_slice` |
+| recognition / production を別々に known / weakness 判断できる | direction 別の known と weakness | 同上 |
+| 同一 LearningItem を複数 Source context で再提示できる | context rotation | 同上 |
+| evidence / page / time provenance を維持する | LearningEvent.metadata | 同上 |
+| 複数 item 横断の WeaknessPattern を検出できる | `aggregate_weakness_patterns` | 同上 |
+| 少数サンプルで苦手と断定しない | weakness の最小試行・最小 Item 数 | `test_sparse_errors_do_not_declare_a_weakness` |
+| backlog / error に応じて Daily Plan 負荷を安全に調整できる | adaptive plan。min / max の内側 | `test_phase7_quality_controls_vertical_slice` |
+| 状態改善時に負荷を戻せる | 翌日のデフォルト件数 | 同上 |
+| Source 単位の学習状況を可視化できる | `GET .../learning-summary` と Source 詳細 | 同上 / `TutorPhase7Flow.test.tsx` |
+| multi-source item を集計で二重計上しない | Source ごとに関連 Item を 1 回数える | `test_phase7_quality_controls_vertical_slice` |
+| 複数日 simulation で主要 policy の相互作用を回帰保護できる | `evaluation.learning_quality` | `test_tutor_phase7_quality.py` |
+| due 優先と Phase 5 ranking の基本を壊さない | review が new より前。弱点 reason を explanation に出す | `test_phase7_quality_controls_vertical_slice` |
+| Source ingestion / Candidate / Practice / Review / Today / quiz / TTS に回帰がない | 既存 API は独立 | `test_phase7_quiz_practice_review_today_and_tts_remain` / `TutorPhase7Flow.test.tsx` |
+| スマホ相当幅で今日の学習、既知、Source 状況が操作できる | 全幅、折り返し、`minHeight` 44 / 48 | `TutorPhase7Flow.test.tsx` |
+| `bash scripts/quality-check.sh` が通る | ruff / pytest / lint / frontend test / build | 作業完了時に実行 |
+| Phase 7 境界と次段階を記載する | 本セクションと「Phase 7 後」 | 本ドキュメント |
+
+スマホ実機の使用感は自動 style test だけでは完全代替しない。
+Phase 6 の教材追加と、Phase 7 の既知操作、Source の学習状況、今日の学習、
+文脈表示は、実機未確認の場合は PR に残す。
+
+## Phase 7 後
+
+Phase 7 で Roadmap #107 の Phase 0〜7 が一巡する。
+完了後に Phase 8 を自動では増やさない。実利用の結果と未解決の課題を見て、
+次のどれにするかを別途決める。
+
+- Roadmap #107 を一旦完了とする
+- 実利用のフィードバックから次の Roadmap を作る
+- OCR、connector sync、会話 Tutor などの追加能力へ進む
+- scheduler や ranking の高度化を別 initiative にする
+
+Phase 7 へ進む前提だった OCR、login / paywall の突破、crawler、
+embeddings、ML ranking、自由会話 Tutor は、この完了条件にも含めない。
+
 ## Phase 1 Exit Criteria（Issue #107）との対応
 
 Issue #107 の Phase 1 は、ユーザーがフランス語テキストを貼り付け、
@@ -4608,3 +4737,7 @@ Source 単位の学習成果は、上記
 「Phase 7 — Source単位の学習成果」を正とする。
 長期の学習品質は、上記
 「Phase 7 — 長期シミュレーションによる学習品質の回帰検証」を正とする。
+Phase 7 の品質制御を一本につないだ検証は、上記
+「Phase 7 vertical slice」を正とする。
+Phase 7 自体の完了条件と、その後に Phase 8 を自動では増やさない判断は、上記
+「Phase 7 Exit Criteria」と「Phase 7 後」を正とする。
