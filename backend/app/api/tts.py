@@ -19,14 +19,16 @@ def speak(
 
     レスポンス形式: audio/mpeg バイナリ（StreamingResponse）
     Frontend再生方法:
-        1. <audio src="/api/tts/speak?text=un+livre" controls />  ← シンプル
+        1. <audio src="/api/tts/speak?text=un+livre" controls />  ← 開発環境のみ
         2. fetch() → Blob URL → new Audio(blobUrl).play()         ← プログラム制御向き
-    どちらも動作確認済み。ボタン連打防止が必要な場合はBlob URL方式を推奨。
+    本番（APP_ENV=production）は費用保護のため X-French-Tutor-Request: 1 ヘッダーを
+    要求するので、ヘッダーを付けられる 2 だけが動く（app/api/request_guard.py）。
 
     エラー時:
         503: APIキー未設定または無効
         400: テキストが空、または500文字超
         502: OpenAI APIへの接続失敗
+        403: 本番でヘッダーが無い、または別 Origin から呼ばれた
     """
     try:
         audio_data = generate_tts_audio(text)

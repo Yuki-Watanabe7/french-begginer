@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Backend (`cd backend`)
 
 ```bash
-uv sync --extra dev          # 依存関係インストール（初回 or pyproject.toml 変更後）
+uv sync --group dev          # 依存関係インストール（初回 or pyproject.toml 変更後）
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000  # 開発サーバー起動
 uv run ruff check .          # lint
 uv run pytest                # 全テスト
@@ -34,6 +34,16 @@ docker compose up
 ```
 
 Frontend: `http://localhost:5173` / Backend: `http://localhost:8000` / API docs: `http://localhost:8000/docs`
+
+### 家庭内本番（`compose.production.yml`、Issue #219）
+
+```bash
+bash scripts/production_compose.sh up -d --build --wait   # -f / -p / --env-file を固定した wrapper。dev と重ねない
+bash scripts/production_compose.sh exec backend python -m app.persistence.readiness  # DB の開閉・schema・書込確認
+bash scripts/probe_production_boundary.sh 127.0.0.1       # 入口 8080 のみ・Host / Origin / TTS 境界の外形確認
+```
+
+本番は `APP_ENV=production` で CORS を外し、`app/api/request_guard.py` が Host（`APP_ALLOWED_HOSTS` + loopback）、書込の Origin / Sec-Fetch-Site、TTS の `X-French-Tutor-Request` ヘッダーを検証する。手順は `docs/operations/local-lan-runbook.md`。
 
 ---
 

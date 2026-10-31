@@ -32,7 +32,7 @@ docker compose up
 
 ```bash
 cd backend
-uv sync --extra dev
+uv sync --group dev
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -134,7 +134,7 @@ docker compose down
 
 ```bash
 cd backend
-uv sync --extra dev
+uv sync --group dev
 
 # lint
 uv run ruff check .
@@ -179,4 +179,15 @@ npm run build
 ## 家庭内本番・外出先教材の運用設計
 
 家庭内で本番学習し、外出先では承認済み教材だけを読み取る構成を [ADR 0001](docs/adr/0001-local-lan-and-remote-readonly-hosting.md) に記録しています。
-[家庭内の起動・バックアップ・復旧手順案](docs/operations/local-lan-runbook.md) と [外出先教材のデータ・公開契約案](docs/operations/remote-readonly-contract.md) は設計草案です。本番構成や外部配布は未実装で、上の開発用起動手順を本番運用の代わりにしないでください。
+
+家庭内本番の Compose・nginx・アクセス境界（運用化 Phase 1 / Issue #219）は `compose.production.yml` にあり、開発用の `docker compose up` とは別に次の wrapper から操作します。
+
+```bash
+cp production.env.example production.env          # 初回のみ。Git 管理外
+docker volume create french-production-tutor-data   # 初回のみ。本番 DB の volume
+bash scripts/production_compose.sh up -d --build --wait
+bash scripts/probe_production_boundary.sh 127.0.0.1 # 入口・非公開ポート・Host/Origin の確認
+```
+
+既定は `127.0.0.1:8080` だけで待ち受けます。LAN への公開、実機確認、firewall、sleep・再起動からの復旧は [家庭内本番の起動・復旧手順](docs/operations/local-lan-runbook.md) に従ってください。バックアップと復元訓練（Phase 2 / #220）が済むまでは合成データだけで使い、学習の正本を切り替えません。
+[外出先教材のデータ・公開契約案](docs/operations/remote-readonly-contract.md) は設計草案で、外部配布は未実装です。

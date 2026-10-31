@@ -150,6 +150,21 @@ describe('useTTS', () => {
 
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
       expect.stringContaining("l'%C3%A9cole"),
+      expect.anything(),
+    )
+  })
+
+  it('本番の有料 GET 境界を通るよう、独自ヘッダーを付けて fetch する', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockSuccessResponse())
+
+    const { result } = renderHook(() => useTTS())
+    await act(async () => {
+      await result.current.play('un livre')
+    })
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      expect.stringContaining('/api/tts/speak?text=un%20livre'),
+      expect.objectContaining({ headers: { 'X-French-Tutor-Request': '1' } }),
     )
   })
 })

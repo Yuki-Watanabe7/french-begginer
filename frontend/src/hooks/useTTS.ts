@@ -2,6 +2,10 @@ import { useCallback, useRef, useState } from 'react'
 
 const BASE = import.meta.env.VITE_API_BASE ?? ''
 
+// TTS は GET でも API 費用が発生する。本番 backend は別サイトからの <audio src> 等を
+// 拒否するため、この独自ヘッダーを要求する（backend/app/api/request_guard.py）。
+const TTS_REQUEST_HEADERS = { 'X-French-Tutor-Request': '1' }
+
 export function useTTS() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -23,7 +27,9 @@ export function useTTS() {
     setError(null)
 
     try {
-      const res = await fetch(`${BASE}/api/tts/speak?text=${encodeURIComponent(text)}`)
+      const res = await fetch(`${BASE}/api/tts/speak?text=${encodeURIComponent(text)}`, {
+        headers: TTS_REQUEST_HEADERS,
+      })
       if (!res.ok) {
         setError('音声を読み込めませんでした')
         return

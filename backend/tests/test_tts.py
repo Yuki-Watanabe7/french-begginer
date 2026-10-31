@@ -20,6 +20,12 @@ def isolated_cache(tmp_path, monkeypatch):
     return cache
 
 
+def test_tts_cache_dir_from_env(tmp_path, monkeypatch):
+    """本番はコードを読取専用にするため、cache を TTS_CACHE_DIR の volume に置く。"""
+    monkeypatch.setenv("TTS_CACHE_DIR", str(tmp_path / "volume"))
+    assert TTSCacheService().cache_dir == tmp_path / "volume"
+
+
 # --- 既存テスト ---
 
 
