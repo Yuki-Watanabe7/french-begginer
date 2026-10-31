@@ -10,6 +10,26 @@ FastAPI (Python)
 SQLite (初期) → PostgreSQL (将来)
 ```
 
+家庭内本番（Issue #219）は開発用 Compose と分け、`compose.production.yml` で次の形に固定する。
+手順・前提は [local-lan-runbook](./operations/local-lan-runbook.md)、判断は [ADR 0001](./adr/0001-local-lan-and-remote-readonly-hosting.md)。
+
+```
+Browser ── HTTP :8080（既定 127.0.0.1、LAN は所有者判断後）
+  → nginx（React 配信、/api と /health を同一オリジンで中継。Host は書き換えない）
+  → FastAPI :8000（ホスト非公開、APP_ENV=production、非 root・読取専用 rootfs・単一 worker）
+  → SQLite（external named volume french-production-tutor-data）
+```
+
+| 項目 | development（`docker-compose.yml`） | production（`compose.production.yml`） |
+|------|------|------|
+| CORS | 全許可 | なし（同一オリジン） |
+| Host 検証 | なし | `APP_ALLOWED_HOSTS` と loopback 以外は 400 |
+| 書込の Origin 検証 | なし | Origin / Sec-Fetch-Site で同一オリジンと示せなければ 403 |
+| TTS（有料 GET） | 制限なし | `X-French-Tutor-Request: 1` 必須、別 Origin は 403 |
+| DB | `backend/data/tutor.db`（bind mount） | `/var/lib/french-tutor/tutor.db`（専用 volume） |
+
+Host / Origin の検証は `backend/app/api/request_guard.py`。これはブラウザ経由の悪用対策で、利用者認証ではない。
+
 ## Frontend / Backend 構成
 
 | 項目 | 詳細 |
@@ -17,13 +37,14 @@ SQLite (初期) → PostgreSQL (将来)
 | Frontend | React 18 + TypeScript + Vite、スタイルはインラインCSSで最小構成 |
 | Backend | FastAPI + Python 3.12、uvicorn でサーブ |
 | Dev環境 | Docker Compose、Dev Container / GitHub Codespaces |
+| 家庭内本番 | `compose.production.yml`（nginx + FastAPI + 専用 SQLite volume）。`scripts/production_compose.sh` から操作 |
 | CI | GitHub Actions (ruff, pytest, npm lint, npm build) |
 
 ## API 概要
 
 | Method | Path | 説明 |
 |--------|------|------|
-| GET | `/health` | ヘルスチェック |
+| GET | `/health` | ヘルスチェック（プロセスの応答だけ。DB の正常性は `python -m app.persistence.readiness` で確認） |
 | GET | `/api/questions/next` | 動詞活用問題を1問返す。クエリパラメータで絞り込み可能（下表参照） |
 | GET | `/api/questions/session` | セッション用に重複なしで最大`count`問の動詞活用問題を返す |
 | POST | `/api/answers/check` | 動詞活用回答の正誤判定 |
@@ -33,7 +54,7 @@ SQLite (初期) → PostgreSQL (将来)
 | GET | `/api/nouns/article/next` | 冠詞+名詞クイズ問題を1問返す |
 | GET | `/api/nouns/article/session` | セッション用に重複なしで最大`count`問の冠詞+名詞問題を返す |
 | POST | `/api/nouns/article/check` | 冠詞+名詞回答の正誤判定 |
-| GET | `/api/tts/speak` | フランス語テキストをOpenAI TTSで音声化してaudio/mpegを返す。`OPENAI_API_KEY`未設定時は503を返す |
+| GET | `/api/tts/speak` | フランス語テキストをOpenAI TTSで音声化してaudio/mpegを返す。`OPENAI_API_KEY`未設定時は503を返す。production では `X-French-Tutor-Request: 1` ヘッダーが必須で、無い・別 Origin は 403（`<audio src>` 直指定は不可） |
 | POST | `/api/tutor/sources` | 手入力の SourceDocument を作成する |
 | POST | `/api/tutor/sources/ingest/url` | Web URL の本文を取得して SourceDocument にする。同じ URL と本文は既存を返し、本文が変わったら版を追加する。危険な URL は 400、サイズ超過は 413、非 HTML は 415、本文なしは 422、上流エラーは 502、タイムアウトは 504 |
 | POST | `/api/tutor/sources/ingest/pdf` | テキスト PDF を multipart で取り込み、ページ位置付きの SourceDocument にする。同じファイルと本文は既存を返す。不正・破損は 400、サイズやページ数の超過は 413、PDF 以外は 415、パスワード付きとテキストレイヤー不足は 422、解析タイムアウトは 504。OCR はしない |
@@ -258,7 +279,10 @@ review entry は due direction を守る。new entry の ReviewSchedule は初�
 
 ```
 backend/app/
+├── main.py       # create_app。development は CORS 全許可、production は request guard（Issue #219）
+├── runtime_settings.py  # APP_ENV / APP_ALLOWED_HOSTS の解釈（Issue #219）
 ├── api/          # HTTPリクエスト/レスポンスの受け取り・返却のみ
+│   ├── request_guard.py  # 本番の Host / Origin / 有料 GET 境界（Issue #219）
 │   ├── questions.py
 │   ├── answers.py
 │   ├── nouns.py
@@ -297,7 +321,7 @@ backend/app/
 │   ├── pdf_parser.py         # pypdf による text layer 抽出（OCR はしない）
 │   └── pdf.py                # pdf adapter
 ├── evaluation/   # 抽出品質（Issue #136）、推薦品質fixture（Issue #180）、長期学習品質（Issue #206）。HTTPからは使わない
-├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）
+├── persistence/  # Tutorデータの SQLite / schema version（ORMはここまで）。readiness.py は DB の開閉・schema・書込確認 CLI（Issue #219）
 ├── repositories/ # Tutorデータの永続化境界（Protocol + SQLite実装）
 └── services/     # ユースケース（問題選択など、複数domainをまたぐ処理）
     ├── question_service.py

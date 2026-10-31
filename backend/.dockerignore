@@ -1,0 +1,13 @@
+# 開発 DB・cache・秘密をイメージへ焼き込まない
+data/
+.cache/
+*.db
+*.sqlite
+*.sqlite3
+.env
+*.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/

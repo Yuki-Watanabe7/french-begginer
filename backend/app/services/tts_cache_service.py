@@ -1,13 +1,20 @@
 import hashlib
+import os
 from pathlib import Path
 
 
 class TTSCacheService:
-    """ファイルシステムベースのTTS音声キャッシュ"""
+    """ファイルシステムベースのTTS音声キャッシュ
+
+    置き場所は TTS_CACHE_DIR（本番はコードを読取専用にするため専用 volume）、
+    未指定時は backend/.cache/tts。
+    """
 
     def __init__(self, cache_dir: "Path | str | None" = None):
         if cache_dir is None:
-            cache_dir = Path(__file__).parent.parent.parent / ".cache" / "tts"
+            cache_dir = os.environ.get("TTS_CACHE_DIR") or (
+                Path(__file__).parent.parent.parent / ".cache" / "tts"
+            )
         self.cache_dir = Path(cache_dir)
 
     def make_cache_key(

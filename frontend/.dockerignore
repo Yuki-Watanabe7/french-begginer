@@ -1,0 +1,7 @@
+# ホストの node_modules（macOS 向けバイナリ）や古い dist、env をビルドに混ぜない
+node_modules/
+dist/
+.vite/
+.env
+.env.*
+*.env

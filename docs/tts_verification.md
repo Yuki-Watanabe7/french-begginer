@@ -142,7 +142,11 @@ GET /api/tts/speak?text=un+livre
 
 ### フロントエンドでの再生方式
 
-#### 方式1: `<audio>` 要素に src を直接指定
+家庭内本番（`APP_ENV=production`、Issue #219）では、TTS は GET でも API 費用が発生するため
+`X-French-Tutor-Request: 1` ヘッダーの無い要求と別 Origin からの要求を 403 にする。
+ヘッダーを付けられない方式1は本番では動かない。実装（`useTTS.ts`）は方式2を使う。
+
+#### 方式1: `<audio>` 要素に src を直接指定（開発環境のみ）
 
 ```tsx
 <audio
@@ -156,7 +160,9 @@ GET /api/tts/speak?text=un+livre
 
 ```ts
 async function playTts(text: string): Promise<void> {
-  const res = await fetch(`/api/tts/speak?text=${encodeURIComponent(text)}`)
+  const res = await fetch(`/api/tts/speak?text=${encodeURIComponent(text)}`, {
+    headers: { 'X-French-Tutor-Request': '1' },
+  })
   if (!res.ok) throw new Error(`TTS error: ${res.status}`)
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)

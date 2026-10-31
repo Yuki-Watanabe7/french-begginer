@@ -1,0 +1,57 @@
+# 家庭内本番（運用化 Phase 1 / Issue #219）。開発用 docker-compose.yml には重ねない。
+# 起動は scripts/production_compose.sh 経由で行う（-f / -p / --env-file の指定漏れを防ぐ）。
+# 手順・前提は docs/operations/local-lan-runbook.md。
+name: french-production
+
+x-hardening: &hardening
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  backend:
+    <<: *hardening
+    build:
+      context: ./backend
+      target: prod
+    image: french-production-backend:local
+    environment:
+      APP_ENV: production
+      APP_ALLOWED_HOSTS: ${FRENCH_ALLOWED_HOSTS:-}
+      TUTOR_DATA_DIR: /var/lib/french-tutor
+      # 設定されていると TUTOR_DATA_DIR より優先されるため、本番では空に固定する
+      TUTOR_DATABASE_URL: ""
+      TTS_CACHE_DIR: /var/cache/french-tutor/tts
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - tutor-data:/var/lib/french-tutor
+      - tts-cache:/var/cache/french-tutor
+    # ホストには公開しない。nginx からコンテナ間通信でだけ到達する
+    expose:
+      - "8000"
+
+  web:
+    <<: *hardening
+    build:
+      context: ./frontend
+      target: prod
+    image: french-production-web:local
+    ports:
+      # 既定は localhost のみ。LAN 公開は所有者の判断後に予約 LAN IPv4 を指定する
+      - "${FRENCH_BIND_ADDRESS:-127.0.0.1}:${FRENCH_HTTP_PORT:-8080}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  # 本番 DB。external にして、名前違い・`down -v` で空 DB を作ったり消したりしない
+  tutor-data:
+    name: french-production-tutor-data
+    external: true
+  tts-cache:
+    name: french-production-tts-cache
