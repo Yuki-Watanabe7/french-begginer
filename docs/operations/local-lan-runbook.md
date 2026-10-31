@@ -113,14 +113,14 @@ bash scripts/production_compose.sh exec backend python -m app.persistence.readin
 
 固定した版は自動で上がらない。更新はこの手順でまとめて行い、PR で差分を確認する。
 
-1. ベースイメージの新しい版を選び、digest を取得する（`docker buildx imagetools inspect <image>:<tag>`）。公開から 2 週間以上経った版を選ぶ。`backend/Dockerfile` と `frontend/Dockerfile` の `<tag>@sha256:<digest>` を更新する。
+1. ベースイメージの新しい版を選び、digest を取得する（`docker buildx imagetools inspect <image>:<tag>`）。通常は公開から 2 週間以上経った版を選ぶ。既知脆弱性の修正で待てない場合は、公開日、待たない理由、固定値、互換性テストと scan の結果を更新記録に残す（[#226 の記録](dependency-security-2026-10-31.md) を参照）。`backend/Dockerfile` と `frontend/Dockerfile` の `<tag>@sha256:<digest>` を更新する。
 2. Python 依存は `cd backend && uv lock --upgrade-package <name>`、Node 依存は `cd frontend && npm install <name>@<version>` で lock ファイルを更新する。
 3. `bash scripts/quality-check.sh` を通す。
 4. `bash scripts/production_compose.sh build` の後、`docker scout cves local://french-production-backend:local --only-severity critical,high`（web も同様）で既知の脆弱性を確認する。
 5. Phase 2 の実装後は upgrade 前に整合バックアップを取る。それまでは合成データだけで行う。
 6. `up -d --wait`、readiness、probe を実行し、画面で回答を1件確認する。
 
-2026-10-31 の scan では、`uv.lock` の anyio / certifi / pypdf / starlette と、Debian / Alpine のベースイメージの一部パッケージに critical・high の既知脆弱性があった（開発環境も同じ版を使う）。web イメージでは使わない curl を削除した。本番開始前に [#226](https://github.com/Yuki-Watanabe7/french-begginer/issues/226) で依存を更新し、scan をやり直す。
+2026-10-31 の [#226](https://github.com/Yuki-Watanabe7/french-begginer/issues/226) の更新後 scan（linux/arm64）では、web の critical / high は 0 件、backend は critical 0 件 / high 1 件（Debian 13 の zlib、安定版の修正未提供）となった。Python 4 依存の更新、Debian 13 への移行、nginx の未使用モジュール除去と zlib の修正版固定で、修正版のある critical / high を解消した。frontend 開発依存の critical / high も 0 件。固定値、再 scan の結果、残る zlib の到達性・影響・受け入れ案は [更新・脆弱性評価の記録](dependency-security-2026-10-31.md) にある。**所有者による残余リスクの受け入れは未承認。本番運用開始・LAN 公開の判断は引き続き保留する。**
 
 ## SQLite のバックアップ
 

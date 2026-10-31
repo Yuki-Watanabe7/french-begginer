@@ -15,9 +15,12 @@ ENV VITE_API_BASE=
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.30.6-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03 AS prod
-# 入口では curl を使わない（healthcheck は busybox wget）。攻撃面と既知 CVE を減らす
+# 静的配信と proxy だけを使う。未使用モジュールと、その brotli / libxml2 等を除く。
+# healthcheck は busybox wget。zlib は修正版を固定し、全体の apk upgrade はしない。
 USER root
-RUN apk del --no-cache curl
+RUN apk del --no-cache curl nginx-module-image-filter nginx-module-xslt \
+        nginx-module-njs nginx-module-geoip \
+    && apk add --no-cache zlib=1.3.2-r1
 USER 101
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html

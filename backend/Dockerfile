@@ -1,7 +1,8 @@
 # ベースイメージは版と digest で固定する。更新手順は docs/operations/local-lan-runbook.md。
 FROM ghcr.io/astral-sh/uv:0.13.0@sha256:cdc6093146eb3ff6a40107b38f008b789e050e77ad87865e381d9917da55a168 AS uv
 
-FROM python:3.12.16-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337 AS base
+# Debian 13 へ移行して bookworm の util-linux / perl の既知脆弱性を解消する。
+FROM python:3.12.16-slim-trixie@sha256:8523d6abeb48ceae0b7240d30c5808fc26cb79c1a635bacdf19cf3baecfbec07 AS base
 WORKDIR /app
 
 COPY --from=uv /uv /usr/local/bin/uv
