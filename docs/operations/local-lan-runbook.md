@@ -120,7 +120,7 @@ bash scripts/production_compose.sh exec backend python -m app.persistence.readin
 5. Phase 2 の実装後は upgrade 前に整合バックアップを取る。それまでは合成データだけで行う。
 6. `up -d --wait`、readiness、probe を実行し、画面で回答を1件確認する。
 
-2026-10-31 の scan では、`uv.lock` の anyio / certifi / pypdf / starlette と、Debian / Alpine のベースイメージの一部パッケージに critical・high の既知脆弱性があった（開発環境も同じ版を使う）。web イメージでは使わない curl を削除した。本番開始前に別 Issue で依存を更新し、scan をやり直す。
+2026-10-31 の scan では、`uv.lock` の anyio / certifi / pypdf / starlette と、Debian / Alpine のベースイメージの一部パッケージに critical・high の既知脆弱性があった（開発環境も同じ版を使う）。web イメージでは使わない curl を削除した。本番開始前に [#226](https://github.com/Yuki-Watanabe7/french-begginer/issues/226) で依存を更新し、scan をやり直す。
 
 ## SQLite のバックアップ
 
