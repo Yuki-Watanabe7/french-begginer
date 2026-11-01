@@ -43,6 +43,8 @@ bash scripts/production_compose.sh exec backend python -m app.persistence.readin
 bash scripts/probe_production_boundary.sh 127.0.0.1       # 入口 8080 のみ・Host / Origin / TTS 境界の外形確認
 ```
 
+本番 DB の明示初期化、日次・終了時・upgrade前の暗号化バックアップ、隔離コピーへの復元・回答検証は `docs/operations/sqlite-backup-runbook.md`。通常起動は既存 DB を必須とし、バックアップ成功と本番正本切替の承認は別に扱う。
+
 本番は `APP_ENV=production` で CORS を外し、`app/api/request_guard.py` が Host（`APP_ALLOWED_HOSTS` + loopback）、書込の Origin / Sec-Fetch-Site、TTS の `X-French-Tutor-Request` ヘッダーを検証する。手順は `docs/operations/local-lan-runbook.md`。
 
 ---

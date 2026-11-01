@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.french-tutor.backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/ABSOLUTE/PATH/TO/uv</string>
+    <string>run</string><string>--project</string><string>/ABSOLUTE/REPO/backend</string>
+    <string>--no-sync</string><string>python</string>
+    <string>/ABSOLUTE/REPO/scripts/production_backup.py</string>
+    <string>backup</string><string>--config</string><string>/PRIVATE/backup.config.json</string>
+    <string>--reason</string><string>daily</string><string>--if-due</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>3600</integer>
+  <key>StandardOutPath</key><string>/PRIVATE/backup.stdout.log</string>
+  <key>StandardErrorPath</key><string>/PRIVATE/backup.stderr.log</string>
+</dict>
+</plist>

@@ -21,7 +21,12 @@ fi
 
 # compose の変数展開はシェルの環境変数を env ファイルより優先する。
 # 開発シェルの OPENAI_API_KEY などが本番へ紛れ込まないよう、env ファイルだけを正にする。
-unset OPENAI_API_KEY FRENCH_BIND_ADDRESS FRENCH_HTTP_PORT FRENCH_ALLOWED_HOSTS
+unset OPENAI_API_KEY FRENCH_BIND_ADDRESS FRENCH_HTTP_PORT FRENCH_ALLOWED_HOSTS FRENCH_TUTOR_VOLUME
+export FRENCH_APP_COMMIT=$(git -C "$root" rev-parse HEAD)
+export FRENCH_APP_DIRTY=false
+if [[ -n "$(git -C "$root" status --porcelain --untracked-files=normal -- backend/app backend/Dockerfile backend/pyproject.toml backend/uv.lock)" ]]; then
+  export FRENCH_APP_DIRTY=true
+fi
 
 exec docker compose \
   --project-directory "$root" \

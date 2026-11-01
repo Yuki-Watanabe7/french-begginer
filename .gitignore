@@ -21,6 +21,18 @@ backend/.cache/
 *.db
 *.sqlite
 *.sqlite3
+*.db-*
+*.sqlite-*
+*.sqlite3-*
+*.age
+*.key
+backup.config.json
+backup.config.*.json
+!scripts/backup.config.example.json
+manifest.json
+receipt.json
+restore-record.json
+.private/
 
 # Misc
 .DS_Store

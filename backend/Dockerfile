@@ -29,6 +29,10 @@ EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 FROM base AS prod
+ARG APP_COMMIT
+ARG APP_DIRTY=false
+LABEL org.opencontainers.image.revision=$APP_COMMIT
+ENV APP_COMMIT=$APP_COMMIT APP_DIRTY=$APP_DIRTY
 RUN UV_COMPILE_BYTECODE=1 uv sync --locked --no-install-project --no-dev \
     && rm /usr/local/bin/uv \
     && groupadd --system --gid 10001 tutor \
