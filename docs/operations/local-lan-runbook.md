@@ -4,7 +4,7 @@
 
 - 2026-10-31 時点で Phase 1（[#219](https://github.com/Yuki-Watanabe7/french-begginer/issues/219)）の本番 Compose・nginx・アクセス境界を実装した。ホスト上の localhost で行った検証は「[検証の記録](#検証の記録)」にある。
 - Mac / Windows / iPhone の実機確認、LAN 公開、firewall、ゲスト WiFi、sleep・OS 再起動の確認は所有者がまだ実施していない。
-- バックアップ・復元（Phase 2 / [#220](https://github.com/Yuki-Watanabe7/french-begginer/issues/220)）は未実装。復元訓練が通るまで本番は合成データだけで使い、学習の正本（開発用 `backend/data/tutor.db`）を移さない。
+- バックアップ・復元（Phase 2 / [#220](https://github.com/Yuki-Watanabe7/french-begginer/issues/220)）の実装・コマンドは [SQLite のバックアップ・復元手順](sqlite-backup-runbook.md)。合成データの検証と別物理機器による受入は別であり、後者の復元訓練が通るまで本番は合成データだけで使い、学習の正本（開発用 `backend/data/tutor.db`）を移さない。
 
 ## 対象と運用開始条件
 
@@ -26,8 +26,8 @@
 | フロント | build 時 `VITE_API_BASE` は空。nginx が `/api/` と `/health` を同一オリジンで backend へ中継し、Host を書き換えない。backend を作り直して IP が変わっても Docker の内部 DNS で引き直す |
 | backend | `APP_ENV=production`、uid 10001 の非 root、rootfs 読取専用、`--workers 1`、`--reload` なし、dev 依存なし。書けるのは DB volume、TTS cache volume、`/tmp`（tmpfs）だけ |
 | 許可 Host | `FRENCH_ALLOWED_HOSTS`（ポートなし、カンマ区切り）+ 常に `localhost` / `127.0.0.1` / `[::1]`。それ以外は 400 |
-| DB | `TUTOR_DATA_DIR=/var/lib/french-tutor`、DB は `tutor.db`。`TUTOR_DATABASE_URL` は空に固定（設定されると優先されるため） |
-| DB volume | external named volume `french-production-tutor-data`（ディレクトリ全体、0700、uid 10001）。external なので compose は作らず、`down -v` でも消えない。名前違いで空 DB を黙って作ることもない |
+| DB | `TUTOR_DATA_DIR=/var/lib/french-tutor`、DB は `tutor.db`。`TUTOR_DATABASE_URL` は空に固定。非空・別パス・未初期化DB・所有権やjournal書込権限不足は起動失敗にする |
+| DB volume | external named volume、既定 `french-production-tutor-data`（ディレクトリ全体、0700、uid/gid 10001）。復旧後だけ private `production.env` の `FRENCH_TUTOR_VOLUME` を検証済みの別volume名へ変更。external なので compose は作らず、`down -v` でも消えない。DB不在でも通常起動は空DBを作らない |
 | TTS cache | named volume `french-production-tts-cache`。消えても再生成できる（再生成時に API 費用が発生する） |
 | 秘密 | `OPENAI_API_KEY` は `production.env` から backend の実行時だけに渡す。フロント build、Git、ログに入れない。`production_compose.sh config` の出力にはキーが展開されるので貼り付けない |
 | イメージ | 各ベースイメージは版と digest で固定する（`backend/Dockerfile`、`frontend/Dockerfile`）。Python 依存は `uv.lock`、Node 依存は `package-lock.json` どおりに入れる |
@@ -38,13 +38,16 @@
 ```bash
 cp production.env.example production.env             # 値は既定のまま（127.0.0.1）
 docker volume create french-production-tutor-data      # 初回だけ。既にあれば作り直さない
-bash scripts/production_compose.sh up -d --build --wait
+bash scripts/production_compose.sh build
+bash scripts/production_compose.sh run --rm --no-deps backend \
+  python -m app.persistence.production initialize-empty-volume
+bash scripts/production_compose.sh up -d --wait
 bash scripts/production_compose.sh ps                  # backend / web が (healthy)
 bash scripts/production_compose.sh exec backend python -m app.persistence.readiness
 bash scripts/probe_production_boundary.sh 127.0.0.1    # 全項目 PASS
 ```
 
-初回起動で backend が空の DB を作り、現行 schema を記録する。`ready: ok (... schema_version=5)` を確認する。`external volume "french-production-tutor-data" not found` が出たら、初回なら上の `docker volume create` を実行する。初回でないのに出た場合は volume 名か Docker の接続先が違うので、新しい volume を作らずに `docker volume ls` と `docker context ls` を確認する。
+初回は上記の明示初期化で DB を作り、現行 schema を記録する。通常起動は DB を作らない。既存の DB がある場合は初期化コマンドを実行しない。`ready: ok (... schema_version=5)` を確認する。`external volume "french-production-tutor-data" not found` が出たら、初回なら上の `docker volume create` を実行する。初回でないのに出た場合は volume 名か Docker の接続先が違うので、新しい volume を作らずに `docker volume ls` と `docker context ls` を確認する。
 
 ## LAN へ公開する（所有者の判断後）
 
@@ -76,12 +79,12 @@ bash scripts/probe_production_boundary.sh <localhost または予約IP>
 
 ## 停止・sleep・再起動
 
-- 通常停止は `bash scripts/production_compose.sh stop`、再開は `up -d --wait`。`down` はコンテナを消すが DB volume は残る。`down -v` でも external の DB volume は消えないが、TTS cache は消えるので通常は使わない。
+- バックアップ設定後の通常停止・再開は `bash scripts/production_manage.sh stop` / `start`（`FRENCH_BACKUP_CONFIG` 必須）。停止後に終了時バックアップ、再開時に日次の補完を行う。詳細は [日次・学習終了・更新](sqlite-backup-runbook.md#日次学習終了更新)。`down` はコンテナを消すが DB volume は残る。`down -v` でも external の DB volume は消えないが、TTS cache は消えるので通常は使わない。
 - `restart: unless-stopped` は、プロセスが自分で終了・異常終了したときにコンテナを再起動する。`docker kill` / `docker stop` / `compose stop` は手動停止扱いで、自動では戻らない（2026-10-31 に実測）。手動で止めたら `up -d --wait` で戻す。
 - ホストの sleep 中は家庭内学習もバックアップも止まる。復帰後は `ps` で healthy、`ipconfig getifaddr en0` で予約 IP が戻っていることを確かめ、probe を実行する。IP が付く前に Docker が入口を作り直そうとすると失敗するので、そのときは `up -d --wait` をやり直す。
 - OS 再起動・ログイン後は、Docker Desktop が起動して初めてコンテナが戻る。Docker Desktop の「Start Docker Desktop when you sign in」設定を確認する（無効なら手動で起動する）。復帰までの所要時間を実機確認の記録に残す。
 - 24 時間稼働は約束しない。無人で再起動直後から使える要件が出たら、ホストの選定を見直す。
-- 電源を切る前は更新を止め、バックアップしてから停止する（Phase 2 の実装後）。
+- 電源を切る前は `production_manage.sh stop` のバックアップ成功を確認する。機器未接続等で失敗した場合は未達として記録し、停止は維持する。
 
 ## 障害の切り分けと回復
 
@@ -117,35 +120,20 @@ bash scripts/production_compose.sh exec backend python -m app.persistence.readin
 2. Python 依存は `cd backend && uv lock --upgrade-package <name>`、Node 依存は `cd frontend && npm install <name>@<version>` で lock ファイルを更新する。
 3. `bash scripts/quality-check.sh` を通す。
 4. `bash scripts/production_compose.sh build` の後、`docker scout cves local://french-production-backend:local --only-severity critical,high`（web も同様）で既知の脆弱性を確認する。
-5. Phase 2 の実装後は upgrade 前に整合バックアップを取る。それまでは合成データだけで行う。
-6. `up -d --wait`、readiness、probe を実行し、画面で回答を1件確認する。
+5. `FRENCH_BACKUP_CONFIG` を指定して `bash scripts/production_manage.sh upgrade`。入口・writer停止後の暗号化別機器バックアップに成功してから build・起動・readiness を行う。バックアップ未達なら停止したまま更新を中断する。
+6. probe と復元用コピーへの回答を確認する。日常確認で正本へ試験回答を混ぜない。
 
 2026-10-31 の [#226](https://github.com/Yuki-Watanabe7/french-begginer/issues/226) の更新後 scan（linux/arm64）では、web の critical / high は 0 件、backend は critical 0 件 / high 1 件（Debian 13 の zlib、安定版の修正未提供）となった。Python 4 依存の更新、Debian 13 への移行、nginx の未使用モジュール除去と zlib の修正版固定で、修正版のある critical / high を解消した。frontend 開発依存の critical / high も 0 件。固定値、再 scan の結果、残る zlib の到達性・影響・受け入れ案は [更新・脆弱性評価の記録](dependency-security-2026-10-31.md) にある。**所有者による残余リスクの受け入れは未承認。本番運用開始・LAN 公開の判断は引き続き保留する。**
 
 ## SQLite のバックアップ
 
-目標 RPO は稼働日の最終更新から 24 時間以内。予定は日次・学習終了時・upgrade 直前。ホスト停止で予定を逃したら次回起動時に補う。最後の成功した off-host コピーが目標より古ければ未達と記録する。現在、この目標を実現する job はない。
-
-1. 本番 DB を特定し、容量と schema version を確認する。実装するツールは read-only 接続から [SQLite backup API](https://www.sqlite.org/backup.html)（Python `sqlite3.Connection.backup` 等）で新規一時ファイルへコピーする。更新中の DB ファイルを `cp` する方式は採用しない。
-2. 完了したコピーに `PRAGMA integrity_check` と `PRAGMA foreign_key_check` を実行する。前者が `ok`、後者が空であること、期待する schema と主要テーブル件数を確認する。失敗した一時ファイルを成功版へ昇格しない。
-3. 作成時刻、backup ID、アプリ commit、schema version、サイズ、SHA-256、主要件数を私的 manifest に記録する。文書や CI に実内容を記録しない。整合コピーを確定した後、recipient 公開鍵による暗号化等で保護する（初期候補 `age`）。復号鍵は本人が別に管理する。
-4. 暗号化ファイルと manifest を別機器へコピーし、hash と復号・整合性を確認する。初期候補は暗号化済み外付けディスクで、完了後に切り離す。同じ内蔵ディスク、同じ Docker volume、Git、教材の静的ホストは off-host 保存先に数えない。
-5. 成功と確認できた最後の版を維持する。保持目安は日次 7、週次 4、月次 3 世代。削除は新しい off-host コピーの確認後。機器未接続なら警告し、RPO 達成と表示しない。公開クラウド保管先の追加は別の配布判断とする。
-
-バックアップ対象は SourceDocument、Candidate、LearningItem と参照、LearningEvent、LearnerState、ReviewSchedule、known 設定とその履歴、schema_migrations を含む **DB 全体**。アプリ版と復旧に必要な非秘密設定も記録する。元音声等の非保存入力を復元できるとは約束しない。API キーは教材・DB バックアップへ足さず、別の秘密管理から再設定する。
+実装済みのコマンド、recipient 公開鍵と別保管の復号鍵、指定した別機器の確認、日次7/週次4/月次3世代、失敗・機器未接続の扱いは [SQLite のバックアップ・復元手順](sqlite-backup-runbook.md) を参照する。RPO は稼働日24時間以内を目標とする。ホスト停止中の予定実行や同じ物理ディスクのコピーを成功扱いにしない。
 
 ## 更新・破損・ホスト故障からの復旧
 
-RTO は動作する代替ホストと復号鍵が揃ってから 4 時間以内が目標。機器調達・鍵紛失にかかる時間は含まれない。達成実績は Phase 2 の復元訓練まで未確認。
+[別の領域への復元と回答保存](sqlite-backup-runbook.md#別の領域へ復元して回答保存を確認する)、[別 volume と rollback](sqlite-backup-runbook.md#別-volume-で起動し正本を切り替える) に実コマンドがある。RTO は動くホストと別保管の復号鍵が揃ってから4時間以内が目標。実測値は私的 `restore-record.json` に残し、コピー復元だけでアプリ復旧を達成したとはしない。
 
-1. 書込を停止し、問題の DB と journal/WAL/SHM をまとめて保全する。壊れた DB や現在の volume を上書き・削除しない。
-2. 最後に検証済みの off-host 版を空の別ディレクトリへ復号する。hash、integrity、FK、schema、記録した件数を確認する。最新版が不正なら前の正常な世代を選び、失う期間を明示する。
-3. バックアップの manifest が指定するアプリ版で隔離した復旧用インスタンスを起動する。実 API キーを渡さず、メール等の外向き処理を発生させない。復旧先の volume 所有権を実行 UID/GID に合わせる。
-4. Source、Item、方向別の復習予定、既知指定、最近の履歴を確認する。テスト用コピーで回答保存まで検証し、そのテスト書込を本番復元データに混ぜない。
-5. 本番書込停止のまま、検証済みの未変更コピーを新しい本番 volume に配置して起動し、他端末で読取を確認後に書込を再開する。復元した版・失った期間・実測時間を私的運用記録へ残す。
-6. 復元後に新しい整合バックアップを作り、個人 Snapshot は新しい `as_of` で別途生成する。外部教材から DB を再構成しない。
-
-upgrade 前には停止中の整合バックアップと復元確認を行う。`schema.py` は起動時に upgrade するため、古いイメージだけへ戻しても旧 schema に戻らない。rollback は旧アプリと upgrade 前バックアップの組合せで行い、upgrade 後の更新消失を報告する。新 schema の DB は保全し、逆 migration を推測で実行しない。
+現在の volume・DB・journal を保全し、別の新規領域へ復元する。旧アプリへ戻すときは upgrade 前 DB と旧 image ID の組を使い、新しい DB を旧コードへ向けない。試験回答は使い捨てコピーだけに行い、正本へ混ぜない。別の物理機器・鍵・代替ホストの受入が済むまで正本を切り替えない。
 
 ## 検証の記録
 

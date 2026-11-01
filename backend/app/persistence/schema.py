@@ -46,6 +46,10 @@ def get_schema_version(engine: Engine) -> int:
 def init_schema(engine: Engine) -> None:
     """未初期化なら現行スキーマを作成し、古いDBなら upgrade を適用する。"""
     with engine.begin() as conn:
+        if conn.dialect.name == "sqlite":
+            # sqlite3 の legacy transaction mode は DDL だけでは BEGIN しない。
+            # migration の途中失敗で CREATE/ALTER だけ残ることを防ぐ。
+            conn.exec_driver_sql("BEGIN IMMEDIATE")
         SchemaMigrationRow.__table__.create(conn, checkfirst=True)
         version = _read_version(conn)
         if version == 0:

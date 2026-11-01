@@ -19,11 +19,15 @@ services:
     build:
       context: ./backend
       target: prod
+      args:
+        APP_COMMIT: ${FRENCH_APP_COMMIT:?Use scripts/production_compose.sh}
+        APP_DIRTY: ${FRENCH_APP_DIRTY:-false}
     image: french-production-backend:local
     environment:
       APP_ENV: production
       APP_ALLOWED_HOSTS: ${FRENCH_ALLOWED_HOSTS:-}
       TUTOR_DATA_DIR: /var/lib/french-tutor
+      TUTOR_VOLUME_NAME: ${FRENCH_TUTOR_VOLUME:-french-production-tutor-data}
       # 設定されていると TUTOR_DATA_DIR より優先されるため、本番では空に固定する
       TUTOR_DATABASE_URL: ""
       TTS_CACHE_DIR: /var/cache/french-tutor/tts
@@ -51,7 +55,9 @@ services:
 volumes:
   # 本番 DB。external にして、名前違い・`down -v` で空 DB を作ったり消したりしない
   tutor-data:
-    name: french-production-tutor-data
+    # 復旧時だけ、検証した別 volume 名を private production.env に明示して切り替える。
+    # external + 通常起動の既存 DB 必須確認で、名前 typo からの空 DB 作成を防ぐ。
+    name: ${FRENCH_TUTOR_VOLUME:-french-production-tutor-data}
     external: true
   tts-cache:
     name: french-production-tts-cache

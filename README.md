@@ -185,9 +185,12 @@ npm run build
 ```bash
 cp production.env.example production.env          # 初回のみ。Git 管理外
 docker volume create french-production-tutor-data   # 初回のみ。本番 DB の volume
-bash scripts/production_compose.sh up -d --build --wait
+bash scripts/production_compose.sh build
+bash scripts/production_compose.sh run --rm --no-deps backend \
+  python -m app.persistence.production initialize-empty-volume  # 初回の空volumeだけ
+bash scripts/production_compose.sh up -d --wait
 bash scripts/probe_production_boundary.sh 127.0.0.1 # 入口・非公開ポート・Host/Origin の確認
 ```
 
-既定は `127.0.0.1:8080` だけで待ち受けます。LAN への公開、実機確認、firewall、sleep・再起動からの復旧は [家庭内本番の起動・復旧手順](docs/operations/local-lan-runbook.md) に従ってください。バックアップと復元訓練（Phase 2 / #220）が済むまでは合成データだけで使い、学習の正本を切り替えません。
+既定は `127.0.0.1:8080` だけで待ち受けます。LAN への公開、実機確認、firewall、sleep・再起動からの復旧は [家庭内本番の起動・復旧手順](docs/operations/local-lan-runbook.md) に従ってください。バックアップ・復元（Phase 2 / #220）の実コマンドは [SQLite のバックアップ・復元手順](docs/operations/sqlite-backup-runbook.md) にあります。通常起動は空 DB を作りません。日次・終了時・更新前の暗号化バックアップと別領域への復元を実装していますが、別の物理機器による復元訓練が済むまでは合成データだけで使い、学習の正本を切り替えません。
 [外出先教材のデータ・公開契約案](docs/operations/remote-readonly-contract.md) は設計草案で、外部配布は未実装です。

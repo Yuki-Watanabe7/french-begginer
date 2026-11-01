@@ -19,7 +19,7 @@ from pathlib import Path
 
 from sqlalchemy.engine.url import make_url
 
-from app.persistence.config import get_database_url
+from app.persistence.config import get_database_url, is_production
 from app.persistence.schema import CURRENT_SCHEMA_VERSION
 
 
@@ -32,7 +32,14 @@ class DatabaseReadiness:
 
 
 def check_database_readiness(database_url: str | None = None) -> DatabaseReadiness:
-    url = make_url(get_database_url(database_url))
+    try:
+        url = make_url(get_database_url(database_url))
+        if is_production():
+            from app.persistence.production import check_production_directory
+
+            check_production_directory()
+    except (ValueError, OSError) as exc:
+        return DatabaseReadiness(False, str(exc))
     if url.get_backend_name() != "sqlite" or url.database in (None, "", ":memory:"):
         return DatabaseReadiness(False, "file-based SQLite ではない")
 
