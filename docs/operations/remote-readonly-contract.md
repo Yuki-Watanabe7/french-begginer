@@ -16,7 +16,7 @@
 | ReviewSchedule の `due_at`、`skill_direction` | 不可 | 任意の限定 `review_hint` だけ可 | `as_of` 時点の予定として表示し「今すぐ復習」の確定値にしない |
 | 苦手パターン・LearnerState の習熟度 | 不可 | 任意の定型 `weakness` 区分だけ可 | 生 score/count/history を出さない。私的文章やプロフィールは含めない |
 | LearningEvent、回答入力、response time、個人会話、私的プロフィール | 不可 | 不可 | private 配布も原本のバックアップや個人履歴 API ではない |
-| API key、cookie/token、provider 生応答・prompt・診断 log、DB・暗号化 backup | 不可 | 不可 | クライアント同梱の鍵・認証情報も禁止 |
+| API key、cookie/token、provider 生応答・prompt・診断 log、DB・backup（暗号化の有無を問わない） | 不可 | 不可 | クライアント同梱の鍵・認証情報も禁止 |
 | TTS/取り込み音声・動画・PDF 原本 | 不可 | 不可 | v1 はテキストのみ。配布権と費用の別判断なしに追加しない |
 
 秘密・私的原文が疑われる場合、正規表現で消したことだけを根拠に承認しない。schema 許可と内容・権利の人間審査を両方必要とする。

@@ -9,9 +9,6 @@ data/
 *.sqlite3-*
 *.age
 *.key
-manifest.json
-receipt.json
-restore-record.json
 .env
 *.env
 .venv/

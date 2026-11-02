@@ -41,9 +41,11 @@ Frontend: `http://localhost:5173` / Backend: `http://localhost:8000` / API docs:
 bash scripts/production_compose.sh up -d --build --wait   # -f / -p / --env-file を固定した wrapper。dev と重ねない
 bash scripts/production_compose.sh exec backend python -m app.persistence.readiness  # DB の開閉・schema・書込確認
 bash scripts/probe_production_boundary.sh 127.0.0.1       # 入口 8080 のみ・Host / Origin / TTS 境界の外形確認
+bash scripts/production_backup.sh                         # 整合バックアップを ~/FrenchTutorBackups に1つ作る（起動中のまま）
+bash scripts/production_restore.sh <backup.db>            # 停止→検査→差し替え（旧DBは残す）→起動
 ```
 
-本番 DB の明示初期化、日次・終了時・upgrade前の暗号化バックアップ、隔離コピーへの復元・回答検証は `docs/operations/sqlite-backup-runbook.md`。通常起動は既存 DB を必須とし、バックアップ成功と本番正本切替の承認は別に扱う。
+本番 DB は external volume `french-production-tutor-data`。通常起動は既存 DB を必須とし、空 DB を作らない（初回だけ明示初期化）。バックアップは手動の整合コピーだけで、暗号化・別機器コピー・世代管理・復元演習は要件にしない（Issue #220 の簡素化）。手順と割り切りは `docs/operations/sqlite-backup-runbook.md`。
 
 本番は `APP_ENV=production` で CORS を外し、`app/api/request_guard.py` が Host（`APP_ALLOWED_HOSTS` + loopback）、書込の Origin / Sec-Fetch-Site、TTS の `X-French-Tutor-Request` ヘッダーを検証する。手順は `docs/operations/local-lan-runbook.md`。
 

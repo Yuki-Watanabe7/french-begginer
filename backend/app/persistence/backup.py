@@ -1,124 +1,97 @@
-"""SQLite backup API による整合コピーと私的 manifest。HTTP には公開しない。"""
+"""Tutor DB の整合バックアップと復元（Issue #220）。HTTP には公開しない。
+
+本番 DB は Docker volume の中にあるため、コンテナ内でこの CLI を実行し、
+ファイルは標準入出力で受け渡す。ホスト側の手順は scripts/production_backup.sh /
+scripts/production_restore.sh と docs/operations/sqlite-backup-runbook.md。
+
+  python -m app.persistence.backup export > tutor.db   # 書込中でも整合コピー
+  python -m app.persistence.backup verify < tutor.db   # 受け取ったコピーを検査
+  python -m app.persistence.backup restore < tutor.db  # backend 停止中に差し替え
+
+復元は差し替え前の DB を消さず、同じ場所に tutor-before-restore-<時刻>.db として残す。
+"""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import os
-import re
+import shutil
 import sqlite3
 import sys
-import tarfile
 import tempfile
 import time
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from typing import BinaryIO
 
-from app.persistence.models import Base
+from sqlalchemy.engine.url import make_url
+
+from app.persistence.config import get_database_url, is_production
 from app.persistence.schema import CURRENT_SCHEMA_VERSION
 
-
-def utc_now() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def sha256(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+_SIDECARS = ("-wal", "-shm", "-journal")
+# 件数の目安として表示する。中身（本文・回答）は出さない。
+_SUMMARY_TABLES = ("source_documents", "learning_items", "learning_events")
 
 
-def inspect_database(path: Path) -> dict:
-    """読み取りだけ。旧版も検査し、ここでは migration を実行しない。"""
+def database_path() -> Path:
+    """アプリと同じ設定で DB ファイルを解決する。ファイルやディレクトリは作らない。"""
+    if is_production():
+        from app.persistence.production import check_production_directory
+
+        return check_production_directory()
+    url = make_url(get_database_url())
+    if url.get_backend_name() != "sqlite" or url.database in (None, "", ":memory:"):
+        raise ValueError("file-based SQLite ではない")
+    return Path(url.database)
+
+
+def verify(path: Path) -> dict[str, int]:
+    """整合性と schema version を確かめ、件数の目安を返す。読み取りだけ。"""
     with closing(
         sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
     ) as conn:
         if conn.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
-            raise ValueError("integrity_check failed")
+            raise ValueError("integrity_check が ok ではない")
         if conn.execute("PRAGMA foreign_key_check").fetchall():
-            raise ValueError("foreign_key_check failed")
+            raise ValueError("foreign_key_check で参照切れがある")
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        if "schema_migrations" not in tables:
+            raise ValueError("Tutor DB ではない（schema_migrations がない）")
         version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[
             0
         ]
-        if not isinstance(version, int) or not 1 <= version <= CURRENT_SCHEMA_VERSION:
-            raise ValueError("unsupported schema version")
-        counts = {}
-        for name, table in Base.metadata.tables.items():
-            if (name == "learning_item_candidates" and version < 2) or (
-                name.startswith("known_item_") and version < 5
-            ):
-                continue
-            columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{name}")')}
-            expected = {c.name for c in table.columns}
-            if name == "source_documents" and version < 4:
-                expected -= {
-                    "content_hash",
-                    "ingestion_version",
-                    "canonical_locator",
-                    "provenance_json",
-                    "segments_json",
-                }
-            if name == "review_schedules" and version < 3:
-                expected -= {"skill_direction"}
-            if not expected <= columns:
-                raise ValueError(f"schema columns missing: {name}")
-            primary_key = {c.name for c in table.primary_key.columns}
-            if name == "review_schedules" and version < 3:
-                primary_key -= {"skill_direction"}
-            actual_key = {
-                row[1] for row in conn.execute(f'PRAGMA table_info("{name}")') if row[5]
-            }
-            if actual_key != primary_key:
-                raise ValueError(f"schema primary key mismatch: {name}")
-            foreign_keys = {
-                (fk.parent.name, fk.column.table.name, fk.column.name)
-                for fk in table.foreign_keys
-            }
-            actual_fk = {
-                (row[3], row[2], row[4])
-                for row in conn.execute(f'PRAGMA foreign_key_list("{name}")')
-            }
-            if not foreign_keys <= actual_fk:
-                raise ValueError(f"schema foreign keys missing: {name}")
-            counts[name] = conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
-        directions = {}
-        if version >= 3:
-            directions = dict(
-                conn.execute(
-                    "SELECT skill_direction, COUNT(*) FROM review_schedules "
-                    "GROUP BY skill_direction"
-                ).fetchall()
+        if not isinstance(version, int) or version < 1:
+            raise ValueError("schema version がない")
+        if version > CURRENT_SCHEMA_VERSION:
+            raise ValueError(
+                f"schema version {version} がこのアプリ（{CURRENT_SCHEMA_VERSION}）"
+                "より新しい"
             )
-            if set(directions) - {"recognition", "production"}:
-                raise ValueError("unknown review direction")
-        schema = conn.execute(
-            "SELECT type, name, tbl_name, sql FROM sqlite_master "
-            "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
-        ).fetchall()
-        schema_hash = hashlib.sha256(json.dumps(schema).encode()).hexdigest()
-    return {
-        "schema_version": version,
-        "schema_sha256": schema_hash,
-        "counts": counts,
-        "review_directions": directions,
-        "database_bytes": path.stat().st_size,
-        "database_sha256": sha256(path),
-    }
+        summary = {"schema_version": version}
+        for table in _SUMMARY_TABLES:
+            if table in tables:
+                summary[table] = conn.execute(
+                    f'SELECT COUNT(*) FROM "{table}"'
+                ).fetchone()[0]
+    return summary
 
 
-def snapshot(source: Path, destination: Path, *, timeout: float = 60) -> None:
-    """書込中も整合コピー。失敗時はこの呼出で作ったファイルだけを除去する。"""
+def snapshot(source: Path, destination: Path, *, timeout: float = 60) -> dict[str, int]:
+    """SQLite backup API で書込中も整合コピーする。失敗時は作りかけを消す。"""
     if not source.is_file() or source.is_symlink():
-        raise ValueError("source DB missing or symlink")
+        raise ValueError("DB ファイルがない")
     fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     os.close(fd)
     deadline = time.monotonic() + timeout
 
     def progress(_status: int, _remaining: int, _total: int) -> None:
         if time.monotonic() > deadline:
-            raise TimeoutError("SQLite backup timed out")
+            raise TimeoutError("SQLite backup がタイムアウトした")
 
     try:
         with (
@@ -130,112 +103,113 @@ def snapshot(source: Path, destination: Path, *, timeout: float = 60) -> None:
             closing(sqlite3.connect(destination)) as writer,
         ):
             reader.backup(writer, pages=128, progress=progress, sleep=0.05)
-            # WAL 元でも単独 DB として復元できる状態にする。
+            # 元が WAL でも、単独のファイルとして持ち運べる状態にする。
             writer.execute("PRAGMA journal_mode=DELETE")
-        inspect_database(destination)
-        with destination.open("rb") as stream:
-            os.fsync(stream.fileno())
+        summary = verify(destination)
+        _fsync(destination)
     except BaseException:
-        for suffix in ("", "-wal", "-shm", "-journal"):
-            Path(str(destination) + suffix).unlink(missing_ok=True)
+        _remove_with_sidecars(destination)
         raise
+    return summary
 
 
-def create_archive(
-    source: Path,
-    output: Path,
-    *,
-    app_commit: str,
-    reason: str,
-    app_dirty: bool = False,
-) -> dict:
-    if not re.fullmatch(r"[0-9a-f]{40}", app_commit):
-        raise ValueError("app commit must be a full Git SHA")
-    started = utc_now()
-    with tempfile.TemporaryDirectory(dir=output.parent) as temp:
-        directory = Path(temp)
-        db = directory / "tutor.db"
-        snapshot(source, db)
-        manifest = {
-            "format_version": 1,
-            "backup_id": datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ-") + uuid4().hex,
-            "snapshot_started_at": started,
-            "snapshot_completed_at": utc_now(),
-            "app_commit": app_commit,
-            "app_dirty": app_dirty,
-            "reason": reason,
-            "runtime": {
-                "uid": 10001,
-                "gid": 10001,
-                "data_dir": "/var/lib/french-tutor",
-                "workers": 1,
-            },
-            **inspect_database(db),
-        }
-        (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        with (
-            output.open("xb") as stream,
-            tarfile.open(fileobj=stream, mode="w") as archive,
-        ):
-            for name in ("tutor.db", "manifest.json"):
-                archive.add(directory / name, arcname=name)
-    output.chmod(0o600)
-    return manifest
-
-
-def unpack_verified(archive_path: Path, directory: Path) -> dict:
-    """固定2ファイルだけを読む。パス移動・symlink・重複 entry は拒否。"""
-    with tarfile.open(archive_path) as archive:
-        members = archive.getmembers()
-        if {m.name for m in members} != {"tutor.db", "manifest.json"} or len(
-            members
-        ) != 2:
-            raise ValueError("unexpected backup archive members")
-        for member in members:
-            if not member.isfile():
-                raise ValueError("backup member is not a regular file")
-            with (
-                archive.extractfile(member) as src,
-                (directory / member.name).open("xb") as dst,
-            ):
-                import shutil
-
-                shutil.copyfileobj(src, dst)
-            (directory / member.name).chmod(0o600)
-    manifest = json.loads((directory / "manifest.json").read_text())
-    if manifest["format_version"] != 1:
-        raise ValueError("unsupported manifest version")
-    if not re.fullmatch(r"[0-9a-f]{40}", manifest["app_commit"]):
-        raise ValueError("invalid app commit")
-    actual = inspect_database(directory / "tutor.db")
-    if any(manifest.get(key) != value for key, value in actual.items()):
-        raise ValueError("restored DB does not match manifest")
-    return manifest
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["export"])
-    parser.add_argument(
-        "--reason", choices=["daily", "shutdown", "pre-upgrade"], required=True
-    )
-    args = parser.parse_args()
-    # 本番 volume を read-only mount した一時コンテナ用。鍵/API キーは不要。
-    from app.persistence.config import default_sqlite_path
-
+def export(out: BinaryIO) -> dict[str, int]:
     with tempfile.TemporaryDirectory() as temp:
-        output = Path(temp) / "backup.tar"
-        create_archive(
-            default_sqlite_path(),
-            output,
-            app_commit=os.environ.get("APP_COMMIT", ""),
-            reason=args.reason,
-            app_dirty=os.environ.get("APP_DIRTY") == "true",
-        )
-        with output.open("rb") as stream:
-            import shutil
+        copy = Path(temp) / "tutor.db"
+        summary = snapshot(database_path(), copy)
+        with copy.open("rb") as stream:
+            shutil.copyfileobj(stream, out)
+        out.flush()
+    return summary
 
-            shutil.copyfileobj(stream, sys.stdout.buffer)
+
+def verify_stream(stream: BinaryIO) -> dict[str, int]:
+    with tempfile.TemporaryDirectory() as temp:
+        copy = Path(temp) / "tutor.db"
+        _receive(stream, copy)
+        return verify(copy)
+
+
+def restore(stream: BinaryIO, target: Path) -> tuple[dict[str, int], Path | None]:
+    """検査済みのコピーで target を差し替える。元の DB は別名で残す。
+
+    書込中の DB を差し替えないよう、backend を止めてから呼ぶ。
+    """
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    incoming = target.with_name(f".{target.stem}-restoring-{stamp}{target.suffix}")
+    _receive(stream, incoming)
+    try:
+        with closing(sqlite3.connect(incoming)) as conn:
+            conn.execute("PRAGMA journal_mode=DELETE")
+        summary = verify(incoming)
+    except BaseException:
+        _remove_with_sidecars(incoming)
+        raise
+    preserved = None
+    if target.exists():
+        preserved = target.with_name(
+            f"{target.stem}-before-restore-{stamp}{target.suffix}"
+        )
+        # journal / WAL を残すと復元した DB に古い更新が混ざるので一緒に退避する。
+        for suffix in ("", *_SIDECARS):
+            current = Path(f"{target}{suffix}")
+            if current.exists():
+                os.rename(current, f"{preserved}{suffix}")
+    os.rename(incoming, target)
+    _fsync_directory(target.parent)
+    return summary, preserved
+
+
+def _receive(stream: BinaryIO, destination: Path) -> None:
+    fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, "wb") as out:
+        shutil.copyfileobj(stream, out)
+        out.flush()
+        os.fsync(out.fileno())
+
+
+def _fsync(path: Path) -> None:
+    with path.open("rb") as stream:
+        os.fsync(stream.fileno())
+
+
+def _fsync_directory(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _remove_with_sidecars(path: Path) -> None:
+    for suffix in ("", *_SIDECARS):
+        Path(f"{path}{suffix}").unlink(missing_ok=True)
+
+
+def _describe(summary: dict[str, int]) -> str:
+    return ", ".join(f"{key}={value}" for key, value in summary.items())
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Tutor DB の整合バックアップと復元")
+    parser.add_argument("command", choices=["export", "verify", "restore"])
+    args = parser.parse_args(argv)
+    # export は標準出力が DB 本体なので、メッセージはすべて標準エラーへ出す。
+    try:
+        if args.command == "export":
+            summary = export(sys.stdout.buffer)
+            print(f"整合コピー: {_describe(summary)}", file=sys.stderr)
+        elif args.command == "verify":
+            summary = verify_stream(sys.stdin.buffer)
+            print(f"検査 ok: {_describe(summary)}", file=sys.stderr)
+        else:
+            summary, preserved = restore(sys.stdin.buffer, database_path())
+            print(f"復元: {_describe(summary)}", file=sys.stderr)
+            if preserved is not None:
+                print(f"差し替え前の DB: {preserved}", file=sys.stderr)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        print(f"{args.command} 失敗: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

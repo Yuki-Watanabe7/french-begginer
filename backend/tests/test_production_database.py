@@ -80,18 +80,6 @@ def test_empty_existing_db_is_not_silently_initialized(production_dir):
     assert path.read_bytes() == b""
 
 
-def test_development_volume_is_rejected_but_named_recovery_is_allowed(
-    production_dir, monkeypatch
-):
-    monkeypatch.setenv("TUTOR_VOLUME_NAME", "french-development")
-    with pytest.raises(ValueError, match="volume"):
-        get_database_url()
-    monkeypatch.setenv(
-        "TUTOR_VOLUME_NAME", "french-production-tutor-data-restored-drill"
-    )
-    assert get_database_url().endswith("/tutor.db")
-
-
 @pytest.mark.skipif(os.geteuid() == 0, reason="root は directory 権限を迂回する")
 def test_directory_without_journal_permission_refuses_startup(production_dir):
     production.initialize()
