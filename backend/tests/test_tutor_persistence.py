@@ -926,6 +926,29 @@ def test_newer_schema_version_is_rejected(store: TutorSqliteStore):
         init_schema(store.engine)
 
 
+def test_failed_upgrade_rolls_back_ddl_and_version(tmp_path: Path, monkeypatch):
+    """upgrade が途中で失敗しても CREATE / ALTER だけが残らない。"""
+    db_path = tmp_path / "v4.db"
+    store = TutorSqliteStore(f"sqlite:///{db_path}")
+    store.source_documents.create(_source())
+    with store.engine.begin() as conn:
+        conn.execute(text("UPDATE schema_migrations SET version = 4"))
+    store.engine.dispose()
+    before = db_path.read_bytes()
+
+    def fail(conn):
+        conn.execute(text("CREATE TABLE incomplete_upgrade (id INTEGER)"))
+        conn.execute(text("ALTER TABLE source_documents ADD COLUMN incomplete TEXT"))
+        raise RuntimeError("simulated migration failure")
+
+    monkeypatch.setattr("app.persistence.schema.UPGRADE_STEPS", [(5, fail)])
+    engine = create_db_engine(f"sqlite:///{db_path}")
+    with pytest.raises(RuntimeError):
+        init_schema(engine)
+    engine.dispose()
+    assert db_path.read_bytes() == before
+
+
 def test_learning_item_repository_has_no_delete():
     assert not hasattr(TutorSqliteStore.in_memory().learning_items, "delete")
     assert not hasattr(TutorSqliteStore.in_memory().learning_item_candidates, "delete")

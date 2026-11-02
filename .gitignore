@@ -17,7 +17,7 @@ dist/
 # TTS cache
 backend/.cache/
 
-# Tutor local SQLite
+# Tutor local SQLite・バックアップ（journal / WAL を含む）
 *.db
 *.sqlite
 *.sqlite3
@@ -26,12 +26,6 @@ backend/.cache/
 *.sqlite3-*
 *.age
 *.key
-backup.config.json
-backup.config.*.json
-!scripts/backup.config.example.json
-manifest.json
-receipt.json
-restore-record.json
 .private/
 
 # Misc

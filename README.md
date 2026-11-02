@@ -192,5 +192,12 @@ bash scripts/production_compose.sh up -d --wait
 bash scripts/probe_production_boundary.sh 127.0.0.1 # 入口・非公開ポート・Host/Origin の確認
 ```
 
-既定は `127.0.0.1:8080` だけで待ち受けます。LAN への公開、実機確認、firewall、sleep・再起動からの復旧は [家庭内本番の起動・復旧手順](docs/operations/local-lan-runbook.md) に従ってください。バックアップ・復元（Phase 2 / #220）の実コマンドは [SQLite のバックアップ・復元手順](docs/operations/sqlite-backup-runbook.md) にあります。通常起動は空 DB を作りません。日次・終了時・更新前の暗号化バックアップと別領域への復元を実装していますが、別の物理機器による復元訓練が済むまでは合成データだけで使い、学習の正本を切り替えません。
+既定は `127.0.0.1:8080` だけで待ち受けます。LAN への公開、実機確認、firewall、sleep・再起動からの復旧は [家庭内本番の起動・復旧手順](docs/operations/local-lan-runbook.md) に従ってください。本番 DB は開発用と別の external volume にあり、コンテナを作り直しても残ります。通常起動は空 DB を作りません。
+
+```bash
+bash scripts/production_backup.sh                     # 起動中のまま整合バックアップを ~/FrenchTutorBackups に1つ作る
+bash scripts/production_restore.sh <バックアップ.db>  # 停止 → 検査 → 差し替え（旧 DB は残す）→ 起動
+```
+
+バックアップは手動です。最後のバックアップより後の学習履歴と、同じ PC 上のバックアップは PC の故障・紛失で失われます（個人利用の割り切り）。保存先・復元・開発 DB の移行は [SQLite の保存先とバックアップ](docs/operations/sqlite-backup-runbook.md) を参照してください。
 [外出先教材のデータ・公開契約案](docs/operations/remote-readonly-contract.md) は設計草案で、外部配布は未実装です。

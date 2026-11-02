@@ -48,7 +48,7 @@ def test_no_source_bind_mounts_and_dedicated_db_volume(compose):
     backend = compose["services"]["backend"]
     assert "tutor-data:/var/lib/french-tutor" in backend["volumes"]
     assert compose["volumes"]["tutor-data"] == {
-        "name": "${FRENCH_TUTOR_VOLUME:-french-production-tutor-data}",
+        "name": "french-production-tutor-data",
         "external": True,
     }
 
