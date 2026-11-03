@@ -94,7 +94,7 @@ Access の [Free（50 人までという公式案内）](https://www.cloudflare.
 
 ## 守るデータと残るリスク
 
-項目単位の許可表、版・hash・期限・公開手順は [remote-readonly-contract](../operations/remote-readonly-contract.md) を正とする。
+項目単位の許可表、Snapshot の形式と書き出し手順は [remote-readonly-contract](../operations/remote-readonly-contract.md) を正とする（2026-11-03 に #221 の実装へ合わせて簡素化。版の hash manifest・期限・private 版は対象外）。
 
 | 境界 | 対策・残余リスク |
 |---|---|
@@ -102,7 +102,7 @@ Access の [Free（50 人までという公式案内）](https://www.cloudflare.
 | SQLite → Snapshot | 新しい限定 DTO を構築。metadata、source_refs、raw event、秘密、私的会話を除外。公開版に due/weakness を入れない |
 | host → static host | 許可ファイルの manifest に固定して送信。DB、`.env`、バックアップ、source map、log を含めない |
 | static host → ブラウザ | 公開版は秘密にできない。private 版も認証後に端末保存・撮影可能。失効が保存済みコピーを回収する保証はない |
-| Snapshot の改変・古さ | hash は整合性確認であって配布者の認証ではない。HTTPS、送信権限、人間の hash 承認を併用。期限後は古い教材と表示し予定を非表示 |
+| Snapshot の改変・古さ | hash は整合性確認であって配布者の認証ではない。HTTPS、送信権限、公開する版の人間の承認を併用。生成時刻を表示し、古い教材を最新と誤認させない |
 | 自宅ホスト故障 | ローカル学習は停止、最終配布教材だけ閲覧可。手元に残ったバックアップがあれば別 PC で復元する。無ければ学習履歴は失われる（許容済み） |
 
 ## 運用目標と費用管理
@@ -132,7 +132,7 @@ ADR のマージは、これらの開始条件を満たした証拠ではない�
 |---|---|---|
 | Phase 1 / #219（本 ADR マージ後） | 本番 Compose/nginx、LAN 境界、Host/Origin、防火壁・起動 | Mac/Windows/iPhone から共有状態で学習、8000/5173 は非公開、再起動・睡眠復帰 |
 | Phase 2 / #220（1 の後） | 永続 DB、dev DB との分離、手動の整合バックアップと基本の復元手順（2026-11-01 に簡素化） | コンテナ再作成後の残存、空 DB へ切り替わらないこと、バックアップ1つの作成と復元手順の文書化 |
-| Phase 3a / #221（#220 と並行可） | public/private の型付き抽出と検証 | 禁止フィールド・権利不明・サイズ超過の拒否、決定的生成、実データを commit しない |
+| Phase 3a / #221（#220 と並行可） | 一般公開教材だけの allowlist 抽出と検証（2026-11-01 に public のみへ簡素化） | 未知・禁止項目、件数・長さ超過、URL・秘密らしい文字列の拒否、DB を変更しない、出力を Git 作業ツリーの外に限る |
 | Phase 3b / #222（3a の後） | 独立した静的閲覧画面 | JSON だけでカードを閲覧。書込、TTS、有料 GET、LAN 接続が発生しない |
 | Phase 4 / #223（3b と人間承認の後） | 選んだ読者に応じた配布・認証・巻戻し | 全 URL の閲覧境界、途中失敗と rollback、契約・費用上限の確認 |
 | Phase 5 / #224（4 の後） | 家庭内外の実使用受入と運用証跡 | 携帯回線・自宅 PC 停止中の閲覧、期限切れ、月次費用と PCP #56 への参照。別機器での復元試験は求めない |

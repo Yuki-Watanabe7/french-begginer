@@ -1,0 +1,28 @@
+{
+  "schema_version": "public-v1",
+  "generated_at": "2026-11-03T09:30:00Z",
+  "cards": [
+    {
+      "card_id": "card-001",
+      "item_type": "vocabulary",
+      "canonical_form": "bonjour",
+      "meaning_ja": "こんにちは",
+      "explanation_ja": "日中の一般的なあいさつ。",
+      "level": "A1"
+    },
+    {
+      "card_id": "card-002",
+      "item_type": "expression",
+      "canonical_form": "s'il vous plaît",
+      "meaning_ja": "お願いします",
+      "level": "A1"
+    },
+    {
+      "card_id": "card-003",
+      "item_type": "conjugation",
+      "canonical_form": "nous parlons",
+      "meaning_ja": "私たちは話す",
+      "explanation_ja": "parler の直説法現在、nous の形。\n語尾は -ons。"
+    }
+  ]
+}

@@ -309,6 +309,7 @@ backend/app/
 │   ├── context_selection.py    # 複数Source文脈の context rotation（Issue #202）
 │   ├── weakness_pattern.py     # 横断の苦手パターン検出（Issue #203）
 │   ├── today_session.py        # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
+│   ├── public_snapshot.py      # 外出先 Read-Only 向け公開 Snapshot（public-v1）の DTO・検査（Issue #221）
 │   └── conjugation_adapter.py
 ├── ingestion/    # Web URL、PDF、YouTube、字幕、テキスト / 会話 JSON（Issue #190 / #191 / #192 / #194）。domain からは依存しない
 │   ├── url_policy.py         # SSRF 向け URL / IP 判定（DNS はしない）
@@ -340,6 +341,7 @@ backend/app/
     ├── practice_session_service.py  # Practice Session 組み立て（Issue #150）
     ├── review_session_service.py  # Review Practice Session 組み立て（Issue #164）
     ├── weakness_pattern_service.py  # LearningEvent 横断の苦手パターン（Issue #203）
+    ├── public_snapshot_export.py  # allowlist の教材だけを snapshot.json に書き出す（Issue #221）
     └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。既知は新規だけ除外し、未学習は admission 通過後。件数省略時は負荷を自動調整（Issue #204）
 ```
 

@@ -200,4 +200,4 @@ bash scripts/production_restore.sh <バックアップ.db>  # 停止 → 検査 
 ```
 
 バックアップは手動です。最後のバックアップより後の学習履歴と、同じ PC 上のバックアップは PC の故障・紛失で失われます（個人利用の割り切り）。保存先・復元・開発 DB の移行は [SQLite の保存先とバックアップ](docs/operations/sqlite-backup-runbook.md) を参照してください。
-[外出先教材のデータ・公開契約案](docs/operations/remote-readonly-contract.md) は設計草案で、外部配布は未実装です。
+外出先向けには、本人が allowlist で選んだ一般教材だけを `snapshot.json` に書き出せます（DB は読み取り専用で開き、外部へは送信しません）。対象項目と手順は [外出先教材のデータ契約と書き出し手順](docs/operations/remote-readonly-contract.md) を参照してください。静的ビューアーと外部配布は未実装です。
