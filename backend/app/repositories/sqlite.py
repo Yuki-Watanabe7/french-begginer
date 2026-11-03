@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.domain.known_item_policy import KnownItemEvent, KnownItemOverride
 from app.domain.review_scheduler import DIRECTION_ORDER, DUE_ITEM_STATUS
@@ -24,6 +27,7 @@ from app.domain.tutor import (
     SourceDocument,
     apply_candidate_status,
 )
+from app.persistence.backup import verify
 from app.persistence.datetime_codec import dump_utc, require_aware
 from app.persistence.db import create_initialized_engine
 from app.persistence.models import (
@@ -493,6 +497,25 @@ class TutorSqliteStore:
     @classmethod
     def in_memory(cls) -> TutorSqliteStore:
         return cls("sqlite:///:memory:")
+
+
+def read_learning_items_readonly(path: Path) -> list[LearningItem]:
+    """SQLite ファイルを読み取り専用で開いて LearningItem を返す（Issue #221）。
+
+    TutorSqliteStore と違い schema の作成・upgrade をしない。Tutor DB かどうかと
+    schema version を先に確かめ、書込は SQLite 自体に拒否させる。
+    """
+    verify(path)
+    uri = f"{path.resolve().as_uri()}?mode=ro"
+    engine = create_engine(
+        "sqlite://",
+        creator=lambda: sqlite3.connect(uri, uri=True),
+        poolclass=NullPool,
+    )
+    try:
+        return SqliteLearningItemRepository(sessionmaker(bind=engine)).list()
+    finally:
+        engine.dispose()
 
 
 def _sort_schedules_for_item(schedules: list[ReviewSchedule]) -> list[ReviewSchedule]:

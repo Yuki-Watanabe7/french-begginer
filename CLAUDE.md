@@ -16,6 +16,7 @@ uv run pytest tests/test_api.py::test_health  # 単一テスト
     uv run python ../scripts/evaluate_tutor_recommendations.py  # Tutor推薦品質の固定fixture評価（任意。LLM不要）
     uv run python ../scripts/evaluate_tutor_learning_quality.py  # Tutor学習品質の複数日シミュレーション（任意。LLM不要）
     uv run python ../scripts/rebuild_review_schedules.py --check  # ReviewSchedule 不整合の検出（任意）
+    uv run python ../scripts/export_public_snapshot.py export --database <DBコピー> --allowlist <allowlist.json>  # 許可した教材だけを公開 Snapshot に書き出す（任意。DB は変更しない）
 ```
 
 ### Frontend (`cd frontend`)
@@ -45,6 +46,8 @@ bash scripts/production_backup.sh                         # 整合バックア�
 bash scripts/production_restore.sh <backup.db>            # 停止→検査→差し替え（旧DBは残す）→起動
 ```
 
+外出先向けの公開 Snapshot は本番 DB を直接読まず、バックアップのコピーから書き出す（`docs/operations/remote-readonly-contract.md`、Issue #221）。
+
 本番 DB は external volume `french-production-tutor-data`。通常起動は既存 DB を必須とし、空 DB を作らない（初回だけ明示初期化）。バックアップは手動の整合コピーだけで、暗号化・別機器コピー・世代管理・復元演習は要件にしない（Issue #220 の簡素化）。手順と割り切りは `docs/operations/sqlite-backup-runbook.md`。
 
 本番は `APP_ENV=production` で CORS を外し、`app/api/request_guard.py` が Host（`APP_ALLOWED_HOSTS` + loopback）、書込の Origin / Sec-Fetch-Site、TTS の `X-French-Tutor-Request` ヘッダーを検証する。手順は `docs/operations/local-lan-runbook.md`。
@@ -73,6 +76,7 @@ backend/app/
 │   ├── context_selection.py # 複数Source文脈の context rotation（Issue #202）
 │   ├── weakness_pattern.py  # 複数Item横断の苦手パターン（Issue #203）
 │   ├── today_session.py  # 今日の学習 Plan 公開表現と Session 生成（Issue #178）
+│   ├── public_snapshot.py  # 外出先 Read-Only 向け公開 Snapshot（public-v1）の DTO・検査（Issue #221）
 │   ├── candidate_normalization.py  # 抽出Candidateの検証・正規化・重複統合
 │   ├── exercise.py  # LearningItem→Exerciseの契約・eligibility・skill direction
 │   ├── exercise_generation.py  # LearningItemからのdeterministic Exercise生成（vocab/expression/cloze/conjugation adapter）
@@ -105,7 +109,8 @@ backend/app/
     ├── review_session_service.py  # Review Practice Session 組み立て
     ├── weakness_pattern_service.py  # 苦手パターンの算出（Issue #203）
     ├── source_learning_summary_service.py  # Source単位の学習成果（Issue #205）
-    └── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。件数省略時は負荷を自動調整（Issue #204）
+    ├── today_learning_service.py  # 今日の学習 Plan / Session（Issue #178）。件数省略時は負荷を自動調整（Issue #204）
+    └── public_snapshot_export.py  # allowlist の教材だけを snapshot.json に書き出す（Issue #221）
 ```
 
 新しい動詞を追加する場合は `CONJUGATIONS` と `VERB_GROUPS` の両方を `conjugation.py` に追記する。`VerbGroup` は `Literal["all", "er", "ir", "irregular"]` で、`?group=` クエリパラメータで絞り込める。
