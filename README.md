@@ -211,4 +211,15 @@ npm run build:readonly
 npm run preview:readonly  # http://127.0.0.1:4174/
 ```
 
-生成先は `frontend/dist-readonly/`。カード・答えと書き出し日時を表示し、学習結果は保存しません。実教材の公開やホスティング設定は別途 #223 で扱います。構成とサブパスでの確認方法は [静的ビューアーの確認手順](docs/operations/readonly-viewer.md) を参照してください。
+生成先は `frontend/dist-readonly/`。カード・答えと書き出し日時を表示し、学習結果は保存しません。構成とサブパスでの確認方法は [静的ビューアーの確認手順](docs/operations/readonly-viewer.md) を参照してください。
+
+公開候補の教材と画面だけを、Git 作業ツリーの外の新しいフォルダーへまとめるには、ビルド後に次を実行します。DB を開かず、外部への送信もしません。
+
+```bash
+cd backend
+uv run python ../scripts/prepare_public_readonly.py \
+  --snapshot ../docs/operations/public-snapshot.synthetic.json \
+  --out /tmp/french-public-review/site
+```
+
+現在の GitHub Free 契約では、この private repo からの Pages 配布は利用できません。追加契約を避ける候補として、配布ファイルだけを置く別の public repo を使います。本人が教材の全文・sha256 と公開先を承認してから公開する手順と、更新・停止・戻し方は [公開教材の配布手順](docs/operations/public-readonly-publishing.md) を参照してください。#223 の実際の公開は承認待ちです。

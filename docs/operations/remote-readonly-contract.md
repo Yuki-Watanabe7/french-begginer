@@ -6,6 +6,8 @@
 
 **2026-11-04 追記（[#222](https://github.com/Yuki-Watanabe7/french-begginer/issues/222)）**: 合成 Snapshot だけを同梱する独立した[静的ビューアー](readonly-viewer.md)を追加。公開（[#223](https://github.com/Yuki-Watanabe7/french-begginer/issues/223)）は未実装で、外部へ公開した教材はない。
 
+**2026-11-05 追記（[#223](https://github.com/Yuki-Watanabe7/french-begginer/issues/223)）**: ビューアーと指定した教材だけを検査・梱包するローカルスクリプトと[公開・更新・停止の手順](public-readonly-publishing.md)を追加。GitHub Free / private repo の制約を確認したため、配布専用 public repo を候補とする。公開 repo の作成、教材の送信、Pages 有効化は本人承認待ちで、まだ行っていない。
+
 ## 読者と情報分類
 
 `public-v1` は、誰でも JSON を取得・保存できる前提の一般教材である。LearningItem を採用したことは、公開や第三者配布の承認ではない。
@@ -73,12 +75,12 @@
 
 この検査は事故の歯止めで、内容の承認ではない。人名、私的な会話の文、権利の不明な例文、LLM が作った説明の誤りは機械では判定しないので、手順 5 で本人が確かめる。
 
-出力物と allowlist はリポジトリの外に置く。テストと CI は合成データ（一時ディレクトリ）だけを使い、実データの Snapshot を artifact に残さない。
+出力物と allowlist はアプリのリポジトリの外に置く。テストと CI は合成データ（一時ディレクトリ）だけを使い、実データの Snapshot を artifact に残さない。#223 の配布専用 public repo は別扱いで、本人が公開を承認した教材と静的画面だけを公開履歴に置く候補である。allowlist・DB・個人 Snapshot はそこにも置かない。
 
 ## ビューアーと後続公開の前提
 
 - #222 静的ビューアー: 同じ配布内の `snapshot.json` だけを取得し、LAN の API、TTS、解析、外部 font に接続しない。答えの開閉はメモリ上の状態だけで、回答の記録や後日の同期はしない。`schema_version` が `public-v1` でない、形が不正、取得に失敗したときは簡潔なエラーにする。`generated_at` を表示し、古い内容を最新と誤認させない。
-- #223 公開: 公開する `snapshot.json`（sha256）と公開先を本人が承認してから、ビューアーと `snapshot.json` だけを配布する。ソース repo の丸ごと公開や Snapshot の commit はしない。GitHub Pages の通常のサイトは、ソース repo が private でも一般公開になる。戻すときは直前に承認した版を配布し直し、誤公開なら配布を止める。外部で保存・cache された内容は回収できない。
+- #223 公開: 公開する `snapshot.json`（sha256）と公開先を本人が承認してから、ビューアーと `snapshot.json` だけを配布する。アプリのソース repo の丸ごと公開や、そこへの実教材 Snapshot の commit はしない。配布専用 public repo を使う場合は、承認済みの一般教材が Git 履歴にも残ることを本人に説明する。GitHub Pages の通常のサイトは、ソース repo が private でも一般公開になる。戻すときは直前に承認した版を配布し直し、誤公開なら配布を止める。外部で保存・cache された内容は回収できない。
 
 ## 対象外（必要になってから検討）
 

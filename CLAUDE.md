@@ -17,6 +17,7 @@ uv run pytest tests/test_api.py::test_health  # 単一テスト
     uv run python ../scripts/evaluate_tutor_learning_quality.py  # Tutor学習品質の複数日シミュレーション（任意。LLM不要）
     uv run python ../scripts/rebuild_review_schedules.py --check  # ReviewSchedule 不整合の検出（任意）
     uv run python ../scripts/export_public_snapshot.py export --database <DBコピー> --allowlist <allowlist.json>  # 許可した教材だけを公開 Snapshot に書き出す（任意。DB は変更しない）
+    uv run python ../scripts/prepare_public_readonly.py --snapshot <snapshot.json> --out <Git外の新規フォルダー>  # 専用画面のビルド後、配布候補だけを梱包（#223。通信なし）
 ```
 
 ### Frontend (`cd frontend`)

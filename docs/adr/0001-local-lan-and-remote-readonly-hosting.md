@@ -118,7 +118,7 @@ Access の [Free（50 人までという公式案内）](https://www.cloudflare.
 | 家庭内の信頼範囲と認証なし HTTP の受入 | 未承認 | LAN 構成、FW 到達試験、所有者の判断。隔離不可なら localhost に留める |
 | 正本 DB の置き場所と復旧可能性 | 実装済み（#220） | 専用ボリューム、非 root 所有権、手動の整合バックアップと復元手順。開発 DB の履歴を移す時期は所有者が決める |
 | 外部の読者と許可するフィールド | 未承認 | 公開一般教材か本人専用か、権利確認、内容 hash、承認者・期限・送信先 |
-| GitHub の正確な契約プランと Pages 利用可否 | **要確認** | アカウント Billing と対象 repo Settings/Pages（現在の repo 可視性から推測しない） |
+| GitHub の正確な契約プランと Pages 利用可否 | 2026-11-05 確認：Free / private repo では利用不可 | Billing と Settings/Pages の表示を確認。[配布手順](../operations/public-readonly-publishing.md)に配布専用 public repo の候補を記録。作成・公開は未承認 |
 | Cloudflare の契約枠・本人認証・全 URL の保護 | **要確認** | 本番、preview、alias、既存 deployment、JSON を未認証で拒否した記録 |
 | 公開操作の go/no-go | no-go（本 Issue の範囲外） | PCP #51 に従った人間の明示承認と Phase 4 の検証 |
 
