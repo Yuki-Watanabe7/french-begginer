@@ -64,3 +64,6 @@ jobs:
         
       - name: Build
         run: npm run build
+
+      - name: Build read-only viewer (synthetic content only)
+        run: npm run build:readonly

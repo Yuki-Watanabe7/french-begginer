@@ -200,4 +200,15 @@ bash scripts/production_restore.sh <バックアップ.db>  # 停止 → 検査 
 ```
 
 バックアップは手動です。最後のバックアップより後の学習履歴と、同じ PC 上のバックアップは PC の故障・紛失で失われます（個人利用の割り切り）。保存先・復元・開発 DB の移行は [SQLite の保存先とバックアップ](docs/operations/sqlite-backup-runbook.md) を参照してください。
-外出先向けには、本人が allowlist で選んだ一般教材だけを `snapshot.json` に書き出せます（DB は読み取り専用で開き、外部へは送信しません）。対象項目と手順は [外出先教材のデータ契約と書き出し手順](docs/operations/remote-readonly-contract.md) を参照してください。静的ビューアーと外部配布は未実装です。
+外出先向けには、本人が allowlist で選んだ一般教材だけを `snapshot.json` に書き出せます（DB は読み取り専用で開き、外部へは送信しません）。対象項目と手順は [外出先教材のデータ契約と書き出し手順](docs/operations/remote-readonly-contract.md) を参照してください。
+
+独立した閲覧専用の静的ビューアーは、次のコマンドで合成教材だけを使って確認できます。既存の学習アプリや Backend の起動、API キーは不要です。
+
+```bash
+cd frontend
+npm ci --include=dev
+npm run build:readonly
+npm run preview:readonly  # http://127.0.0.1:4174/
+```
+
+生成先は `frontend/dist-readonly/`。カード・答えと書き出し日時を表示し、学習結果は保存しません。実教材の公開やホスティング設定は別途 #223 で扱います。構成とサブパスでの確認方法は [静的ビューアーの確認手順](docs/operations/readonly-viewer.md) を参照してください。

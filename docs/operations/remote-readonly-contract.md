@@ -2,7 +2,9 @@
 
 [ADR 0001](../adr/0001-local-lan-and-remote-readonly-hosting.md) の外出先 Read-Only のうち、一般公開してよい教材を静的ファイルに書き出す範囲と形式を定める。
 
-**2026-11-03 改訂（[#221](https://github.com/Yuki-Watanabe7/french-begginer/issues/221)）**: 2026-11-01 の簡素化（[#209](https://github.com/Yuki-Watanabe7/french-begginer/issues/209)）に合わせ、本人限定の private-v1、内容 hash の manifest と bundle hash による承認台帳、有効期限、Cloudflare Access を前提にした記述を外した。実装済みの `public-v1` の書き出しだけを正とする。静的ビューアー（[#222](https://github.com/Yuki-Watanabe7/french-begginer/issues/222)）と公開（[#223](https://github.com/Yuki-Watanabe7/french-begginer/issues/223)）は未実装で、外部へ公開した教材はない。
+**2026-11-03 改訂（[#221](https://github.com/Yuki-Watanabe7/french-begginer/issues/221)）**: 2026-11-01 の簡素化（[#209](https://github.com/Yuki-Watanabe7/french-begginer/issues/209)）に合わせ、本人限定の private-v1、内容 hash の manifest と bundle hash による承認台帳、有効期限、Cloudflare Access を前提にした記述を外した。実装済みの `public-v1` の書き出しだけを正とする。
+
+**2026-11-04 追記（[#222](https://github.com/Yuki-Watanabe7/french-begginer/issues/222)）**: 合成 Snapshot だけを同梱する独立した[静的ビューアー](readonly-viewer.md)を追加。公開（[#223](https://github.com/Yuki-Watanabe7/french-begginer/issues/223)）は未実装で、外部へ公開した教材はない。
 
 ## 読者と情報分類
 
@@ -73,7 +75,7 @@
 
 出力物と allowlist はリポジトリの外に置く。テストと CI は合成データ（一時ディレクトリ）だけを使い、実データの Snapshot を artifact に残さない。
 
-## 後続 Issue の前提
+## ビューアーと後続公開の前提
 
 - #222 静的ビューアー: 同じ配布内の `snapshot.json` だけを取得し、LAN の API、TTS、解析、外部 font に接続しない。答えの開閉はメモリ上の状態だけで、回答の記録や後日の同期はしない。`schema_version` が `public-v1` でない、形が不正、取得に失敗したときは簡潔なエラーにする。`generated_at` を表示し、古い内容を最新と誤認させない。
 - #223 公開: 公開する `snapshot.json`（sha256）と公開先を本人が承認してから、ビューアーと `snapshot.json` だけを配布する。ソース repo の丸ごと公開や Snapshot の commit はしない。GitHub Pages の通常のサイトは、ソース repo が private でも一般公開になる。戻すときは直前に承認した版を配布し直し、誤公開なら配布を止める。外部で保存・cache された内容は回収できない。
