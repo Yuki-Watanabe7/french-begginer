@@ -52,7 +52,7 @@ public にすると、コード・全履歴・Issue / PR とコメント・保�
 | コミットのメールアドレス | public の他の repo（DME）と同じで、新たに出るものではない |
 | artifact・Release | 0 件 |
 | Actions secrets | `CLAUDE_CODE_OAUTH_TOKEN`・`OPENAI_API_KEY`。値は public にしても見えない。fork からの PR の workflow には渡らない |
-| `@claude` の起動 | `claude.yml` を、所有者・collaborator が書いた Issue とコメントでだけ動くように絞った。claude-code-action 自体も書き込み権限のない人の依頼を拒否する。Claude の全出力をログに出す `show_full_output` は既定の `false` のまま |
+| `@claude` の起動 | `claude.yml` を、所有者・collaborator が書いた Issue とコメントでだけ動くように絞った。`claude-code-review.yml`（PR・レビュー・レビューコメントで起動）はこのとき見落としていた。2026-11-07 に [#236](https://github.com/Yuki-Watanabe7/french-begginer/issues/236) で同じように絞った。claude-code-action 自体も書き込み権限のない人の依頼を拒否する。Claude の全出力をログに出す `show_full_output` は既定の `false` のまま |
 
 過去 747 回の Actions 実行ログは、全部は読んでいない。secrets は GitHub がログ上で伏せる。LICENSE は置かない（閲覧はできるが、利用の許諾は与えない）。
 
