@@ -7,10 +7,10 @@
 - アカウントの [Billing](https://github.com/settings/billing) は **GitHub Free**。2026-11-05 の確認では、[Settings → Pages](https://github.com/Yuki-Watanabe7/french-begginer/settings/pages) に「Upgrade or make this repository public to enable Pages」と表示され、private のままでは Pages を使えない。
 - 2026-11-07、所有者は配布専用 repo を新しく作らず、**このアプリ repo を public にして、同じ repo の `gh-pages` ブランチから配布する**と決めた。公開 URL は `https://yuki-watanabe7.github.io/french-begginer/`。
 - `gh-pages` は配布ファイルだけを置くブランチで、アプリの履歴と共通の祖先を持たない。main へ merge せず、PR も作らない。
-- 可視性の変更（手順2）と教材の公開（手順3）は、どちらもまだ行っていない。
-- 初回教材の候補は [合成教材3枚](public-snapshot.synthetic.json)：`bonjour`（こんにちは）、`s'il vous plaît`（お願いします）、`nous parlons`（私たちは話す）。実 DB は使わない。生成する `snapshot.json` の全文と sha256 を本人が確認して承認する。別の教材を使う場合は [#221 の書き出し手順](remote-readonly-contract.md) で作る。
+- 2026-11-07、所有者が repo を public にし（手順2）、本人が承認した教材を公開した（手順3）。結果は[初回公開結果](#2026-11-07-の初回公開結果)にある。
+- 初回教材は [合成教材3枚](public-snapshot.synthetic.json)：`bonjour`（こんにちは）、`s'il vous plaît`（お願いします）、`nous parlons`（私たちは話す）。実 DB は使っていない。別の教材を使う場合は [#221 の書き出し手順](remote-readonly-contract.md) で作り、手順4で更新する。
 
-**教材の公開は未承認・未実施。** この手順や実装のマージ、Issue の対応依頼は、教材の送信・Pages 有効化の承認に代わらない。
+**本人が承認したのは、初回の合成教材3枚（sha256 `38f62357d9bf8c8c0bf8ad32e9fc9b3dde2df028f51b0536ae8d9a335eb5d600`）とこの公開先だけである。** 教材を変えるときは、全文と sha256 を改めて承認する。この手順や実装のマージ、Issue の対応依頼は、その承認に代わらない。
 
 [公式の利用条件](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)では、Free は公開 repo でだけ Pages を使える。追加契約やドメイン購入は不要である。public にすると、この repo の標準 runner による Actions は無料扱いになる（[Actions 課金](https://docs.github.com/en/billing/concepts/product-billing/github-actions)）。配布は branch から行うので、Pages 用の build workflow、cache、保存 artifact は追加しない。サイト上限 1 GB・帯域 soft limit 月 100 GB 内で使い、制限超過時は更新を止めて確認する。自動アップグレードしない。
 
@@ -87,18 +87,35 @@ git -C "$deploy_checkout" commit -m "Publish approved public learning materials"
 
 # ここから外部変更。
 git -C "$deploy_checkout" push origin gh-pages
+```
+
+public repo に `gh-pages` を push すると、GitHub が Pages を自動で有効にする。2026-11-07 の初回公開では、push の直後に Source が `gh-pages` / root で設定されていた。続けて実行した有効化の API は 409（`GitHub Pages is already enabled.`）を返した。push の後は設定を確かめ、404（未設定）のときだけ有効にする。
+
+```bash
+gh api "repos/$app_repo/pages" --jq '{html_url,status,build_type,source,https_enforced}'
+# 上が 404 のときだけ実行する
 gh api --method POST "repos/$app_repo/pages" \
   -f build_type=legacy -f 'source[branch]=gh-pages' -f 'source[path]=/'
 ```
 
 Pages の Source は **Deploy from a branch / gh-pages / /(root)**。`.nojekyll` は Jekyll による加工を省く指定で、GitHub の配布処理だけが走る（[公式のブランチ配布手順](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)）。通常の CI は main / develop への push でだけ動くので、`gh-pages` への push では動かない。GitHub トークンをファイルや公開 repo へ保存しない。
 
+配布処理は Actions の `pages-build-deployment` として動く。完了後、build の status が `built`、commit が push した commit であることを確かめる。
+
 ```bash
-gh api "repos/$app_repo/pages" --jq '{html_url,status,source,https_enforced}'
 gh api "repos/$app_repo/pages/builds/latest" --jq '{status,error,commit}'
 ```
 
-配布成功の commit と URL を確かめ、公開 URL の `snapshot.json` を取得して、承認したファイルと sha256 を照合する。スマホの携帯回線からカードと答えを開き、自宅 PC が停止中でも読めることを本人が確認する。公開を試していない段階で実施済みと記録しない。#223 は公開・実機確認と関連 PR のレビュー／マージを確認するまで閉じない。
+公開 URL から配布ファイルを取得し、承認したフォルダーとバイト列を照合する。Pages は `Cache-Control: max-age=600` を返すため、更新直後の10分ほどは前の版が返ることがある。
+
+```bash
+site=https://yuki-watanabe7.github.io/french-begginer
+(cd "$bundle" && find . -type f | sed 's|^\./||') | while read -r f; do
+  if [ "$(curl -sS "$site/$f" | shasum -a 256)" = "$(shasum -a 256 < "$bundle/$f")" ]; then echo "一致 $f"; else echo "不一致 $f"; fi
+done
+```
+
+スマホの携帯回線からカードと答えを開き、自宅 PC が停止中でも読めることを本人が確認する。公開を試していない段階で実施済みと記録しない。#223 は公開・実機確認と関連 PR のレビュー／マージを確認するまで閉じない。
 
 ## 4. 更新する
 
@@ -136,7 +153,7 @@ repo を private に戻すと、Free では Pages の公開も止まる。ただ
 
 `bash scripts/quality-check.sh` は通常の検査と、合成教材による専用ビルド・配布フォルダー生成を行う。テストは公開可能な項目だけのコピー、不正教材・混入ファイル・リンクの拒否、既存版と Git 作業ツリーの保護、コピー失敗時に途中の版を出さないことを検証する。外部へは送信しない。
 
-repo の public 化、実際の公開、公開後のスマホ確認は、本人の操作と承認の後に行う。新しい契約と本人認証基盤の追加は本手順に含まれない。
+repo の public 化、初回公開、公開後のスマホ確認は、2026-11-07 に本人の操作と承認の後で行った（[初回公開結果](#2026-11-07-の初回公開結果)）。新しい契約と本人認証基盤の追加は本手順に含まれない。
 
 ### 2026-11-05 の実装検証結果
 
@@ -150,4 +167,14 @@ repo の public 化、実際の公開、公開後のスマホ確認は、本人�
 
 - `bash scripts/quality-check.sh` 成功。Backend 2,037 件成功・1 件スキップ、Frontend 407 件成功。配布候補の4ファイルと教材の sha256 は 2026-11-05 と同じ。
 - 変えたのは文書と `claude.yml` だけで、ビューアー・スクリプト・テストは変えていない。ビルドの `base` は `./` なので、サブパスが `/french-begginer/` になっても生成物は変わらない。ブラウザでの表示確認はやり直していない。
-- repo の public 化、`gh-pages` の作成、Pages 設定、外部配布、携帯回線／スマホ実機確認は未実施。
+- この時点では、repo の public 化、`gh-pages` の作成、Pages 設定、外部配布、携帯回線／スマホ実機確認は未実施だった（同日、次節のとおり実施）。
+
+### 2026-11-07 の初回公開結果
+
+- 所有者が repo を public にした（API で `visibility: PUBLIC`、fork 0 件を確認）。所有者が合成教材3枚の全文・sha256 と公開先を承認した。
+- PR #233 のマージ後の main（`f2f1339`）から、手順1で候補を作り直した。4ファイルのサイズと教材の sha256 は 2026-11-05 と同じ。
+- `gh-pages` は親を持たない commit `d14eae3` 1つで、中身はこの4ファイルだけ。push の時点で Pages が自動で有効になり（Deploy from a branch / `gh-pages` / root、HTTPS 強制）、手順3の有効化 API は 409 を返した。手順3はこれに合わせて直した。
+- `pages-build-deployment`（build・deploy）は成功し、build の status は `built`、commit は `d14eae3`。
+- 公開 URL から4ファイルを取得し、配布フォルダーとバイト列が一致した。`README.md`・`backend/app/main.py`・`docs/operations/public-snapshot.synthetic.json` は 404 で、アプリのファイルは配信されない。
+- headless Chrome で公開 URL を開き、3枚のカード・答え・説明・書き出し日時（2026-11-03 09:30:00 UTC）の表示を確認した。
+- 所有者がスマホの携帯回線から公開 URL を開き、閲覧できることを確認した。ホーム画面にも追加できるが、`index.html` にアイコンの指定がないため、専用のアイコンは出ない。

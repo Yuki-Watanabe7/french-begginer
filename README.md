@@ -222,4 +222,4 @@ uv run python ../scripts/prepare_public_readonly.py \
   --out /tmp/french-public-review/site
 ```
 
-GitHub Free では private repo から Pages を配布できません。そのため、この repo を public にし、配布ファイルだけを置く `gh-pages` ブランチから `https://yuki-watanabe7.github.io/french-begginer/` で配布します（2026-11-07 の所有者の判断）。public 化の前の確認結果、本人が教材の全文・sha256 と公開先を承認してから公開する手順、更新・停止・戻し方は [公開教材の配布手順](docs/operations/public-readonly-publishing.md) を参照してください。repo の public 化と #223 の実際の公開は、まだ行っていません。
+GitHub Free では private repo から Pages を配布できません。そのため、この repo を public にし、配布ファイルだけを置く `gh-pages` ブランチから `https://yuki-watanabe7.github.io/french-begginer/` で配布します（2026-11-07 の所有者の判断）。public 化の前の確認結果、本人が教材の全文・sha256 と公開先を承認してから公開する手順、更新・停止・戻し方は [公開教材の配布手順](docs/operations/public-readonly-publishing.md) を参照してください。2026-11-07 に repo を public にし、本人が承認した合成教材3枚を公開しました。
