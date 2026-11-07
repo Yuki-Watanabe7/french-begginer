@@ -211,4 +211,15 @@ npm run build:readonly
 npm run preview:readonly  # http://127.0.0.1:4174/
 ```
 
-生成先は `frontend/dist-readonly/`。カード・答えと書き出し日時を表示し、学習結果は保存しません。実教材の公開やホスティング設定は別途 #223 で扱います。構成とサブパスでの確認方法は [静的ビューアーの確認手順](docs/operations/readonly-viewer.md) を参照してください。
+生成先は `frontend/dist-readonly/`。カード・答えと書き出し日時を表示し、学習結果は保存しません。構成とサブパスでの確認方法は [静的ビューアーの確認手順](docs/operations/readonly-viewer.md) を参照してください。
+
+公開候補の教材と画面だけを、Git 作業ツリーの外の新しいフォルダーへまとめるには、ビルド後に次を実行します。DB を開かず、外部への送信もしません。
+
+```bash
+cd backend
+uv run python ../scripts/prepare_public_readonly.py \
+  --snapshot ../docs/operations/public-snapshot.synthetic.json \
+  --out /tmp/french-public-review/site
+```
+
+GitHub Free では private repo から Pages を配布できません。そのため、この repo を public にし、配布ファイルだけを置く `gh-pages` ブランチから `https://yuki-watanabe7.github.io/french-begginer/` で配布します（2026-11-07 の所有者の判断）。public 化の前の確認結果、本人が教材の全文・sha256 と公開先を承認してから公開する手順、更新・停止・戻し方は [公開教材の配布手順](docs/operations/public-readonly-publishing.md) を参照してください。repo の public 化と #223 の実際の公開は、まだ行っていません。

@@ -42,7 +42,7 @@ python3 -m http.server 4175 --bind 127.0.0.1 --directory "$preview_root"
 
 `bash scripts/quality-check.sh` と GitHub Actions の通常 CI は、既存の検査に加えて専用ビルドを実行する。`ReadonlyViewer.test.tsx` は合成 fixture の受理、不正形式の拒否、答えの開閉、通信先・取得オプション、保存しないこと、エラーからの再試行、タイムアウトを確認する。
 
-本変更はローカル検証用で、GitHub Pages の設定・デプロイ・実教材の送信は行わない。実際の配布は #223 で、公開先と公開する Snapshot の内容・sha256 を本人が確認してから、承認済みのファイルとビューアーだけを配布する。詳細は [教材契約](remote-readonly-contract.md) を参照。スマホ実機の使用感は人手で確認する。
+専用ビルドはローカル検証用で、GitHub Pages の設定・デプロイ・実教材の送信は行わない。#223 の[配布準備と公開手順](public-readonly-publishing.md)で、指定した Snapshot を再検査し、ビューアーと教材だけを新しい配布フォルダーにまとめられる。実際の公開は、公開先と Snapshot の内容・sha256 を本人が確認してから行う。詳細は [教材契約](remote-readonly-contract.md) を参照。スマホ実機の使用感は人手で確認する。
 
 ### 2026-11-04 の確認結果
 

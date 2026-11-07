@@ -84,6 +84,8 @@ GitHub Pages は [Free/Pro とソース repo の条件](https://docs.github.com/
 
 Pages 自体の目安は [サイト 1 GB、帯域 soft limit 月 100 GB](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)。本用途は遥かに小さなテキストに制限する。既存 repo 全体を public にする必要はなく、必要なら承認した別の公開教材 repo を使うか、対応する private source + Actions artifact で配布する。個人 Snapshot を Git 履歴へ保存しない。[Actions 課金仕様](https://docs.github.com/en/billing/concepts/product-billing/github-actions)には標準 runner の Pages 用実行の無料扱いがある一方、private repo の通常 CI、別の生成・検査 job、artifact/cache 保持等は契約・利用量の確認が必要。「Pages だから全 CI 無料」とも「private なら必ず配布分まで有料」とも断定しない。
 
+**2026-11-07 追記（[#223](https://github.com/Yuki-Watanabe7/french-begginer/issues/223)）**: 所有者は、配布専用 repo を作らず、このアプリ repo を public にすると決めた。配布は、同じ repo の `gh-pages` ブランチから行う。`gh-pages` はアプリの履歴と共通の祖先を持たない。上表の「repo の公開化を暗黙に行わない」に沿った、明示の判断である。public 化の前に、履歴・Issue / PR・Actions を確認した。その結果と、配布専用 repo との違いは[配布手順](../operations/public-readonly-publishing.md)にある。違いは、Issue と議論も公開されることと、誤公開のときに repo ごと消せないことである。個人 Snapshot を Git 履歴へ保存しない点は変わらない。
+
 Cloudflare は [Pages Free の月 500 builds、同時 1 build、20,000 files、単一 25 MiB](https://developers.cloudflare.com/pages/platform/limits/)と、[Functions を呼ばない静的リクエストの無料枠](https://developers.cloudflare.com/pages/functions/pricing/)を確認した。ローカルで事前生成した出力だけを [Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/)する案なら個人 DB を Git/クラウド build へ渡さない。Git 連携方式への後からの切替は同一プロジェクトではできないため、導入時に決める。Functions、Workers、R2 は追加しない。
 
 Access の本人確認は本人のメールを限定した OTP または既存 IdP とし、Everyone 許可や Bypass を使わない。[Bypass は認証を無効化する](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)ため、画面にログインが見えるだけでは合格にしない。[preview の保護設定は本番を保護しない](https://developers.cloudflare.com/pages/configuration/preview-deployments/)。[本番 pages.dev・preview wildcard・custom domain は各々保護が必要](https://developers.cloudflare.com/pages/platform/known-issues/)。最初は空の検証用データで全 URL の未認証拒否を確かめてから、個人 Snapshot を送る。
@@ -118,7 +120,7 @@ Access の [Free（50 人までという公式案内）](https://www.cloudflare.
 | 家庭内の信頼範囲と認証なし HTTP の受入 | 未承認 | LAN 構成、FW 到達試験、所有者の判断。隔離不可なら localhost に留める |
 | 正本 DB の置き場所と復旧可能性 | 実装済み（#220） | 専用ボリューム、非 root 所有権、手動の整合バックアップと復元手順。開発 DB の履歴を移す時期は所有者が決める |
 | 外部の読者と許可するフィールド | 未承認 | 公開一般教材か本人専用か、権利確認、内容 hash、承認者・期限・送信先 |
-| GitHub の正確な契約プランと Pages 利用可否 | **要確認** | アカウント Billing と対象 repo Settings/Pages（現在の repo 可視性から推測しない） |
+| GitHub の正確な契約プランと Pages 利用可否 | 2026-11-05 確認：Free / private repo では利用不可。2026-11-07 所有者がアプリ repo の public 化を決定（未実施） | Billing と Settings/Pages の表示を確認。public 化前の確認結果と手順は[配布手順](../operations/public-readonly-publishing.md)。教材の公開は未承認 |
 | Cloudflare の契約枠・本人認証・全 URL の保護 | **要確認** | 本番、preview、alias、既存 deployment、JSON を未認証で拒否した記録 |
 | 公開操作の go/no-go | no-go（本 Issue の範囲外） | PCP #51 に従った人間の明示承認と Phase 4 の検証 |
 
