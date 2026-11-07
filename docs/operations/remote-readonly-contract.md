@@ -6,7 +6,7 @@
 
 **2026-11-04 追記（[#222](https://github.com/Yuki-Watanabe7/french-begginer/issues/222)）**: 合成 Snapshot だけを同梱する独立した[静的ビューアー](readonly-viewer.md)を追加。公開（[#223](https://github.com/Yuki-Watanabe7/french-begginer/issues/223)）は未実装で、外部へ公開した教材はない。
 
-**2026-11-05 追記（[#223](https://github.com/Yuki-Watanabe7/french-begginer/issues/223)）**: ビューアーと指定した教材だけを検査・梱包するローカルスクリプトと[公開・更新・停止の手順](public-readonly-publishing.md)を追加。GitHub Free / private repo では Pages を使えないため、2026-11-07 に所有者の判断で、このアプリ repo を public にして `gh-pages` ブランチから配布する方式にした（配布専用 repo は作らない）。repo の public 化、教材の送信、Pages 有効化はまだ行っていない。
+**2026-11-05 追記（[#223](https://github.com/Yuki-Watanabe7/french-begginer/issues/223)）**: ビューアーと指定した教材だけを検査・梱包するローカルスクリプトと[公開・更新・停止の手順](public-readonly-publishing.md)を追加。GitHub Free / private repo では Pages を使えないため、2026-11-07 に所有者の判断で、このアプリ repo を public にして `gh-pages` ブランチから配布する方式にした（配布専用 repo は作らない）。同日、repo を public にし、本人が承認した合成教材3枚を公開した（[初回公開結果](public-readonly-publishing.md#2026-11-07-の初回公開結果)）。
 
 ## 読者と情報分類
 
