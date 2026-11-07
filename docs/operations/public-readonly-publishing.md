@@ -145,3 +145,9 @@ repo の public 化、実際の公開、公開後のスマホ確認は、本人�
 - 候補は `.nojekyll`（0 bytes）、`index.html`（904 bytes）、独立 JS（149,074 bytes）、合成 `snapshot.json`（755 bytes）の4ファイル。教材の sha256 は `38f62357d9bf8c8c0bf8ad32e9fc9b3dde2df028f51b0536ae8d9a335eb5d600`。
 - Chrome でローカルの `/french-beginner-materials/` 配下を開き、3枚のカード・答え・説明・UTC の書き出し日時を確認。HTML / JS / JSON の取得が成功し、配布元のバイト列と一致。通常アプリの API・DB 設定・ブラウザ保存・ソースマップへの参照が生成物にないことも確認。
 - 公開 repo の作成・Pages 設定・外部配布・携帯回線／スマホ実機確認は未実施。#223 は未完了のまま維持する。
+
+### 2026-11-07 の再検証（配布先の変更後）
+
+- `bash scripts/quality-check.sh` 成功。Backend 2,037 件成功・1 件スキップ、Frontend 407 件成功。配布候補の4ファイルと教材の sha256 は 2026-11-05 と同じ。
+- 変えたのは文書と `claude.yml` だけで、ビューアー・スクリプト・テストは変えていない。ビルドの `base` は `./` なので、サブパスが `/french-begginer/` になっても生成物は変わらない。ブラウザでの表示確認はやり直していない。
+- repo の public 化、`gh-pages` の作成、Pages 設定、外部配布、携帯回線／スマホ実機確認は未実施。
