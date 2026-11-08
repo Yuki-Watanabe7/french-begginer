@@ -28,7 +28,19 @@ uv run python ../scripts/prepare_public_readonly.py \
   --out /tmp/french-public-review/site
 ```
 
-出力は `index.html`、`assets/index-<hash>.js`、指定した `snapshot.json`、空の `.nojekyll` だけ。通常アプリの `dist/` や `public/` は使わない。教材の形式・禁止文字列は #221 の型で再検査し、未知のキー・null の任意項目・UTC 秒単位でない日時を拒否する。元の教材のバイト列をそのままコピーするため、表示された sha256 は入力と一致する。生成元に余分なファイル・ソースマップ・DB・`.env`・リンクがあれば停止する。コピー失敗時は配布フォルダーを作らず、既存版も上書きしない。
+出力は次の9ファイルだけ。HTML・合成教材・アイコン4種・manifest と、名前にハッシュを持つ JS 1つがすべて揃わなければ停止する。
+
+- `index.html`
+- `assets/index-<hash>.js`
+- 指定した `snapshot.json`
+- 空の `.nojekyll`
+- `apple-touch-icon.png`（180×180）
+- `favicon.png`（32×32）
+- `icon-192.png`（192×192）
+- `icon-512.png`（512×512）
+- `manifest.webmanifest`（ホーム画面の名前・アイコン・起動先の設定）
+
+通常アプリの `dist/` や `public/` は使わず、アイコンと manifest は閲覧専用の `frontend/readonly/public/` からコピーする。教材の形式・禁止文字列は #221 の型で再検査し、未知のキー・null の任意項目・UTC 秒単位でない日時を拒否する。元の教材のバイト列をそのままコピーするため、表示された sha256 は入力と一致する。生成元に余分なファイル・ソースマップ・DB・`.env`・リンクがあれば停止する。コピー失敗時は配布フォルダーを作らず、既存版も上書きしない。
 
 自動検査だけでは人名・私的な文・権利・教材の誤りを判定できない。**本人は `snapshot.json` の全文、sha256、公開 URL、誰でも保存できることを確認する。** 承認はこの内容と公開先に対して得る。内容が変われば再確認する。アプリのソースや個人 Snapshot を main / develop へ commit しない。承認済みの公開教材は、`gh-pages` の公開履歴に残す方式である。
 
@@ -80,7 +92,8 @@ git -C "$deploy_checkout" init -b gh-pages
 git -C "$deploy_checkout" remote add origin "https://github.com/$app_repo.git"
 git -C "$deploy_checkout" ls-remote --heads origin gh-pages  # 何も出ないことを確かめる。出たら手順4で更新する
 cp -R "$bundle/." "$deploy_checkout/"
-git -C "$deploy_checkout" add -- .nojekyll index.html assets snapshot.json
+git -C "$deploy_checkout" add -- .nojekyll index.html assets snapshot.json \
+  apple-touch-icon.png favicon.png icon-192.png icon-512.png manifest.webmanifest
 git -C "$deploy_checkout" diff --cached --stat
 git -C "$deploy_checkout" diff --cached -- snapshot.json
 git -C "$deploy_checkout" commit -m "Publish approved public learning materials"
@@ -119,7 +132,7 @@ done
 
 ## 4. 更新する
 
-まず品質検査と手順1で、新しい候補を**別フォルダー**へ作る。本人が新しい教材の全文・sha256 と同じ公開先を承認してから、次を行う。
+まず品質検査と手順1で、新しい候補を**別フォルダー**へ作る。本人が新しい教材の全文・sha256 と同じ公開先を承認してから、次を行う。画面やアイコンだけの更新でも、変更内容と配布先を本人が承認してから配布する（Issue #235）。その場合は前の公開版と `snapshot.json` のバイト列・sha256 が一致することも確認する。
 
 ```bash
 app_repo=Yuki-Watanabe7/french-begginer
@@ -130,7 +143,8 @@ git clone --single-branch --branch gh-pages "https://github.com/$app_repo.git" "
 git -C "$update_root/repo" rev-parse HEAD  # 前の公開版の commit を控える
 git -C "$update_root/repo" rm -r --ignore-unmatch .
 cp -R "$bundle/." "$update_root/repo/"
-git -C "$update_root/repo" add -- .nojekyll index.html assets snapshot.json
+git -C "$update_root/repo" add -- .nojekyll index.html assets snapshot.json \
+  apple-touch-icon.png favicon.png icon-192.png icon-512.png manifest.webmanifest
 git -C "$update_root/repo" diff --cached --stat
 git -C "$update_root/repo" diff --cached -- snapshot.json
 git -C "$update_root/repo" commit -m "Update approved public learning materials"
@@ -138,6 +152,8 @@ git -C "$update_root/repo" push origin gh-pages
 ```
 
 削除するのは一時 checkout 内の旧配布ファイルだけ。以前の JS を残さず置き換える。公開完了と新しい教材の sha256 を手順3と同様に確認する。main へのマージや develop への push だけでは教材サイトは更新されない。
+
+アイコン更新後は、[ホーム画面への追加の確認手順](readonly-viewer.md#ホーム画面への追加を確認するissue-235)で、本人がスマホ上のアイコン・名前・起動先を確認する。実機確認などの完了条件を満たしたら、main 向けの PR 本文に `Closes #235` を指定し、マージ時に Issue を自動で閉じる。
 
 ## 5. 失敗・戻し・停止
 
@@ -178,3 +194,9 @@ repo の public 化、初回公開、公開後のスマホ確認は、2026-11-07
 - 公開 URL から4ファイルを取得し、配布フォルダーとバイト列が一致した。`README.md`・`backend/app/main.py`・`docs/operations/public-snapshot.synthetic.json` は 404 で、アプリのファイルは配信されない。
 - headless Chrome で公開 URL を開き、3枚のカード・答え・説明・書き出し日時（2026-11-03 09:30:00 UTC）の表示を確認した。
 - 所有者がスマホの携帯回線から公開 URL を開き、閲覧できることを確認した。ホーム画面にも追加できるが、`index.html` にアイコンの指定がないため、専用のアイコンは出ない。
+
+### 2026-11-08 のアイコン更新（Issue #235）
+
+本人がアイコン・ホーム画面名と既存の公開先への反映を承認した後、手順4で `gh-pages` を `d4e3cd654e4350896c7a7af0b8e7597d6e3c48cc` へ更新した。[Pages の配布処理](https://github.com/Yuki-Watanabe7/french-begginer/actions/runs/42470743836) は成功し、公開 URL から取得した9ファイルが承認済み候補とバイト単位で一致した。教材3枚と JS は前の版から変更していない。教材の sha256 は `38f62357d9bf8c8c0bf8ad32e9fc9b3dde2df028f51b0536ae8d9a335eb5d600` のままである。
+
+本人が iPhone の Safari でホーム画面へ追加し、専用アイコン・名前「フランス語教材」・追加したアイコンからの起動を確認した（2026-11-08）。確認項目と公開結果の詳細は[閲覧専用画面の手順・記録](readonly-viewer.md#2026-11-08-のアイコン更新の公開結果issue-235)を参照する。[PR #238](https://github.com/Yuki-Watanabe7/french-begginer/pull/238) の本文に `Closes #235` を指定し、main へのマージ時に Issue を自動で閉じる。

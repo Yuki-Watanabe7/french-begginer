@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Original geometric artwork for the read-only French materials viewer. -->
+  <rect width="512" height="512" fill="#1a56d6"/>
+  <path d="M100 168Q178 142 256 180Q334 142 412 168V370Q334 344 256 382Q178 344 100 370Z" fill="#123e9e"/>
+  <path d="M88 152Q172 124 256 164Q340 124 424 152V354Q340 326 256 366Q172 326 88 354Z" fill="#fff"/>
+  <path d="M256 164Q340 124 424 152V354Q340 326 256 366Z" fill="#e6eeff"/>
+  <path d="M256 172V354" fill="none" stroke="#a8bfea" stroke-width="10" stroke-linecap="round"/>
+  <path d="M120 208Q166 198 214 216M120 250Q166 240 214 258M120 292Q166 282 214 300" fill="none" stroke="#a8bfea" stroke-width="12" stroke-linecap="round"/>
+  <path d="M294 250Q340 232 388 242M294 292Q340 274 388 284" fill="none" stroke="#a8bfea" stroke-width="12" stroke-linecap="round"/>
+  <path d="M300 100H332V210L300 226Z" fill="#123e9e"/>
+  <path d="M332 100H364V210H332Z" fill="#fff"/>
+  <path d="M364 100H396V226L364 210Z" fill="#ef5261"/>
+</svg>

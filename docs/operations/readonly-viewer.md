@@ -18,15 +18,17 @@ npm run preview:readonly
 ## 配布物と入力の境界
 
 - `frontend/readonly/index.html` が独立した入口で、`frontend/src/readonly/` だけをアプリの入口としてビルドする。通常の `src/main.tsx`、API client、TTS hook は取り込まない。
-- `npm run build:readonly` の出力は Git 管理外の `frontend/dist-readonly/`。中身は `index.html`、`assets/*.js` と `snapshot.json` だけ。
+- `npm run build:readonly` の出力は Git 管理外の `frontend/dist-readonly/`。中身は `index.html`、`assets/index-<hash>.js`、`snapshot.json`、`apple-touch-icon.png`、`favicon.png`、`icon-192.png`、`icon-512.png`、`manifest.webmanifest` の8ファイル。配布準備では空の `.nojekyll` を追加し、合計9ファイルにする。
 - 教材は #221 の exporter と一致することをテスト済みの `docs/operations/public-snapshot.synthetic.json` に固定する。DB、実データの Snapshot、allowlist、環境変数を入力に取らない。通常の frontend の `public/` もコピーしない。
 - ブラウザからの教材取得は、画面と同じ階層の `./snapshot.json` の GET だけ。Cookie は送らず、リダイレクトを拒否し、`cache: 'no-store'` で取得する。Service Worker やブラウザ保存領域は使わない。
+- アイコンと manifest は閲覧専用の `frontend/readonly/public/` だけからコピーする。図案の元は `frontend/readonly/artwork/icon.svg`。青地の本と青・白・赤のしおりを図形だけで自作し、第三者の画像・フォントは使っていない。PNG 4種はこの SVG を各サイズに変換した、透過のない画像である。図案の元ファイルは配布しない。
+- HTML のアイコン・manifest の参照、manifest のアイコン・起動先・対象範囲はすべて相対 URL にし、GitHub Pages の `/french-begginer/` 内で解決する。Content Security Policy は同一配信元の画像と manifest だけを許可する。
 - root / card の未知のキー、未対応の版、重複 ID、件数・長さ・型・日時・公開テキストの制約を検査する。1 枚でも不正なら全体をエラーにし、部分的なカードを出さない。文字列は React の通常のテキストとして描画する。
 - HTTP エラー、通信失敗、不正 JSON、不正形式、10 秒の取得タイムアウトは画面にエラーを出す。「再読み込み」で再取得できる。過去の成功データへのフォールバックはしない。
 
 ## GitHub Pages と同じサブパスで確認する
 
-ビルドの `base` は `./`。スクリプトと教材は `/french-begginer/` のようなサブパスからも、そのサブパス内で取得する。フォルダーの URL は末尾を `/` にする。
+ビルドの `base` は `./`。スクリプト・教材・アイコン・manifest は `/french-begginer/` のようなサブパスからも、そのサブパス内で取得する。フォルダーの URL は末尾を `/` にする。
 
 ```bash
 # リポジトリのルートから。合成教材だけのビルドを一時フォルダーに置く
@@ -37,6 +39,18 @@ python3 -m http.server 4175 --bind 127.0.0.1 --directory "$preview_root"
 ```
 
 `http://127.0.0.1:4175/french-begginer/` を開き、スマホ幅でカード・答え・改行・日時が読めることを確かめる。ブラウザの通信一覧には、この階層内の静的ファイルだけが現れる。`snapshot.json` を一時フォルダー内で消したり、不正 JSON に差し替えて再読み込みすると、カードの代わりにエラーになる。
+
+## ホーム画面への追加を確認する（Issue #235）
+
+本人がスマホ実機で次を確認する。ローカルの画面確認だけでは、公開版のホーム画面の表示を確認したことにはしない。
+
+1. [配布手順の手順4](public-readonly-publishing.md#4-更新する)で、本人が承認した候補を公開する。教材を変えない更新では、公開前後の `snapshot.json` の sha256 が一致することを確認する。
+2. iPhone の Safari で `https://yuki-watanabe7.github.io/french-begginer/` を開き、「共有」から「ホーム画面に追加」を選ぶ。
+3. 青地の本と3色のしおりの専用アイコン、名前「フランス語教材」が出ることを確認して追加する。名前は Apple 用の設定 `apple-mobile-web-app-title` に指定している（[Apple の公式説明](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/SafariWebContent/ConfiguringWebApplications/ConfiguringWebApplications.html)）。
+4. 追加したアイコンから開き、3枚の教材と答えを読めることを確認する。manifest の `display: standalone` はブラウザのアドレス欄を隠す表示指定で、オフライン対応の指定ではない（[MDN の説明](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/display)）。閲覧には通信が必要で、学習結果は保存しない。
+5. 以前のアイコンが残る場合は、公開ファイルの更新を確認してから、以前のホーム画面のショートカットを削除し、Safari から追加し直す。Pages のキャッシュで公開直後は約10分、旧版が返る場合もある。
+
+manifest の `name` は「フランス語練習・公開教材」、`short_name` は「フランス語教材」。iPhone 以外でもホーム画面への追加時には同じ図案の192px・512pxアイコンを参照する。Service Worker やオフライン保存は追加していない。
 
 ## 品質検査と公開の扱い
 
@@ -51,3 +65,21 @@ python3 -m http.server 4175 --bind 127.0.0.1 --directory "$preview_root"
 - Chrome で `/french-begginer/` 配下から表示。通信一覧は同じサブパス内の HTML・JS・`snapshot.json` の 3 件だけ。iPhone 16 相当（393px 幅）でカード・答えの開閉・スクロールを確認。
 - 一時配布フォルダーで `snapshot.json` を欠落／不正 JSON にして画面を再読み込みし、各エラーを表示して以前のカードを表示しないことを確認。元の合成ファイルへ復旧。
 - スマホ実機の使用感は未確認。本人による確認を経てからレビュー完了・マージする。
+
+### 2026-11-08 のアイコン追加の検証結果（Issue #235）
+
+- `bash scripts/quality-check.sh` 成功。Backend 2,052 件成功・実 LLM 評価1件スキップ、Frontend 407 件成功。lint・format 検査、通常／閲覧専用の両ビルド、合成教材での配布準備が成功した。
+- 配布境界の32件が成功。アイコン・manifest を含む必要ファイルの欠落、指定外の画像・manifest・Service Worker・2つ目の JS、画像・manifest へのリンクを拒否した。梱包したファイルのバイト列も生成元と一致した。
+- 配布候補をローカルの `/french-begginer/` 配下で Chrome により確認した。iPhone 13 相当の390px幅でカード3枚・答えの開閉・改行を確認し、横にはみ出さないことを確認した。これはスマホ実機や Safari の確認ではない。
+- アイコン4種をブラウザで読み込み、180×180・32×32・192×192・512×512を確認した。Chrome が manifest をエラーなく受理し、名前が「フランス語教材」、起動先と対象範囲が同じサブパスになることを確認した。9配布ファイルが HTTP 200 で取得でき、候補とバイト列が一致した。ブラウザの通信はそのサブパス内だけで、ページエラー・CSP 違反・ブラウザ保存・Service Worker 登録はなかった。
+- 現在の公開 URL から取得した `snapshot.json` と候補のバイト列が一致した。sha256 は `38f62357d9bf8c8c0bf8ad32e9fc9b3dde2df028f51b0536ae8d9a335eb5d600`。教材とビューアーの JS は変更していない。
+- この検証時点では再配布とスマホ実機確認は未実施だった。その後、同日に下記のとおり公開した。
+
+### 2026-11-08 のアイコン更新の公開結果（Issue #235）
+
+- 本人が青地の本と3色のしおりのアイコン、ホーム画面名「フランス語教材」、既存の公開先への反映を承認した。教材3枚は前の公開版と同一であることを承認時に説明した。
+- 実装の develop commit は `cddeace399b0b87dfec5b7d42852da7570aeefe5`。[CI](https://github.com/Yuki-Watanabe7/french-begginer/actions/runs/42468648879) は成功した。初回は uv の取得先の HTTP 504 でテスト開始前に失敗したが、失敗ジョブの再実行で成功した。
+- 手順4で `gh-pages` を `d14eae302f8cbd2fdcf64d26bb4be386c002e601` から `d4e3cd654e4350896c7a7af0b8e7597d6e3c48cc` へ更新した。差分は HTML と追加のアイコン4種・manifest だけで、教材と JS は変更していない。[Pages の build・deploy](https://github.com/Yuki-Watanabe7/french-begginer/actions/runs/42470743836) が成功し、build の status は `built`、commit は今回の `d4e3cd6` であることを確認した。
+- 公開 URL から9ファイルを取得し、本人が承認した候補とバイト列が一致した。教材の sha256 は `38f62357d9bf8c8c0bf8ad32e9fc9b3dde2df028f51b0536ae8d9a335eb5d600` のままである。
+- 公開 URL を Chrome の iPhone 13 相当の幅で開き、カード3枚と答えの開閉、アイコン4種の寸法、名前、サブパス内の起動先を確認した。manifest のエラー、CSP 違反、ページエラー、配布サブパス外への通信、ブラウザ保存、Service Worker 登録はなかった。
+- 本人が iPhone の Safari でホーム画面へ追加し、青地の本と3色のしおりのアイコン、名前「フランス語教材」、追加したアイコンから教材を開けることを確認した（2026-11-08）。公開後の実機確認まで完了した。[PR #238](https://github.com/Yuki-Watanabe7/french-begginer/pull/238) の本文に `Closes #235` を指定し、main へのマージ時に Issue を自動で閉じる。
