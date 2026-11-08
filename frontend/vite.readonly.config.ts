@@ -6,7 +6,8 @@ import syntheticSnapshot from '../docs/operations/public-snapshot.synthetic.json
 export default defineConfig({
   root: 'readonly',
   base: './',
-  publicDir: false,
+  // Only the read-only viewer's icons and manifest; never the main app's public/.
+  publicDir: 'public',
   plugins: [
     react(),
     {

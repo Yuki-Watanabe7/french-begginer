@@ -15,6 +15,15 @@ def bundle_input(tmp_path, monkeypatch):
     (viewer / "index.html").write_text('<script src="./assets/index-demo.js"></script>')
     (viewer / "assets" / "index-demo.js").write_text("// synthetic viewer")
     (viewer / "snapshot.json").write_bytes(preparation.SYNTHETIC.read_bytes())
+    for name in (
+        "apple-touch-icon.png",
+        "favicon.png",
+        "icon-192.png",
+        "icon-512.png",
+        "manifest.webmanifest",
+    ):
+        source = preparation.ROOT / "frontend" / "readonly" / "public" / name
+        (viewer / name).write_bytes(source.read_bytes())
     monkeypatch.setattr(preparation, "VIEWER_DIR", viewer)
     return viewer, preparation.SYNTHETIC, tmp_path / "public"
 
@@ -31,8 +40,23 @@ def test_only_viewer_and_exact_snapshot_enter_bundle(bundle_input):
         "index.html",
         "assets/index-demo.js",
         "snapshot.json",
+        "apple-touch-icon.png",
+        "favicon.png",
+        "icon-192.png",
+        "icon-512.png",
+        "manifest.webmanifest",
         ".nojekyll",
     }
+    for name in (
+        "index.html",
+        "assets/index-demo.js",
+        "apple-touch-icon.png",
+        "favicon.png",
+        "icon-192.png",
+        "icon-512.png",
+        "manifest.webmanifest",
+    ):
+        assert (target / name).read_bytes() == (viewer / name).read_bytes()
     assert not (viewer / ".nojekyll").exists()
 
 
@@ -57,17 +81,39 @@ def test_selected_snapshot_replaces_demo_without_changing_bytes(bundle_input):
 
 
 @pytest.mark.parametrize(
-    "name", ["index.html", "snapshot.json", "assets/index-demo.js"]
+    "name",
+    [
+        "index.html",
+        "snapshot.json",
+        "assets/index-demo.js",
+        "apple-touch-icon.png",
+        "favicon.png",
+        "icon-192.png",
+        "icon-512.png",
+        "manifest.webmanifest",
+    ],
 )
 def test_incomplete_viewer_is_rejected(bundle_input, name):
     viewer, snapshot, out = bundle_input
     (viewer / name).unlink()
-    with pytest.raises(ValueError, match="3ファイル"):
+    with pytest.raises(ValueError, match="8ファイル"):
         preparation.prepare_bundle(snapshot=snapshot, out=out)
     assert not out.exists()
 
 
-@pytest.mark.parametrize("name", [".env", "tutor.db", "assets/index-demo.js.map"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".env",
+        "tutor.db",
+        "assets/index-demo.js.map",
+        "extra.png",
+        "icon-1024.png",
+        "assets/private.png",
+        "private.webmanifest",
+        "service-worker.js",
+    ],
+)
 def test_extra_files_are_rejected_without_output(bundle_input, name):
     viewer, snapshot, out = bundle_input
     (viewer / name).write_text("private sentinel")
@@ -77,9 +123,12 @@ def test_extra_files_are_rejected_without_output(bundle_input, name):
 
 
 @pytest.mark.parametrize("link_type", ["symbolic", "hard"])
-def test_linked_assets_are_rejected(bundle_input, link_type):
+@pytest.mark.parametrize(
+    "name", ["assets/index-demo.js", "apple-touch-icon.png", "manifest.webmanifest"]
+)
+def test_linked_assets_are_rejected(bundle_input, link_type, name):
     viewer, snapshot, out = bundle_input
-    asset = viewer / "assets" / "index-demo.js"
+    asset = viewer / name
     outside = viewer.parent / "outside.js"
     asset.rename(outside)
     if link_type == "symbolic":
@@ -87,6 +136,14 @@ def test_linked_assets_are_rejected(bundle_input, link_type):
     else:
         os.link(outside, asset)
     with pytest.raises(ValueError):
+        preparation.prepare_bundle(snapshot=snapshot, out=out)
+    assert not out.exists()
+
+
+def test_second_javascript_bundle_is_rejected(bundle_input):
+    viewer, snapshot, out = bundle_input
+    (viewer / "assets" / "index-extra.js").write_text("// unexpected second bundle")
+    with pytest.raises(ValueError, match="8ファイル"):
         preparation.prepare_bundle(snapshot=snapshot, out=out)
     assert not out.exists()
 

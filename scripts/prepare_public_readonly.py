@@ -31,6 +31,17 @@ from app.services.public_snapshot_export import check_output_dir  # noqa: E402
 
 VIEWER_DIR = ROOT / "frontend" / "dist-readonly"
 SYNTHETIC = ROOT / "docs" / "operations" / "public-snapshot.synthetic.json"
+VIEWER_FILES = frozenset(
+    {
+        "index.html",
+        "snapshot.json",
+        "apple-touch-icon.png",
+        "favicon.png",
+        "icon-192.png",
+        "icon-512.png",
+        "manifest.webmanifest",
+    }
+)
 
 
 def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -70,13 +81,15 @@ def prepare_bundle(*, snapshot: Path, out: Path) -> tuple[Path, str, int]:
             continue
         if not path.is_file() or path.stat().st_nlink != 1:
             raise PublicSnapshotError("閲覧専用の生成物に通常ファイル以外がある")
-        if name not in {"index.html", "snapshot.json"} and not re.fullmatch(
+        if name not in VIEWER_FILES and not re.fullmatch(
             r"assets/index-[A-Za-z0-9_-]+\.js", name
         ):
             raise PublicSnapshotError("閲覧専用の生成物に許可外のファイルがある")
         files[name] = path
-    if not {"index.html", "snapshot.json"}.issubset(files) or len(files) != 3:
-        raise PublicSnapshotError("閲覧専用の HTML・JS・合成教材の3ファイルが必要")
+    if not VIEWER_FILES.issubset(files) or len(files) != len(VIEWER_FILES) + 1:
+        raise PublicSnapshotError(
+            "閲覧専用の HTML・JS・合成教材・アイコン4種・manifestの8ファイルが必要"
+        )
     if json.loads(files["snapshot.json"].read_bytes()) != json.loads(
         SYNTHETIC.read_bytes()
     ):
