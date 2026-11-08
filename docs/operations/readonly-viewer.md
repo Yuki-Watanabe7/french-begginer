@@ -82,4 +82,4 @@ manifest の `name` は「フランス語練習・公開教材」、`short_name`
 - 手順4で `gh-pages` を `d14eae302f8cbd2fdcf64d26bb4be386c002e601` から `d4e3cd654e4350896c7a7af0b8e7597d6e3c48cc` へ更新した。差分は HTML と追加のアイコン4種・manifest だけで、教材と JS は変更していない。[Pages の build・deploy](https://github.com/Yuki-Watanabe7/french-begginer/actions/runs/42470743836) が成功し、build の status は `built`、commit は今回の `d4e3cd6` であることを確認した。
 - 公開 URL から9ファイルを取得し、本人が承認した候補とバイト列が一致した。教材の sha256 は `38f62357d9bf8c8c0bf8ad32e9fc9b3dde2df028f51b0536ae8d9a335eb5d600` のままである。
 - 公開 URL を Chrome の iPhone 13 相当の幅で開き、カード3枚と答えの開閉、アイコン4種の寸法、名前、サブパス内の起動先を確認した。manifest のエラー、CSP 違反、ページエラー、配布サブパス外への通信、ブラウザ保存、Service Worker 登録はなかった。
-- 本人が iPhone の Safari でホーム画面へ追加し、青地の本と3色のしおりのアイコン、名前「フランス語教材」、追加したアイコンから教材を開けることを確認した（2026-11-08）。公開後の実機確認まで完了した。関連 PR のレビュー・マージを確認するまで Issue #235 は開いたままにする。
+- 本人が iPhone の Safari でホーム画面へ追加し、青地の本と3色のしおりのアイコン、名前「フランス語教材」、追加したアイコンから教材を開けることを確認した（2026-11-08）。公開後の実機確認まで完了した。[PR #238](https://github.com/Yuki-Watanabe7/french-begginer/pull/238) の本文に `Closes #235` を指定し、main へのマージ時に Issue を自動で閉じる。
